@@ -208,10 +208,10 @@ public interface StreamMetadataStore {
      * @param executor     callers executor
      * @return current stream configuration.
      */
-    CompletableFuture<StreamConfigurationRecord> getConfigurationProperty(final String scope, final String name,
-                                                                          final boolean ignoreCached,
-                                                                          final OperationContext context,
-                                                                          final Executor executor);
+    CompletableFuture<StreamConfigurationRecord> getConfigurationRecord(final String scope, final String name,
+                                                                        final boolean ignoreCached,
+                                                                        final OperationContext context,
+                                                                        final Executor executor);
 
     /**
      * Start new stream truncation.
@@ -253,10 +253,10 @@ public interface StreamMetadataStore {
      * @param executor     callers executor
      * @return current truncation property.
      */
-    CompletableFuture<StreamTruncationRecord> getTruncationProperty(final String scope, final String name,
-                                                                                final boolean ignoreCached,
-                                                                                final OperationContext context,
-                                                                                final Executor executor);
+    CompletableFuture<StreamTruncationRecord> getTruncationRecord(final String scope, final String name,
+                                                                  final boolean ignoreCached,
+                                                                  final OperationContext context,
+                                                                  final Executor executor);
 
     /**
      * Set the stream state to sealed.

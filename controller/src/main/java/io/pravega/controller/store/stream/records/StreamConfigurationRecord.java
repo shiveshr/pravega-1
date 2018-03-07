@@ -1,3 +1,12 @@
+/**
+ * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
 package io.pravega.controller.store.stream.records;
 
 import io.pravega.client.stream.RetentionPolicy;
@@ -25,6 +34,16 @@ public class StreamConfigurationRecord {
 
     private final StreamConfiguration streamConfiguration;
     private final boolean updating;
+
+    public static StreamConfigurationRecord update(StreamConfiguration streamConfig) {
+        return StreamConfigurationRecord.builder().streamConfiguration(streamConfig)
+                .updating(true).build();
+    }
+
+    public static StreamConfigurationRecord complete(StreamConfiguration streamConfig) {
+        return StreamConfigurationRecord.builder().streamConfiguration(streamConfig)
+                .updating(false).build();
+    }
 
     public static class StreamConfigurationRecordBuilder implements ObjectBuilder<StreamConfigurationRecord> {
 

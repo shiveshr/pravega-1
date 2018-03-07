@@ -15,6 +15,7 @@ import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.State;
+import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.shared.controller.event.UpdateStreamEvent;
 import lombok.extern.slf4j.Slf4j;
@@ -51,7 +52,7 @@ public class UpdateStreamTask implements StreamTask<UpdateStreamEvent> {
         String scope = request.getScope();
         String stream = request.getStream();
 
-        return streamMetadataStore.getConfigurationProperty(scope, stream, true, context, executor)
+        return streamMetadataStore.getConfigurationRecord(scope, stream, true, context, executor)
                 .thenCompose(configProperty -> {
                     if (!configProperty.isUpdating()) {
                         throw new TaskExceptions.StartException("Update Stream not started yet.");
@@ -61,18 +62,18 @@ public class UpdateStreamTask implements StreamTask<UpdateStreamEvent> {
                 });
     }
 
-    private CompletableFuture<Void> processUpdate(String scope, String stream, StreamProperty<StreamConfiguration> configProperty,
+    private CompletableFuture<Void> processUpdate(String scope, String stream, StreamConfigurationRecord configProperty,
                                                   OperationContext context) {
         return Futures.toVoid(streamMetadataStore.setState(scope, stream, State.UPDATING, context, executor)
                 .thenCompose(x -> {
-                    if (configProperty.getProperty().getRetentionPolicy() != null) {
+                    if (configProperty.getStreamConfiguration().getRetentionPolicy() != null) {
                         return streamMetadataStore.addUpdateStreamForAutoStreamCut(scope, stream,
-                                configProperty.getProperty().getRetentionPolicy(), context, executor);
+                                configProperty.getStreamConfiguration().getRetentionPolicy(), context, executor);
                     } else {
                         return streamMetadataStore.removeStreamFromAutoStreamCut(scope, stream, context, executor);
                     }
                 })
-                .thenCompose(x -> notifyPolicyUpdate(context, scope, stream, configProperty.getProperty()))
+                .thenCompose(x -> notifyPolicyUpdate(context, scope, stream, configProperty.getStreamConfiguration()))
                 .thenCompose(x -> streamMetadataStore.completeUpdateConfiguration(scope, stream, context, executor))
                 .thenCompose(x -> streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor)));
     }

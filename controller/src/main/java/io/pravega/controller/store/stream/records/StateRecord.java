@@ -1,3 +1,12 @@
+/**
+ * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
 package io.pravega.controller.store.stream.records;
 
 import io.pravega.common.ObjectBuilder;
@@ -27,14 +36,14 @@ public class StateRecord {
     }
 
     public static StateRecord parse(byte[] data) {
-        StateRecord StateRecord;
+        StateRecord stateRecord;
         try {
-            StateRecord = SERIALIZER.deserialize(data);
+            stateRecord = SERIALIZER.deserialize(data);
         } catch (IOException e) {
             log.error("deserialization error for state record {}", e);
             throw Lombok.sneakyThrow(e);
         }
-        return StateRecord;
+        return stateRecord;
     }
 
     public byte[] toByteArray() {

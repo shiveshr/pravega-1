@@ -110,13 +110,6 @@ interface Stream {
     /**
      * Fetches the current stream cut.
      *
-     * @return current stream cut.
-     */
-    CompletableFuture<StreamTruncationRecord> getTruncationRecord();
-
-    /**
-     * Fetches the current stream cut.
-     *
      * @param ignoreCached ignore cached
      *
      * @return current stream cut.

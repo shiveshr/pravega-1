@@ -15,12 +15,12 @@ import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.BitConverter;
 import io.pravega.controller.store.stream.records.ActiveTxnRecord;
 import io.pravega.controller.store.stream.records.CompletedTxnRecord;
+import io.pravega.controller.store.stream.records.StateRecord;
 import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.stream.records.TableHelper;
 import lombok.AccessLevel;
 import lombok.Getter;
-import org.apache.commons.lang3.SerializationUtils;
 import org.apache.curator.utils.ZKPaths;
 
 import java.util.HashMap;
@@ -227,7 +227,7 @@ class ZKStream extends PersistentStreamBase<Integer> {
 
     @Override
     public CompletableFuture<Void> createStateIfAbsent(final State state) {
-        return store.createZNodeIfNotExist(statePath, SerializationUtils.serialize(state))
+        return store.createZNodeIfNotExist(statePath, StateRecord.builder().state(state).build().toByteArray())
                 .thenApply(x -> cache.invalidateCache(statePath));
     }
 

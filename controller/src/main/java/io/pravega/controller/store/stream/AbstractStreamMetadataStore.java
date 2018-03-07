@@ -264,11 +264,11 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<StreamTruncationRecord> getTruncationProperty(final String scope,
-                                                                                           final String name,
-                                                                                           final boolean ignoreCached,
-                                                                                           final OperationContext context,
-                                                                                           final Executor executor) {
+    public CompletableFuture<StreamTruncationRecord> getTruncationRecord(final String scope,
+                                                                         final String name,
+                                                                         final boolean ignoreCached,
+                                                                         final OperationContext context,
+                                                                         final Executor executor) {
         return withCompletion(getStream(scope, name, context).getTruncationProperty(ignoreCached), executor);
     }
 
@@ -295,11 +295,11 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<StreamConfigurationRecord> getConfigurationProperty(final String scope,
-                                                                                 final String name,
-                                                                                 final boolean ignoreCached,
-                                                                                 final OperationContext context,
-                                                                                 final Executor executor) {
+    public CompletableFuture<StreamConfigurationRecord> getConfigurationRecord(final String scope,
+                                                                               final String name,
+                                                                               final boolean ignoreCached,
+                                                                               final OperationContext context,
+                                                                               final Executor executor) {
         return withCompletion(getStream(scope, name, context).getConfigurationProperty(ignoreCached), executor);
     }
 

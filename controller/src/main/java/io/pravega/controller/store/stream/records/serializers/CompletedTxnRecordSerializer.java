@@ -29,15 +29,16 @@ public class CompletedTxnRecordSerializer
         version(0).revision(0, this::write00, this::read00);
     }
 
-    private void read00(RevisionDataInput revisionDataInput, CompletedTxnRecord.CompletedTxnRecordBuilder CompletedTxnRecordBuilder)
+    private void read00(RevisionDataInput revisionDataInput,
+                        CompletedTxnRecord.CompletedTxnRecordBuilder completedTxnRecordBuilder)
             throws IOException {
-        CompletedTxnRecordBuilder.completeTime(revisionDataInput.readLong())
+        completedTxnRecordBuilder.completeTime(revisionDataInput.readLong())
                 .completionStatus(TxnStatus.values()[revisionDataInput.readInt()]);
     }
 
-    private void write00(CompletedTxnRecord CompletedTxnRecord, RevisionDataOutput revisionDataOutput) throws IOException {
-        revisionDataOutput.writeLong(CompletedTxnRecord.getCompleteTime());
-        revisionDataOutput.writeInt(CompletedTxnRecord.getCompletionStatus().ordinal());
+    private void write00(CompletedTxnRecord completedTxnRecord, RevisionDataOutput revisionDataOutput) throws IOException {
+        revisionDataOutput.writeLong(completedTxnRecord.getCompleteTime());
+        revisionDataOutput.writeInt(completedTxnRecord.getCompletionStatus().ordinal());
     }
 
     @Override

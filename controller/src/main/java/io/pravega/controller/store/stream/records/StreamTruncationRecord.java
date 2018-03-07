@@ -9,6 +9,7 @@
  */
 package io.pravega.controller.store.stream.records;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.pravega.common.ObjectBuilder;
@@ -105,19 +106,41 @@ public class StreamTruncationRecord  {
         return new StreamTruncationRecord(streamCut, cutEpochMap, ImmutableSet.copyOf(deleted), ImmutableSet.of(), updating);
     }
 
+    public static StreamTruncationRecord update(StreamTruncationRecord toUpdadte) {
+        Preconditions.checkState(!toUpdadte.updating);
+        return StreamTruncationRecord.builder()
+                .updating(true)
+                .cutEpochMap(toUpdadte.cutEpochMap)
+                .streamCut(toUpdadte.streamCut)
+                .deletedSegments(toUpdadte.deletedSegments)
+                .toDelete(toUpdadte.toDelete)
+                .build();
+    }
+
+    public static StreamTruncationRecord complete(StreamTruncationRecord toUpdadte) {
+        Preconditions.checkState(toUpdadte.updating);
+        return StreamTruncationRecord.builder()
+                .updating(false)
+                .cutEpochMap(toUpdadte.cutEpochMap)
+                .streamCut(toUpdadte.streamCut)
+                .deletedSegments(toUpdadte.deletedSegments)
+                .toDelete(toUpdadte.toDelete)
+                .build();
+    }
+
     public static class StreamTruncationRecordBuilder implements ObjectBuilder<StreamTruncationRecord> {
 
     }
 
     public static StreamTruncationRecord parse(byte[] data) {
-        StreamTruncationRecord StreamTruncationRecord;
+        StreamTruncationRecord streamTruncationRecord;
         try {
-            StreamTruncationRecord = SERIALIZER.deserialize(data);
+            streamTruncationRecord = SERIALIZER.deserialize(data);
         } catch (IOException e) {
             log.error("deserialization error for stream truncation record {}", e);
             throw Lombok.sneakyThrow(e);
         }
-        return StreamTruncationRecord;
+        return streamTruncationRecord;
     }
 
     public byte[] toByteArray() {
