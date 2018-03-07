@@ -7,7 +7,7 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
-package io.pravega.controller.store.stream.tables;
+package io.pravega.controller.store.stream.records;
 
 import io.pravega.common.util.BitConverter;
 import com.google.common.base.Preconditions;

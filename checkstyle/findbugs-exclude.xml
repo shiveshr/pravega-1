@@ -30,7 +30,7 @@
         <Or>
             <Class name="io.pravega.common.io.FixedByteArrayOutputStream" />
             <Class name="io.pravega.common.util.ByteArraySegment" />
-            <Class name="io.pravega.controller.store.stream.tables.Data" />
+            <Class name="io.pravega.controller.store.stream.Data" />
             <Class name="io.pravega.segmentstore.server.logs.operations.StreamSegmentAppendOperation" />
         </Or>
         <Or>

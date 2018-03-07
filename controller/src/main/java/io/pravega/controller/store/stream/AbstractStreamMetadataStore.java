@@ -15,9 +15,10 @@ import com.google.common.cache.LoadingCache;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.store.index.HostIndex;
-import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
-import io.pravega.controller.store.stream.tables.State;
-import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
+import io.pravega.controller.store.stream.records.ActiveTxnRecord;
+import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
+import io.pravega.controller.store.stream.records.StreamCutRecord;
+import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.controller.stream.api.grpc.v1.Controller.CreateScopeStatus;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteScopeStatus;
@@ -263,14 +264,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<StreamTruncationRecord> getTruncationRecord(final String scope,
-                                                                         final String name,
-                                                                         final OperationContext context, final Executor executor) {
-        return withCompletion(getStream(scope, name, context).getTruncationRecord(), executor);
-    }
-
-    @Override
-    public CompletableFuture<StreamProperty<StreamTruncationRecord>> getTruncationProperty(final String scope,
+    public CompletableFuture<StreamTruncationRecord> getTruncationProperty(final String scope,
                                                                                            final String name,
                                                                                            final boolean ignoreCached,
                                                                                            final OperationContext context,
@@ -301,11 +295,11 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<StreamProperty<StreamConfiguration>> getConfigurationProperty(final String scope,
-                                                                                           final String name,
-                                                                                           final boolean ignoreCached,
-                                                                                           final OperationContext context,
-                                                                                           final Executor executor) {
+    public CompletableFuture<StreamConfigurationRecord> getConfigurationProperty(final String scope,
+                                                                                 final String name,
+                                                                                 final boolean ignoreCached,
+                                                                                 final OperationContext context,
+                                                                                 final Executor executor) {
         return withCompletion(getStream(scope, name, context).getConfigurationProperty(ignoreCached), executor);
     }
 

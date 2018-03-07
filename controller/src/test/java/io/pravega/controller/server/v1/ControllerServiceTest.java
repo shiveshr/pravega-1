@@ -11,7 +11,7 @@ package io.pravega.controller.server.v1;
 
 import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StartScaleResponse;
-import io.pravega.controller.store.stream.tables.State;
+import io.pravega.controller.store.stream.State;
 import io.pravega.test.common.TestingServerStarter;
 import io.pravega.controller.mocks.SegmentHelperMock;
 import io.pravega.controller.server.ControllerService;

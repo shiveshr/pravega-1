@@ -10,9 +10,10 @@
 package io.pravega.controller.store.stream;
 
 import io.pravega.client.stream.StreamConfiguration;
-import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
-import io.pravega.controller.store.stream.tables.State;
-import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
+import io.pravega.controller.store.stream.records.ActiveTxnRecord;
+import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
+import io.pravega.controller.store.stream.records.StreamCutRecord;
+import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.AbstractMap;
@@ -89,7 +90,7 @@ interface Stream {
      *
      * @return current stream configuration.
      */
-    CompletableFuture<StreamProperty<StreamConfiguration>> getConfigurationProperty(boolean ignoreCached);
+    CompletableFuture<StreamConfigurationRecord> getConfigurationProperty(boolean ignoreCached);
 
     /**
      * Starts truncating an existing stream.
@@ -120,7 +121,7 @@ interface Stream {
      *
      * @return current stream cut.
      */
-    CompletableFuture<StreamProperty<StreamTruncationRecord>> getTruncationProperty(boolean ignoreCached);
+    CompletableFuture<StreamTruncationRecord> getTruncationProperty(boolean ignoreCached);
 
     /**
      * Update the state of the stream.

@@ -13,13 +13,11 @@ import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.BitConverter;
-import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
-import io.pravega.controller.store.stream.tables.Cache;
-import io.pravega.controller.store.stream.tables.CompletedTxnRecord;
-import io.pravega.controller.store.stream.tables.Data;
-import io.pravega.controller.store.stream.tables.State;
-import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
-import io.pravega.controller.store.stream.tables.TableHelper;
+import io.pravega.controller.store.stream.records.ActiveTxnRecord;
+import io.pravega.controller.store.stream.records.CompletedTxnRecord;
+import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
+import io.pravega.controller.store.stream.records.StreamTruncationRecord;
+import io.pravega.controller.store.stream.records.TableHelper;
 import lombok.AccessLevel;
 import lombok.Getter;
 import org.apache.commons.lang3.SerializationUtils;
@@ -222,8 +220,8 @@ class ZKStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    public CompletableFuture<Void> createConfigurationIfAbsent(final StreamProperty<StreamConfiguration> configuration) {
-        return store.createZNodeIfNotExist(configurationPath, SerializationUtils.serialize(configuration))
+    public CompletableFuture<Void> createConfigurationIfAbsent(final StreamConfigurationRecord configuration) {
+        return store.createZNodeIfNotExist(configurationPath, configuration.toByteArray())
                 .thenApply(x -> cache.invalidateCache(configurationPath));
     }
 
@@ -428,8 +426,8 @@ class ZKStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    public CompletableFuture<Void> createTruncationDataIfAbsent(final StreamProperty<StreamTruncationRecord> truncationRecord) {
-        return store.createZNodeIfNotExist(truncationPath, SerializationUtils.serialize(truncationRecord))
+    public CompletableFuture<Void> createTruncationDataIfAbsent(final StreamTruncationRecord truncationRecord) {
+        return store.createZNodeIfNotExist(truncationPath, truncationRecord.toByteArray())
                 .thenApply(x -> cache.invalidateCache(truncationPath));
     }
 

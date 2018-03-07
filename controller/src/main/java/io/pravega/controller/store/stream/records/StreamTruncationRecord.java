@@ -7,14 +7,21 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
-package io.pravega.controller.store.stream.tables;
+package io.pravega.controller.store.stream.records;
 
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import io.pravega.common.ObjectBuilder;
+import io.pravega.common.io.serialization.VersionedSerializer;
+import io.pravega.controller.store.stream.records.serializers.StreamTruncationRecordSerializer;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.Lombok;
+import lombok.extern.slf4j.Slf4j;
 
-import java.io.Serializable;
+import java.io.IOException;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -23,10 +30,16 @@ import java.util.Set;
 /**
  * Data class for storing information about stream's truncation point.
  */
+@Data
+@Builder
+@Slf4j
 @AllArgsConstructor(access = AccessLevel.PACKAGE)
-public class StreamTruncationRecord implements Serializable {
+public class StreamTruncationRecord  {
+    public static final VersionedSerializer.WithBuilder<StreamTruncationRecord,
+            StreamTruncationRecord.StreamTruncationRecordBuilder> SERIALIZER = new StreamTruncationRecordSerializer();
+
     public static final StreamTruncationRecord EMPTY = new StreamTruncationRecord(ImmutableMap.of(),
-            ImmutableMap.of(), ImmutableSet.of(), ImmutableSet.of());
+            ImmutableMap.of(), ImmutableSet.of(), ImmutableSet.of(), false);
 
     /**
      * Stream cut that is applied as part of this truncation.
@@ -60,6 +73,8 @@ public class StreamTruncationRecord implements Serializable {
      */
     private final ImmutableSet<Integer> toDelete;
 
+    private final boolean updating;
+
     int getTruncationEpochLow() {
         return cutEpochMap.values().stream().min(Comparator.naturalOrder()).orElse(Integer.MIN_VALUE);
     }
@@ -87,6 +102,33 @@ public class StreamTruncationRecord implements Serializable {
     public StreamTruncationRecord mergeDeleted() {
         Set<Integer> deleted = new HashSet<>(deletedSegments);
         deleted.addAll(toDelete);
-        return new StreamTruncationRecord(streamCut, cutEpochMap, ImmutableSet.copyOf(deleted), ImmutableSet.of());
+        return new StreamTruncationRecord(streamCut, cutEpochMap, ImmutableSet.copyOf(deleted), ImmutableSet.of(), updating);
     }
+
+    public static class StreamTruncationRecordBuilder implements ObjectBuilder<StreamTruncationRecord> {
+
+    }
+
+    public static StreamTruncationRecord parse(byte[] data) {
+        StreamTruncationRecord StreamTruncationRecord;
+        try {
+            StreamTruncationRecord = SERIALIZER.deserialize(data);
+        } catch (IOException e) {
+            log.error("deserialization error for stream truncation record {}", e);
+            throw Lombok.sneakyThrow(e);
+        }
+        return StreamTruncationRecord;
+    }
+
+    public byte[] toByteArray() {
+        byte[] array;
+        try {
+            array = SERIALIZER.serialize(this).array();
+        } catch (IOException e) {
+            log.error("error serializing stream truncation record {}", e);
+            throw Lombok.sneakyThrow(e);
+        }
+        return array;
+    }
+
 }

@@ -7,11 +7,13 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
-package io.pravega.controller.store.stream.tables.serializer;
+package io.pravega.controller.store.stream.records.serializer;
 
 import com.google.common.collect.Lists;
-import io.pravega.controller.store.stream.StreamCutRecord;
-import io.pravega.controller.store.stream.tables.RetentionRecord;
+import io.pravega.controller.store.stream.TxnStatus;
+import io.pravega.controller.store.stream.records.ActiveTxnRecord;
+import io.pravega.controller.store.stream.records.StreamCutRecord;
+import io.pravega.controller.store.stream.records.RetentionRecord;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -29,8 +31,8 @@ public class ControllerMetadataSerializerTest {
         streamcut.put(0, 1L);
         streamcut.put(1, 1L);
         StreamCutRecord record = new StreamCutRecord(1L, 1L, streamcut);
-        byte[] serialized = StreamCutRecord.SERIALIZER_V1.serialize(record).array();
-        StreamCutRecord deserialized = StreamCutRecord.SERIALIZER_V1.deserialize(serialized);
+        byte[] serialized = StreamCutRecord.SERIALIZER.serialize(record).array();
+        StreamCutRecord deserialized = StreamCutRecord.SERIALIZER.deserialize(serialized);
         assertEquals(record, deserialized);
     }
 
@@ -43,8 +45,16 @@ public class ControllerMetadataSerializerTest {
         StreamCutRecord s2 = new StreamCutRecord(1L, 1L, map);
         List<StreamCutRecord> streamCuts = Lists.newArrayList(s1, s2);
         RetentionRecord record = RetentionRecord.builder().streamCuts(streamCuts).build();
-        byte[] serialized = RetentionRecord.SERIALIZER_V1.serialize(record).array();
-        RetentionRecord deserialized = RetentionRecord.SERIALIZER_V1.deserialize(serialized);
+        byte[] serialized = RetentionRecord.SERIALIZER.serialize(record).array();
+        RetentionRecord deserialized = RetentionRecord.SERIALIZER.deserialize(serialized);
+        assertEquals(record, deserialized);
+    }
+
+    @Test
+    public void activeTxnRecordTest() throws IOException {
+        ActiveTxnRecord record = new ActiveTxnRecord(1L, 1L, 1L, 1L, TxnStatus.OPEN);
+        byte[] serialized = ActiveTxnRecord.SERIALIZER.serialize(record).array();
+        ActiveTxnRecord deserialized = ActiveTxnRecord.SERIALIZER.deserialize(serialized);
         assertEquals(record, deserialized);
     }
 }

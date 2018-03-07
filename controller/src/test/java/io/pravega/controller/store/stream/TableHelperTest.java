@@ -10,10 +10,10 @@
 package io.pravega.controller.store.stream;
 
 import com.google.common.collect.Lists;
-import io.pravega.controller.store.stream.tables.HistoryRecord;
-import io.pravega.controller.store.stream.tables.SegmentRecord;
-import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
-import io.pravega.controller.store.stream.tables.TableHelper;
+import io.pravega.controller.store.stream.records.HistoryRecord;
+import io.pravega.controller.store.stream.records.SegmentRecord;
+import io.pravega.controller.store.stream.records.StreamTruncationRecord;
+import io.pravega.controller.store.stream.records.TableHelper;
 import io.pravega.test.common.AssertExtensions;
 import org.junit.Assert;
 import org.junit.Test;
