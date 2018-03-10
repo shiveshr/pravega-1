@@ -405,7 +405,7 @@ abstract class AbstractFailoverTests {
                     final Long longEvent = reader.readNextEvent(SECONDS.toMillis(5)).getEvent();
                     log.debug("Reading event {}", longEvent);
                     if (longEvent != null) {
-                        //update if event read is not null.
+                        //startUpdate if event read is not null.
                         testState.eventRead(longEvent);
                         log.debug("Event read count {}", testState.getEventReadCount());
                     } else {

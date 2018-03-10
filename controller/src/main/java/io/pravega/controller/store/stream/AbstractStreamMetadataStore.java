@@ -60,7 +60,7 @@ import static io.pravega.shared.MetricsNames.nameFromStream;
 
 /**
  * Abstract Stream metadata store. It implements various read queries using the Stream interface.
- * Implementation of create and update queries are delegated to the specific implementations of this abstract class.
+ * Implementation of create and startUpdate queries are delegated to the specific implementations of this abstract class.
  */
 @Slf4j
 public abstract class AbstractStreamMetadataStore implements StreamMetadataStore {
@@ -269,7 +269,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                                          final boolean ignoreCached,
                                                                          final OperationContext context,
                                                                          final Executor executor) {
-        return withCompletion(getStream(scope, name, context).getTruncationProperty(ignoreCached), executor);
+        return withCompletion(getStream(scope, name, context).getTruncationRecord(ignoreCached), executor);
     }
 
     @Override
@@ -300,7 +300,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                                                final boolean ignoreCached,
                                                                                final OperationContext context,
                                                                                final Executor executor) {
-        return withCompletion(getStream(scope, name, context).getConfigurationProperty(ignoreCached), executor);
+        return withCompletion(getStream(scope, name, context).getConfigurationRecord(ignoreCached), executor);
     }
 
     @Override

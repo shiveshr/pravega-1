@@ -238,7 +238,7 @@ public class ReadWriteTest {
                     final Long longEvent = reader.readNextEvent(SECONDS.toMillis(2)).getEvent();
                     log.info("Reading event {}", longEvent);
                     if (longEvent != null) {
-                        //update if event read is not null.
+                        //startUpdate if event read is not null.
                         readResult.add(longEvent);
                         readCount.incrementAndGet();
                     }

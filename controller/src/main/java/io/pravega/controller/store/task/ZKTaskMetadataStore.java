@@ -69,7 +69,7 @@ class ZKTaskMetadataStore extends AbstractTaskMetadataStore {
         try {
             // Read the existing data along with its version.
             // Update data if version hasn't changed from the previously read value.
-            // If update is successful, lock acquired else lock failed.
+            // If startUpdate is successful, lock acquired else lock failed.
             Stat stat = new Stat();
             byte[] data = client.getData().storingStatIn(stat).forPath(getTaskPath(resource));
             LockData lockData = LockData.deserialize(data);

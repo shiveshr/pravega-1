@@ -141,7 +141,7 @@ public class StoreException extends RuntimeException {
     }
 
     /**
-     * Exception type when you are attempting to update a stale value.
+     * Exception type when you are attempting to startUpdate a stale value.
      */
     public static class WriteConflictException extends StoreException implements RetryableException {
         private WriteConflictException(String errorMessage, Throwable cause) {

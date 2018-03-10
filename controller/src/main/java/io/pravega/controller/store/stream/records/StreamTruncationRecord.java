@@ -26,6 +26,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -34,7 +35,6 @@ import java.util.Set;
 @Data
 @Builder
 @Slf4j
-@AllArgsConstructor(access = AccessLevel.PACKAGE)
 public class StreamTruncationRecord  {
     public static final VersionedSerializer.WithBuilder<StreamTruncationRecord,
             StreamTruncationRecord.StreamTruncationRecordBuilder> SERIALIZER = new StreamTruncationRecordSerializer();
@@ -45,7 +45,7 @@ public class StreamTruncationRecord  {
     /**
      * Stream cut that is applied as part of this truncation.
      */
-    private final ImmutableMap<Integer, Long> streamCut;
+    private final Map<Integer, Long> streamCut;
 
     /**
      * If a stream cut spans across multiple epochs then this map captures mapping of segments from the stream cut to
@@ -62,19 +62,31 @@ public class StreamTruncationRecord  {
      * applied on it to find segments that are available for consumption.
      * Refer to TableHelper.getActiveSegmentsAt
      */
-    private final ImmutableMap<Integer, Integer> cutEpochMap;
+    private final Map<Integer, Integer> cutEpochMap;
     /**
      * All segments that have been deleted for this stream so far.
      */
-    private final ImmutableSet<Integer> deletedSegments;
+    private final Set<Integer> deletedSegments;
     /**
      * Segments to delete as part of this truncation.
      * This is non empty while truncation is ongoing.
      * This is reset to empty once truncation completes by calling mergeDeleted method.
      */
-    private final ImmutableSet<Integer> toDelete;
+    private final Set<Integer> toDelete;
 
     private final boolean updating;
+
+    public StreamTruncationRecord(Map<Integer, Long> streamCut,
+                                  Map<Integer, Integer> cutEpochMap,
+                                  Set<Integer> deletedSegments,
+                                  Set<Integer> toDelete,
+                                  boolean updating) {
+        this.streamCut = ImmutableMap.copyOf(streamCut);
+        this.cutEpochMap = ImmutableMap.copyOf(cutEpochMap);
+        this.deletedSegments = ImmutableSet.copyOf(deletedSegments);
+        this.toDelete = ImmutableSet.copyOf(toDelete);
+        this.updating = updating;
+    }
 
     int getTruncationEpochLow() {
         return cutEpochMap.values().stream().min(Comparator.naturalOrder()).orElse(Integer.MIN_VALUE);
@@ -84,47 +96,33 @@ public class StreamTruncationRecord  {
         return cutEpochMap.values().stream().max(Comparator.naturalOrder()).orElse(Integer.MIN_VALUE);
     }
 
-    public ImmutableMap<Integer, Long> getStreamCut() {
+    public Map<Integer, Long> getStreamCut() {
         return streamCut;
     }
 
-    public ImmutableMap<Integer, Integer> getCutEpochMap() {
+    public Map<Integer, Integer> getCutEpochMap() {
         return cutEpochMap;
     }
 
-    public ImmutableSet<Integer> getDeletedSegments() {
+    public Set<Integer> getDeletedSegments() {
         return deletedSegments;
     }
 
     public Set<Integer> getToDelete() {
-        return Collections.unmodifiableSet(toDelete);
+        return toDelete;
     }
+    
+    public static StreamTruncationRecord complete(StreamTruncationRecord toComplete) {
+        Preconditions.checkState(toComplete.updating);
+        Set<Integer> deleted = new HashSet<>(toComplete.deletedSegments);
+        deleted.addAll(toComplete.toDelete);
 
-    public StreamTruncationRecord mergeDeleted() {
-        Set<Integer> deleted = new HashSet<>(deletedSegments);
-        deleted.addAll(toDelete);
-        return new StreamTruncationRecord(streamCut, cutEpochMap, ImmutableSet.copyOf(deleted), ImmutableSet.of(), updating);
-    }
-
-    public static StreamTruncationRecord update(StreamTruncationRecord toUpdadte) {
-        Preconditions.checkState(!toUpdadte.updating);
-        return StreamTruncationRecord.builder()
-                .updating(true)
-                .cutEpochMap(toUpdadte.cutEpochMap)
-                .streamCut(toUpdadte.streamCut)
-                .deletedSegments(toUpdadte.deletedSegments)
-                .toDelete(toUpdadte.toDelete)
-                .build();
-    }
-
-    public static StreamTruncationRecord complete(StreamTruncationRecord toUpdadte) {
-        Preconditions.checkState(toUpdadte.updating);
         return StreamTruncationRecord.builder()
                 .updating(false)
-                .cutEpochMap(toUpdadte.cutEpochMap)
-                .streamCut(toUpdadte.streamCut)
-                .deletedSegments(toUpdadte.deletedSegments)
-                .toDelete(toUpdadte.toDelete)
+                .cutEpochMap(toComplete.cutEpochMap)
+                .streamCut(toComplete.streamCut)
+                .deletedSegments(deleted)
+                .toDelete(ImmutableSet.of())
                 .build();
     }
 

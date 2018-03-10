@@ -90,7 +90,7 @@ interface Stream {
      *
      * @return current stream configuration.
      */
-    CompletableFuture<StreamConfigurationRecord> getConfigurationProperty(boolean ignoreCached);
+    CompletableFuture<StreamConfigurationRecord> getConfigurationRecord(boolean ignoreCached);
 
     /**
      * Starts truncating an existing stream.
@@ -114,7 +114,7 @@ interface Stream {
      *
      * @return current stream cut.
      */
-    CompletableFuture<StreamTruncationRecord> getTruncationProperty(boolean ignoreCached);
+    CompletableFuture<StreamTruncationRecord> getTruncationRecord(boolean ignoreCached);
 
     /**
      * Update the state of the stream.

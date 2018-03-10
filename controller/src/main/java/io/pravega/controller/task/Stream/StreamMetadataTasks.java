@@ -75,10 +75,10 @@ import java.util.stream.IntStream;
 import static io.pravega.controller.task.Stream.TaskStepsRetryHelper.withRetries;
 
 /**
- * Collection of metadata update tasks on stream.
+ * Collection of metadata startUpdate tasks on stream.
  * Task methods are annotated with @Task annotation.
  * <p>
- * Any update to the task method signature should be avoided, since it can cause problems during upgrade.
+ * Any startUpdate to the task method signature should be avoided, since it can cause problems during upgrade.
  * Instead, a new overloaded method may be created with the same task annotation name but a new version.
  */
 @Slf4j
@@ -144,7 +144,7 @@ public class StreamMetadataTasks extends TaskBase {
      * @param stream     stream name.
      * @param newConfig     modified stream configuration.
      * @param contextOpt optional context
-     * @return update status.
+     * @return startUpdate status.
      */
     public CompletableFuture<UpdateStreamStatus.Status> updateStream(String scope, String stream, StreamConfiguration newConfig,
                                                                      OperationContext contextOpt) {
@@ -153,23 +153,23 @@ public class StreamMetadataTasks extends TaskBase {
         // 1. get configuration
         return streamMetadataStore.getConfigurationRecord(scope, stream, true, context, executor)
                 .thenCompose(configProperty -> {
-                    // 2. post event to start update workflow
+                    // 2. post event to start startUpdate workflow
                     if (!configProperty.isUpdating()) {
                         return writeEvent(new UpdateStreamEvent(scope, stream))
-                                // 3. update new configuration in the store with updating flag = true
-                                // if attempt to update fails, we bail out with no harm done
+                                // 3. startUpdate new configuration in the store with updating flag = true
+                                // if attempt to startUpdate fails, we bail out with no harm done
                                 .thenCompose(x -> streamMetadataStore.startUpdateConfiguration(scope, stream, newConfig,
                                         context, executor))
-                                // 4. wait for update to complete
+                                // 4. wait for startUpdate to complete
                                 .thenCompose(x -> checkDone(() -> isUpdated(scope, stream, newConfig, context))
                                         .thenApply(y -> UpdateStreamStatus.Status.SUCCESS));
                     } else {
-                        log.warn("Another update in progress for {}/{}", scope, stream);
+                        log.warn("Another startUpdate in progress for {}/{}", scope, stream);
                         return CompletableFuture.completedFuture(UpdateStreamStatus.Status.FAILURE);
                     }
                 })
                 .exceptionally(ex -> {
-                    log.warn("Exception thrown in trying to update stream configuration {}", ex.getMessage());
+                    log.warn("Exception thrown in trying to startUpdate stream configuration {}", ex.getMessage());
                     return handleUpdateStreamError(ex);
                 });
     }
@@ -300,7 +300,7 @@ public class StreamMetadataTasks extends TaskBase {
      * @param stream     stream name.
      * @param streamCut  stream cut.
      * @param contextOpt optional context
-     * @return update status.
+     * @return startUpdate status.
      */
     public CompletableFuture<UpdateStreamStatus.Status> truncateStream(final String scope, final String stream,
                                                                        final Map<Integer, Long> streamCut,
@@ -320,7 +320,7 @@ public class StreamMetadataTasks extends TaskBase {
                     }
                 })
                 .exceptionally(ex -> {
-                    log.warn("Exception thrown in trying to update stream configuration {}", ex);
+                    log.warn("Exception thrown in trying to startUpdate stream configuration {}", ex);
                     return handleUpdateStreamError(ex);
                 });
     }
@@ -358,7 +358,7 @@ public class StreamMetadataTasks extends TaskBase {
      * @param scope      scope.
      * @param stream     stream name.
      * @param contextOpt optional context
-     * @return update status.
+     * @return startUpdate status.
      */
     public CompletableFuture<UpdateStreamStatus.Status> sealStream(String scope, String stream, OperationContext contextOpt) {
         final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;

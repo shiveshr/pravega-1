@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
 /**
  * ZK Stream. It understands the following.
  * 1. underlying file organization/object structure of stream metadata store.
- * 2. how to evaluate basic read and update queries defined in the Stream interface.
+ * 2. how to evaluate basic read and startUpdate queries defined in the Stream interface.
  * <p>
  * It may cache files read from the store for its lifetime.
  * This shall reduce store round trips for answering queries, thus making them efficient.
@@ -239,7 +239,7 @@ class ZKStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    public CompletableFuture<Void> createIndexTableIfAbsent(final Data<Integer> indexTable) {
+    public CompletableFuture<Void> createHistoryIndexIfAbsent(final Data<Integer> indexTable) {
         return store.createZNodeIfNotExist(indexPath, indexTable.getData())
                 .thenApply(x -> cache.invalidateCache(indexPath));
     }
@@ -494,7 +494,7 @@ class ZKStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    CompletableFuture<Void> setSegmentTable(final Data<Integer> data) {
+    CompletableFuture<Void> updateSegmentTable(final Data<Integer> data) {
         return store.setData(segmentPath, data)
                 .whenComplete((r, e) -> cache.invalidateCache(segmentPath));
     }
@@ -522,12 +522,12 @@ class ZKStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    public CompletableFuture<Data<Integer>> getIndexTable() {
+    public CompletableFuture<Data<Integer>> getHistoryIndex() {
         return cache.getCachedData(indexPath);
     }
 
     @Override
-    CompletableFuture<Void> updateIndexTable(final Data<Integer> updated) {
+    CompletableFuture<Void> updateHistoryIndex(final Data<Integer> updated) {
         return store.setData(indexPath, updated)
                 .whenComplete((r, e) -> cache.invalidateCache(indexPath));
     }

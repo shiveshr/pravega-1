@@ -9,11 +9,21 @@
  */
 package io.pravega.controller.store.stream.records.serializer;
 
+import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
+import io.pravega.client.stream.RetentionPolicy;
+import io.pravega.client.stream.ScalingPolicy;
+import io.pravega.client.stream.StreamConfiguration;
+import io.pravega.controller.store.stream.State;
 import io.pravega.controller.store.stream.TxnStatus;
 import io.pravega.controller.store.stream.records.ActiveTxnRecord;
+import io.pravega.controller.store.stream.records.CompletedTxnRecord;
+import io.pravega.controller.store.stream.records.StateRecord;
+import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.records.StreamCutRecord;
 import io.pravega.controller.store.stream.records.RetentionRecord;
+import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -51,10 +61,71 @@ public class ControllerMetadataSerializerTest {
     }
 
     @Test
-    public void activeTxnRecordTest() throws IOException {
+    public void txnRecordTest() throws IOException {
         ActiveTxnRecord record = new ActiveTxnRecord(1L, 1L, 1L, 1L, TxnStatus.OPEN);
         byte[] serialized = ActiveTxnRecord.SERIALIZER.serialize(record).array();
         ActiveTxnRecord deserialized = ActiveTxnRecord.SERIALIZER.deserialize(serialized);
+        assertEquals(record, deserialized);
+
+        CompletedTxnRecord record2 = new CompletedTxnRecord(1L, TxnStatus.COMMITTED);
+        byte[] serialized2 = CompletedTxnRecord.SERIALIZER.serialize(record2).array();
+        CompletedTxnRecord deserialized2 = CompletedTxnRecord.SERIALIZER.deserialize(serialized2);
+        assertEquals(record2, deserialized2);
+    }
+
+    @Test
+    public void stateRecordTest() throws IOException {
+        StateRecord record = new StateRecord(State.ACTIVE);
+        byte[] serialized = StateRecord.SERIALIZER.serialize(record).array();
+        StateRecord deserialized = StateRecord.SERIALIZER.deserialize(serialized);
+        assertEquals(record, deserialized);
+    }
+
+    @Test
+    public void truncationRecordTest() throws IOException {
+        Map<Integer, Long> streamCut = new HashMap<>();
+        streamCut.put(0, 1L);
+        streamCut.put(2, 1L);
+        streamCut.put(3, 1L);
+
+        ImmutableMap<Integer, Integer> epochMap = null;
+        ImmutableSet<Integer> deleted = null;
+        StreamTruncationRecord record = StreamTruncationRecord.builder().cutEpochMap(epochMap)
+                .streamCut(ImmutableMap.copyOf(streamCut))
+                .deletedSegments(deleted)
+                .toDelete(null)
+                .updating(true).build();
+
+        byte[] serialized = StreamTruncationRecord.SERIALIZER.serialize(record).array();
+        StreamTruncationRecord deserialized = StreamTruncationRecord.SERIALIZER.deserialize(serialized);
+        assertEquals(record, deserialized);
+    }
+
+    @Test
+    public void configurationRecordTest() throws IOException {
+        StreamConfiguration withScalingAndRetention = StreamConfiguration.builder().streamName("a").scope("a")
+                .scalingPolicy(ScalingPolicy.fixed(1)).retentionPolicy(RetentionPolicy.bySizeBytes(1L)).build();
+        StreamConfiguration withScalingOnly = StreamConfiguration.builder().streamName("a").scope("a")
+                .retentionPolicy(RetentionPolicy.bySizeBytes(1L)).build();
+        StreamConfiguration withRetentiononly = StreamConfiguration.builder().streamName("a").scope("a")
+                .retentionPolicy(RetentionPolicy.bySizeBytes(1L)).build();
+
+        StreamConfigurationRecord record = StreamConfigurationRecord.builder().streamConfiguration(withScalingAndRetention)
+            .updating(true).build();
+        byte[] serialized = StreamConfigurationRecord.SERIALIZER.serialize(record).array();
+        StreamConfigurationRecord deserialized = StreamConfigurationRecord.SERIALIZER.deserialize(serialized);
+        assertEquals(record, deserialized);
+
+        record = StreamConfigurationRecord.builder().streamConfiguration(withScalingOnly)
+                .updating(true).build();
+        serialized = StreamConfigurationRecord.SERIALIZER.serialize(record).array();
+        deserialized = StreamConfigurationRecord.SERIALIZER.deserialize(serialized);
+        assertEquals(record, deserialized);
+
+        record = StreamConfigurationRecord.builder().streamConfiguration(withRetentiononly)
+                .updating(true).build();
+        serialized = StreamConfigurationRecord.SERIALIZER.serialize(record).array();
+        deserialized = StreamConfigurationRecord.SERIALIZER.deserialize(serialized);
         assertEquals(record, deserialized);
     }
 }

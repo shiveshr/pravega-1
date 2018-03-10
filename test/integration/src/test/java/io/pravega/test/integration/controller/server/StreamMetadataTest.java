@@ -126,9 +126,9 @@ public class StreamMetadataTest {
 
         assertTrue(controller.createStream(config3).get());
 
-        // update stream config(update Stream)
+        // startUpdate stream config(startUpdate Stream)
 
-        // AS3:update the type of scaling policy
+        // AS3:startUpdate the type of scaling policy
         final StreamConfiguration config6 = StreamConfiguration.builder()
                                                                .scope(scope1)
                                                                .streamName(streamName1)
@@ -136,7 +136,7 @@ public class StreamMetadataTest {
                                                                .build();
         assertTrue(controller.updateStream(config6).get());
 
-        // AS4:update the target rate of scaling policy
+        // AS4:startUpdate the target rate of scaling policy
         final StreamConfiguration config7 = StreamConfiguration.builder()
                                                                .scope(scope1)
                                                                .streamName(streamName1)
@@ -144,7 +144,7 @@ public class StreamMetadataTest {
                                                                .build();
         assertTrue(controller.updateStream(config7).get());
 
-        // AS5:update the scale factor of scaling policy
+        // AS5:startUpdate the scale factor of scaling policy
         final StreamConfiguration config8 = StreamConfiguration.builder()
                                                                .scope(scope1)
                                                                .streamName(streamName1)
@@ -152,7 +152,7 @@ public class StreamMetadataTest {
                                                                .build();
         assertTrue(controller.updateStream(config8).get());
 
-        // AS6:update the minNumsegments of scaling policy
+        // AS6:startUpdate the minNumsegments of scaling policy
         final StreamConfiguration config9 = StreamConfiguration.builder()
                                                                .scope(scope1)
                                                                .streamName(streamName1)

@@ -187,8 +187,8 @@ public class ControllerRestApiTest {
         ScalingConfig scalingConfig1 = new ScalingConfig();
         scalingConfig1.setType(ScalingConfig.TypeEnum.FIXED_NUM_SEGMENTS);
         scalingConfig1.setTargetRate(2);
-        scalingConfig1.scaleFactor(3); // update existing scaleFactor from 2 to 3
-        scalingConfig1.minSegments(4); // update existing minSegments from 2 to 4
+        scalingConfig1.scaleFactor(3); // startUpdate existing scaleFactor from 2 to 3
+        scalingConfig1.minSegments(4); // startUpdate existing minSegments from 2 to 4
         updateStreamRequest.setScalingPolicy(scalingConfig1);
         updateStreamRequest.setRetentionPolicy(retentionConfig);
 

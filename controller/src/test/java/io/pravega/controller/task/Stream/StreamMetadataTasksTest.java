@@ -189,7 +189,7 @@ public class StreamMetadataTasksTest {
         StreamConfigurationRecord configProp = streamStorePartialMock.getConfigurationRecord(SCOPE, stream1, true, null, executor).join();
         assertFalse(configProp.isUpdating());
         // 1. happy day test
-        // update.. should succeed
+        // startUpdate.. should succeed
         CompletableFuture<UpdateStreamStatus.Status> updateOperationFuture = streamMetadataTasks.updateStream(SCOPE, stream1, streamConfiguration, null);
         assertTrue(Futures.await(processEvent(requestEventWriter)));
         assertEquals(UpdateStreamStatus.Status.SUCCESS, updateOperationFuture.join());
@@ -204,7 +204,7 @@ public class StreamMetadataTasksTest {
 
         // 2. change state to scaling
         streamStorePartialMock.setState(SCOPE, stream1, State.SCALING, null, executor).get();
-        // call update should fail without posting the event
+        // call startUpdate should fail without posting the event
         streamMetadataTasks.updateStream(SCOPE, stream1, streamConfiguration, null);
 
         AtomicBoolean loop = new AtomicBoolean(false);
@@ -249,14 +249,14 @@ public class StreamMetadataTasksTest {
                 .streamName(stream1)
                 .scalingPolicy(ScalingPolicy.fixed(7)).build();
 
-        // post the second update request. This should fail here itself as previous one has started.
+        // post the second startUpdate request. This should fail here itself as previous one has started.
         CompletableFuture<UpdateStreamStatus.Status> updateOperationFuture2 = streamMetadataTasks.updateStream(SCOPE, stream1,
                 streamConfiguration2, null);
         assertEquals(UpdateStreamStatus.Status.FAILURE, updateOperationFuture2.join());
 
         // process event
         assertTrue(Futures.await(processEvent(requestEventWriter)));
-        // verify that first request for update also completes with success.
+        // verify that first request for startUpdate also completes with success.
         assertEquals(UpdateStreamStatus.Status.SUCCESS, updateOperationFuture1.join());
 
         configProp = streamStorePartialMock.getConfigurationRecord(SCOPE, stream1, true, null, executor).join();
@@ -291,7 +291,7 @@ public class StreamMetadataTasksTest {
                 true, null, executor).join();
         assertFalse(truncProp.isUpdating());
         // 1. happy day test
-        // update.. should succeed
+        // startUpdate.. should succeed
         Map<Integer, Long> streamCut = new HashMap<>();
         streamCut.put(0, 1L);
         streamCut.put(1, 11L);
@@ -306,7 +306,7 @@ public class StreamMetadataTasksTest {
 
         // 2. change state to scaling
         streamStorePartialMock.setState(SCOPE, "test", State.SCALING, null, executor).get();
-        // call update should fail without posting the event
+        // call startUpdate should fail without posting the event
         Map<Integer, Long> streamCut2 = new HashMap<>();
         streamCut2.put(0, 1L);
         streamCut2.put(2, 1L);
@@ -351,7 +351,7 @@ public class StreamMetadataTasksTest {
         truncProp = streamStorePartialMock.getTruncationRecord(SCOPE, "test", true, null, executor).join();
         assertTrue(truncProp.getStreamCut().equals(streamCut3) && truncProp.isUpdating());
 
-        // post the second update request. This should fail here itself as previous one has started.
+        // post the second startUpdate request. This should fail here itself as previous one has started.
         Map<Integer, Long> streamCut4 = new HashMap<>();
         streamCut4.put(0, 14L);
         streamCut4.put(2, 14L);
@@ -362,7 +362,7 @@ public class StreamMetadataTasksTest {
 
         // process event
         assertTrue(Futures.await(processEvent(requestEventWriter)));
-        // verify that first request for update also completes with success.
+        // verify that first request for startUpdate also completes with success.
         assertEquals(UpdateStreamStatus.Status.SUCCESS, truncateOp1.join());
 
         truncProp = streamStorePartialMock.getTruncationRecord(SCOPE, "test", true, null, executor).join();
@@ -772,7 +772,7 @@ public class StreamMetadataTasksTest {
         final StreamConfiguration withRetentionConfig = StreamConfiguration.builder().scope(SCOPE).streamName(stream).scalingPolicy(policy)
                 .retentionPolicy(retentionPolicy).build();
 
-        // now update stream with a retention policy
+        // now startUpdate stream with a retention policy
         streamStorePartialMock.startUpdateConfiguration(SCOPE, stream, withRetentionConfig, null, executor).join();
         UpdateStreamEvent update = new UpdateStreamEvent(SCOPE, stream);
         task.execute(update).join();
@@ -780,7 +780,7 @@ public class StreamMetadataTasksTest {
         // verify that bucket has the stream.
         assertTrue(streamStorePartialMock.getStreamsForBucket(0, executor).join().contains(scopedStreamName));
 
-        // update stream such that stream is updated with null retention policy
+        // startUpdate stream such that stream is updated with null retention policy
         streamStorePartialMock.startUpdateConfiguration(SCOPE, stream, noRetentionConfig, null, executor).join();
         task.execute(update).join();
 

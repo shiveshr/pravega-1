@@ -168,7 +168,7 @@ public class ControllerServiceTest {
 
         streamDuplicationNotAllowed(controller, config1);
        
-        //update stream config section
+        //startUpdate stream config section
 
         updateStreamName(controller, scope1, scalingPolicy);
 

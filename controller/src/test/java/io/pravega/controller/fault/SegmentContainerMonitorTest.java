@@ -108,7 +108,7 @@ public class SegmentContainerMonitorTest {
             @Override
             public void updateHostContainersMap(Map<Host, Set<Integer>> newMapping) {
                 hostStore.updateHostContainersMap(newMapping);
-                //Notify the test case of the update.
+                //Notify the test case of the startUpdate.
                 sync.release();
             }
             
@@ -152,7 +152,7 @@ public class SegmentContainerMonitorTest {
         //Rebalance should not have been triggered since the min rebalance interval is not yet elapsed.
         assertEquals(3, hostStore.getHostContainersMap().size());
 
-        //Wait for rebalance and verify the host update.
+        //Wait for rebalance and verify the host startUpdate.
         assertTrue(sync.tryAcquire(10, TimeUnit.SECONDS));
         assertEquals(4, hostStore.getHostContainersMap().size());
 

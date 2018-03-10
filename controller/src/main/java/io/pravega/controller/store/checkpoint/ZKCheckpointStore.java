@@ -225,7 +225,7 @@ class ZKCheckpointStore implements CheckpointStore {
 
     /**
      * Updates the reader group data at specified path by applying the updater method on the existing data.
-     * It repeatedly invokes conditional update on specified path until is succeeds or max attempts (10) are exhausted.
+     * It repeatedly invokes conditional startUpdate on specified path until is succeeds or max attempts (10) are exhausted.
      *
      * @param path Reader group node path.
      * @param updater Function to obtain the new data value from existing data value.

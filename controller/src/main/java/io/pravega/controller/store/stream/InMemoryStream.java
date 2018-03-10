@@ -307,7 +307,7 @@ public class InMemoryStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    CompletableFuture<Void> setSegmentTable(Data<Integer> data) {
+    CompletableFuture<Void> updateSegmentTable(Data<Integer> data) {
         Preconditions.checkNotNull(data);
         Preconditions.checkNotNull(data.getData());
 
@@ -328,7 +328,7 @@ public class InMemoryStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    CompletableFuture<Void> createIndexTableIfAbsent(Data<Integer> data) {
+    CompletableFuture<Void> createHistoryIndexIfAbsent(Data<Integer> data) {
         Preconditions.checkNotNull(data);
         Preconditions.checkNotNull(data.getData());
 
@@ -341,7 +341,7 @@ public class InMemoryStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    CompletableFuture<Data<Integer>> getIndexTable() {
+    CompletableFuture<Data<Integer>> getHistoryIndex() {
         synchronized (lock) {
             if (this.indexTable == null) {
                 return Futures.failedFuture(StoreException.create(StoreException.Type.DATA_NOT_FOUND, getName()));
@@ -351,7 +351,7 @@ public class InMemoryStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    CompletableFuture<Void> updateIndexTable(Data<Integer> updated) {
+    CompletableFuture<Void> updateHistoryIndex(Data<Integer> updated) {
         Preconditions.checkNotNull(updated);
         Preconditions.checkNotNull(updated.getData());
 

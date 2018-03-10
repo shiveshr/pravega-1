@@ -127,7 +127,7 @@ public class TableHelperTest {
         segments.add(four);
 
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, newSegments);
-        byte[] indexTable = TableHelper.createIndexTable(timestamp, 0);
+        byte[] indexTable = TableHelper.createHistoryIndex(timestamp, 0);
 
         timestamp = timestamp + 10000;
         // scale down
@@ -156,7 +156,7 @@ public class TableHelperTest {
 
         List<Integer> predecessors, successors;
 
-        // find predecessors and successors when update to index table hasn't happened
+        // find predecessors and successors when startUpdate to index table hasn't happened
         predecessors = TableHelper.getOverlaps(five,
                 TableHelper
                         .findSegmentPredecessorCandidates(five,
@@ -194,7 +194,7 @@ public class TableHelperTest {
         segments.add(one);
 
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, newSegments);
-        byte[] indexTable = TableHelper.createIndexTable(timestamp, 0);
+        byte[] indexTable = TableHelper.createHistoryIndex(timestamp, 0);
 
         // scale up 1... 0 -> 2, 3
         int numOfSplits = 2;
@@ -225,7 +225,7 @@ public class TableHelperTest {
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
         HistoryRecord historyRecord = HistoryRecord.readLatestRecord(historyTable, false).get();
 
-        indexTable = TableHelper.updateIndexTable(indexTable,
+        indexTable = TableHelper.updateHistoryIndex(indexTable,
                 historyRecord.getScaleTime(),
                 historyRecord.getOffset());
 
@@ -257,7 +257,7 @@ public class TableHelperTest {
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
         historyRecord = HistoryRecord.readLatestRecord(historyTable, false).get();
 
-        indexTable = TableHelper.updateIndexTable(indexTable,
+        indexTable = TableHelper.updateHistoryIndex(indexTable,
                 historyRecord.getScaleTime(),
                 historyRecord.getOffset());
 
@@ -300,7 +300,7 @@ public class TableHelperTest {
                 historyTable);
         assertTrue(candidates5.containsAll(Arrays.asList(2, 3, 4, 6, 7)));
 
-        indexTable = TableHelper.updateIndexTable(indexTable,
+        indexTable = TableHelper.updateHistoryIndex(indexTable,
                 historyRecord.getScaleTime(),
                 historyRecord.getOffset());
 
@@ -328,7 +328,7 @@ public class TableHelperTest {
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
         historyRecord = HistoryRecord.readLatestRecord(historyTable, false).get();
         // add index
-        indexTable = TableHelper.updateIndexTable(indexTable,
+        indexTable = TableHelper.updateHistoryIndex(indexTable,
                 historyRecord.getScaleTime(),
                 historyRecord.getOffset());
 
@@ -364,7 +364,7 @@ public class TableHelperTest {
 
         List<Integer> predecessors, successors;
 
-        // find predecessors and successors when update to history and index table hasnt happened
+        // find predecessors and successors when startUpdate to history and index table hasnt happened
         predecessors = TableHelper.getOverlaps(zero,
                 TableHelper
                         .findSegmentPredecessorCandidates(zero,
@@ -385,7 +385,7 @@ public class TableHelperTest {
         assertEquals(successors, new ArrayList<Integer>());
 
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, newSegments);
-        byte[] indexTable = TableHelper.createIndexTable(timestamp, 0);
+        byte[] indexTable = TableHelper.createHistoryIndex(timestamp, 0);
 
         int nextHistoryOffset = historyTable.length;
 
@@ -421,7 +421,7 @@ public class TableHelperTest {
         timestamp = timestamp + 5;
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
 
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp, nextHistoryOffset);
+        indexTable = TableHelper.updateHistoryIndex(indexTable, timestamp, nextHistoryOffset);
         nextHistoryOffset = historyTable.length;
 
         // 1 -> 6,7.. 2,5 -> 8
@@ -458,7 +458,7 @@ public class TableHelperTest {
         timestamp = timestamp + 5;
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
 
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp, nextHistoryOffset);
+        indexTable = TableHelper.updateHistoryIndex(indexTable, timestamp, nextHistoryOffset);
         nextHistoryOffset = historyTable.length;
 
         // 7 -> 9,10.. 8 -> 10, 11
@@ -495,7 +495,7 @@ public class TableHelperTest {
         assertEquals(predecessors, Lists.newArrayList(7, 8));
         assertEquals(successors, Lists.newArrayList(9, 10));
 
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp, nextHistoryOffset);
+        indexTable = TableHelper.updateHistoryIndex(indexTable, timestamp, nextHistoryOffset);
 
         // 0 has no successor and no predecessor
         // 10 has multiple predecessor
@@ -846,7 +846,7 @@ public class TableHelperTest {
         byte[] segmentTable = createSegmentTable(2, timestamp);
 
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, startSegments);
-        byte[] indexTable = TableHelper.createIndexTable(timestamp, 0);
+        byte[] indexTable = TableHelper.createHistoryIndex(timestamp, 0);
 
         List<Integer> activeSegments = TableHelper.getActiveSegments(historyTable);
         assertEquals(activeSegments, startSegments);
@@ -861,7 +861,7 @@ public class TableHelperTest {
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments1);
         HistoryRecord partial = HistoryRecord.readLatestRecord(historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp + 1);
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp + 1, partial.getOffset());
+        indexTable = TableHelper.updateHistoryIndex(indexTable, timestamp + 1, partial.getOffset());
 
         // epoch 2
         List<Integer> newSegments2 = Lists.newArrayList(0, 2, 4, 5);
@@ -873,7 +873,7 @@ public class TableHelperTest {
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments2);
         partial = HistoryRecord.readLatestRecord(historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp + 2);
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp + 2, partial.getOffset());
+        indexTable = TableHelper.updateHistoryIndex(indexTable, timestamp + 2, partial.getOffset());
 
         // epoch 3
         List<Integer> newSegments3 = Lists.newArrayList(0, 4, 5, 6, 7);
@@ -885,7 +885,7 @@ public class TableHelperTest {
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments3);
         partial = HistoryRecord.readLatestRecord(historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp + 3);
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp + 3, partial.getOffset());
+        indexTable = TableHelper.updateHistoryIndex(indexTable, timestamp + 3, partial.getOffset());
 
         // epoch 4
         List<Integer> newSegments4 = Lists.newArrayList(4, 5, 6, 7, 8, 9);
@@ -897,7 +897,7 @@ public class TableHelperTest {
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments4);
         partial = HistoryRecord.readLatestRecord(historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp + 4);
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp + 4, partial.getOffset());
+        indexTable = TableHelper.updateHistoryIndex(indexTable, timestamp + 4, partial.getOffset());
 
         // happy day
         Map<Integer, Long> streamCut1 = new HashMap<>();
@@ -910,7 +910,7 @@ public class TableHelperTest {
         assertTrue(truncationRecord.getStreamCut().equals(streamCut1));
         assertTrue(truncationRecord.getCutEpochMap().get(0) == 0 &&
                 truncationRecord.getCutEpochMap().get(1) == 0);
-        truncationRecord = truncationRecord.mergeDeleted();
+        truncationRecord = StreamTruncationRecord.complete(truncationRecord);
 
         Map<Integer, Long> streamCut2 = new HashMap<>();
         streamCut2.put(0, 1L);
@@ -926,7 +926,7 @@ public class TableHelperTest {
                 truncationRecord.getCutEpochMap().get(2) == 2 &&
                 truncationRecord.getCutEpochMap().get(4) == 2 &&
                 truncationRecord.getCutEpochMap().get(5) == 2);
-        truncationRecord = truncationRecord.mergeDeleted();
+        truncationRecord = StreamTruncationRecord.complete(truncationRecord);
 
         Map<Integer, Long> streamCut3 = new HashMap<>();
         streamCut3.put(2, 10L);
@@ -943,7 +943,7 @@ public class TableHelperTest {
                 truncationRecord.getCutEpochMap().get(5) == 4 &&
                 truncationRecord.getCutEpochMap().get(8) == 4 &&
                 truncationRecord.getCutEpochMap().get(9) == 4);
-        truncationRecord = truncationRecord.mergeDeleted();
+        truncationRecord = StreamTruncationRecord.complete(truncationRecord);
 
         // behind previous
         Map<Integer, Long> streamCut4 = new HashMap<>();

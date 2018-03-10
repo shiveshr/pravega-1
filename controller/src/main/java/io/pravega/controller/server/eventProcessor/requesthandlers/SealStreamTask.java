@@ -65,7 +65,7 @@ public class SealStreamTask implements StreamTask<SealStreamEvent> {
                     if (activeSegments.isEmpty()) {
                         // idempotent check
                         // if active segment set is empty then the stream is sealed.
-                        // Do not update the state if the stream is already sealed.
+                        // Do not startUpdate the state if the stream is already sealed.
                         return CompletableFuture.completedFuture(null);
                     } else {
                         return notifySealed(scope, stream, context, activeSegments);

@@ -463,7 +463,7 @@ public abstract class StreamMetadataStoreTest {
 
         StreamConfigurationRecord configProperty = store.getConfigurationRecord(scope, stream, true, null, executor).join();
         assertFalse(configProperty.isUpdating());
-        // run update configuration multiple times
+        // run startUpdate configuration multiple times
         assertTrue(Futures.await(store.startUpdateConfiguration(scope, stream, configuration2, null, executor)));
         configProperty = store.getConfigurationRecord(scope, stream, true, null, executor).join();
 

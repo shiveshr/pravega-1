@@ -35,7 +35,7 @@ public class StreamConfigurationRecord {
     private final StreamConfiguration streamConfiguration;
     private final boolean updating;
 
-    public static StreamConfigurationRecord update(StreamConfiguration streamConfig) {
+    public static StreamConfigurationRecord startUpdate(StreamConfiguration streamConfig) {
         return StreamConfigurationRecord.builder().streamConfiguration(streamConfig)
                 .updating(true).build();
     }
