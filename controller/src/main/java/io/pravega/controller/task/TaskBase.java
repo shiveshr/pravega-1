@@ -118,7 +118,7 @@ public abstract class TaskBase implements AutoCloseable {
             return createIndexes(taggedResource, taskData);
         }
         // PutChild (HostId, resource)
-        // Initially store the fact that I am about the startUpdate the resource.
+        // Initially store the fact that I am about the update the resource.
         // Since multiple threads within this process could concurrently attempt to modify same resource,
         // we tag the resource name with a random GUID so as not to interfere with other thread's
         // creation or deletion of resource children under HostId node.
@@ -184,7 +184,7 @@ public abstract class TaskBase implements AutoCloseable {
                 .lock(resource, taskData, context.hostId, tag, context.oldHostId, context.oldTag)
 
                 // On acquiring lock, the following invariants hold
-                // Invariant 1. No other thread within any controller process is running an startUpdate task on the resource
+                // Invariant 1. No other thread within any controller process is running an update task on the resource
                 // Invariant 2. We have denoted the fact that current controller's HostId is updating the resource. This
                 // fact can be used in case current controller instance crashes.
                 // Invariant 3. Any other controller that had created resource child under its HostId, can now be safely
@@ -204,7 +204,7 @@ public abstract class TaskBase implements AutoCloseable {
                 }, executor);
 
         lockResult
-                // Exclusively execute the startUpdate task on the resource
+                // Exclusively execute the update task on the resource
                 .thenComposeAsync(y -> operation.apply(), executor)
 
                 // If lock had been obtained, unlock it before completing the task.

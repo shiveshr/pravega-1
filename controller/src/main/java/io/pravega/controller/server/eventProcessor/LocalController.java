@@ -114,7 +114,7 @@ public class LocalController implements Controller {
         return this.controller.updateStream(streamConfig).thenApply(x -> {
             switch (x.getStatus()) {
             case FAILURE:
-                throw new ControllerFailureException("Failed to startUpdate stream: " + streamConfig);
+                throw new ControllerFailureException("Failed to update stream: " + streamConfig);
             case SCOPE_NOT_FOUND:
                 throw new IllegalArgumentException("Scope does not exist: " + streamConfig);
             case STREAM_NOT_FOUND:

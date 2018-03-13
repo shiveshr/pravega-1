@@ -67,7 +67,7 @@ interface Stream {
      * @param configuration new stream configuration.
      * @return future of new StreamConfigWithVersion.
      */
-    CompletableFuture<Void> startUpdateConfiguration(final StreamConfiguration configuration);
+    CompletableFuture<Void> updateConfiguration(final StreamConfiguration configuration);
 
     /**
      * Completes an ongoing updates configuration of an existing stream.

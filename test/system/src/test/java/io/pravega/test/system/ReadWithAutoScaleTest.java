@@ -228,7 +228,7 @@ public class ReadWithAutoScaleTest extends AbstractScaleTests {
                 try {
                     final Long longEvent = reader.readNextEvent(SECONDS.toMillis(60)).getEvent();
                     if (longEvent != null) {
-                        //startUpdate if event read is not null.
+                        //update if event read is not null.
                         readResult.add(longEvent);
                         count = readCount.incrementAndGet();
                         log.debug("Reader {}, read count {}", id, count);

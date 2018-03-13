@@ -840,7 +840,7 @@ public class TableHelper {
                 low = range.getKey();
                 high = range.getValue();
             } else if (high == range.getKey()) {
-                // if adjacent (prev.high == next.low) then startUpdate only high
+                // if adjacent (prev.high == next.low) then update only high
                 high = range.getValue();
             } else {
                 // if prev.high > next.low.

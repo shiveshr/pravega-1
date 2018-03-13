@@ -141,7 +141,7 @@ public class TableHelperTest {
 
         List<Integer> predecessors, successors;
 
-        // find predecessors and successors when startUpdate to history and index table hasnt happened
+        // find predecessors and successors when update to history and index table hasnt happened
         predecessors = TableHelper.getOverlaps(zero,
                 TableHelper
                         .findSegmentPredecessorCandidates(zero,

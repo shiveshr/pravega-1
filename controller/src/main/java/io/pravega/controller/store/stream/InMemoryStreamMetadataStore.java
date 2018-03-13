@@ -131,7 +131,7 @@ class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
 
     @Override
     @Synchronized
-    public CompletableFuture<Void> startUpdateConfiguration(final String scopeName,
+    public CompletableFuture<Void> updateConfiguration(final String scopeName,
                                                             final String streamName,
                                                             final StreamConfiguration configuration,
                                                             final OperationContext context,
@@ -142,7 +142,7 @@ class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
                 return Futures.
                         failedFuture(StoreException.create(StoreException.Type.DATA_NOT_FOUND, scopeStreamName));
             }
-            return streams.get(scopeStreamName).startUpdateConfiguration(configuration);
+            return streams.get(scopeStreamName).updateConfiguration(configuration);
         } else {
             return Futures.
                     failedFuture(StoreException.create(StoreException.Type.DATA_NOT_FOUND, scopeName));

@@ -276,7 +276,7 @@ public class StreamMetaDataTests {
     public void testUpdateStream() throws ExecutionException, InterruptedException {
         String resourceURI = getURI() + "v1/scopes/" + scope1 + "/streams/" + stream1;
 
-        // Test to startUpdate an existing stream
+        // Test to update an existing stream
         when(mockControllerService.updateStream(any())).thenReturn(updateStreamStatus);
         Response response = client.target(resourceURI).request().buildPut(Entity.json(updateStreamRequest)).invoke();
         assertEquals("Update Stream Status", 200, response.getStatus());
@@ -291,7 +291,7 @@ public class StreamMetaDataTests {
         testExpectedVsActualObject(streamResponseExpected, streamResponseActual);
         response.close();
 
-        // Test to startUpdate an non-existing stream
+        // Test to update an non-existing stream
         when(mockControllerService.updateStream(any())).thenReturn(updateStreamStatus2);
         response = client.target(resourceURI).request().buildPut(Entity.json(updateStreamRequest2)).invoke();
         assertEquals("Update Stream Status", 404, response.getStatus());
@@ -305,7 +305,7 @@ public class StreamMetaDataTests {
         assertEquals("Update Stream Status", 500, response.getStatus());
         response.close();
 
-        // Test to startUpdate stream for non-existent scope
+        // Test to update stream for non-existent scope
         when(mockControllerService.updateStream(any())).thenReturn(updateStreamStatus4);
         response = client.target(resourceURI).request().buildPut(Entity.json(updateStreamRequest)).invoke();
         assertEquals("Update Stream Status", 404, response.getStatus());

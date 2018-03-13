@@ -214,13 +214,13 @@ public abstract class PersistentStreamBase<T> implements Stream {
      * @return future of operation.
      */
     @Override
-    public CompletableFuture<Void> startUpdateConfiguration(final StreamConfiguration newConfiguration) {
+    public CompletableFuture<Void> updateConfiguration(final StreamConfiguration newConfiguration) {
         return getConfigurationData(true)
                 .thenCompose(configData -> {
                     StreamConfigurationRecord previous = StreamConfigurationRecord.parse(configData.getData());
                     Preconditions.checkNotNull(previous);
                     Preconditions.checkArgument(!previous.isUpdating());
-                    StreamConfigurationRecord update = StreamConfigurationRecord.startUpdate(newConfiguration);
+                    StreamConfigurationRecord update = StreamConfigurationRecord.update(newConfiguration);
                     return setConfigurationData(new Data<>(update.toByteArray(), configData.getVersion()));
                 });
     }
@@ -238,7 +238,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                     Preconditions.checkNotNull(current);
                     if (current.isUpdating()) {
                         StreamConfigurationRecord newProperty = StreamConfigurationRecord.complete(current.getStreamConfiguration());
-                        log.debug("Completing startUpdate configuration for stream {}/{}", scope, name);
+                        log.debug("Completing update configuration for stream {}/{}", scope, name);
                         return setConfigurationData(new Data<>(newProperty.toByteArray(), configData.getVersion()));
                     } else {
                         // idempotent
@@ -450,7 +450,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     /**
-     * Scale and create are two tasks where we startUpdate the table. For scale to be legitimate, it has to be
+     * Scale and create are two tasks where we update the table. For scale to be legitimate, it has to be
      * preceded by create. Which means all appropriate tables exist.
      * Scale Steps:
      * 1. Add new segment information in segment table.
@@ -619,7 +619,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     /**
-     * Segments created with pravega, startUpdate the history table with this fact so they are available as successors
+     * Segments created with pravega, update the history table with this fact so they are available as successors
      * 3. Add entry into the history table.
      *
      * @return : list of newly created segments
@@ -691,7 +691,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     /**
-     * Remainder of scale metadata startUpdate. Also set the state back to active.
+     * Remainder of scale metadata update. Also set the state back to active.
      * 4. complete entry into the history table.
      * 5. Add entry into the index table.
      *
@@ -1081,7 +1081,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     /**
-     * startUpdate history table if not already updated:
+     * update history table if not already updated:
      * fetch last record from history table.
      * if eventTime is >= scale.scaleTimeStamp do nothing, else create record
      *

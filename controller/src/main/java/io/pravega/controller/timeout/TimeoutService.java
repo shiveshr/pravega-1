@@ -29,7 +29,7 @@ import java.util.UUID;
  * Subsequently, the client may renew transaction lease by calling pingTransaction API on the same controller
  * instance. On receiving a ping request for a known transaction, the controller instance updates the in-memory
  * data structures of TimeoutService by invoking {@link TimeoutService#pingTxn} method. The controller instance does
- * not startUpdate the persisted transaction data on receiving ping request about a known transaction in order to reduce
+ * not update the persisted transaction data on receiving ping request about a known transaction in order to reduce
  * latency of ping requests. Eventually, the client may commit or abort a transaction by calling commitTransaction
  * or abortTransaction controller API, respectively. On receiving these requests, the controller instance
  * updates the transaction state in the persistent store and removes information about that transaction from

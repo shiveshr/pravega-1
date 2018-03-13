@@ -54,10 +54,10 @@ import static io.pravega.controller.util.RetryHelper.RETRYABLE_PREDICATE;
 import static io.pravega.controller.util.RetryHelper.withRetriesAsync;
 
 /**
- * Collection of metadata startUpdate tasks on stream.
+ * Collection of metadata update tasks on stream.
  * Task methods are annotated with @Task annotation.
  * <p>
- * Any startUpdate to the task method signature should be avoided, since it can cause problems during upgrade.
+ * Any update to the task method signature should be avoided, since it can cause problems during upgrade.
  * Instead, a new overloaded method may be created with the same task annotation name but a new version.
  */
 @Slf4j
@@ -393,7 +393,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      * 2. If process fails before responding to the client, then since txn is present in the host-txn index,
      * some other controller process shall abort the txn after maxLeaseValue
      *
-     * Store read/startUpdate operation is not invoked on receiving ping request for a txn that is being tracked in the
+     * Store read/update operation is not invoked on receiving ping request for a txn that is being tracked in the
      * timeout service. Otherwise, if the txn is not being tracked in the timeout service, txn node is read from
      * the store and updated.
      *
@@ -518,7 +518,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
 
         // Step 1. Add txn to current host's index, if it is not already present
         CompletableFuture<Void> addIndex = host.equals(hostId) && !timeoutService.containsTxn(scope, stream, txnId) ?
-                // PS: txn version in index does not matter, because if startUpdate is successful,
+                // PS: txn version in index does not matter, because if update is successful,
                 // then txn would no longer be open.
                 streamMetadataStore.addTxnToIndex(hostId, resource, Integer.MAX_VALUE) :
                 CompletableFuture.completedFuture(null);

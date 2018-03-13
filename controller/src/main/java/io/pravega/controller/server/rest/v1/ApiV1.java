@@ -45,7 +45,7 @@ import javax.ws.rs.core.SecurityContext;
  * Different interfaces will hold different groups of APIs.
  *
  * ##############################IMPORTANT NOTE###################################
- * Do not make any API changes here directly, you need to startUpdate swagger/Controller.yaml and generate
+ * Do not make any API changes here directly, you need to update swagger/Controller.yaml and generate
  * the server stubs as documented in swagger/README.md before updating this file.
  *
  */

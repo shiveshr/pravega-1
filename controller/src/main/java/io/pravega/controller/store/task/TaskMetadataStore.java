@@ -21,7 +21,7 @@ import java.util.concurrent.CompletableFuture;
 public interface TaskMetadataStore {
 
     /**
-     * Locks a resource for startUpdate.
+     * Locks a resource for update.
      * If (oldOwner, oldTag) are specified then it revokes old owner's lock and itself acquires it.
      * This is non-reentrant lock, i.e., a process/thread cannot lock the same resource twice.
      * If oldOwner is null then
@@ -31,7 +31,7 @@ public interface TaskMetadataStore {
      * resource -> (owner, tag, taskData).
      *
      * @param resource    resource identifier.
-     * @param taskData    details of startUpdate task on the resource.
+     * @param taskData    details of update task on the resource.
      * @param owner       owner of the task.
      * @param tag         tag.
      * @param oldOwner    host that had previously locked the resource.

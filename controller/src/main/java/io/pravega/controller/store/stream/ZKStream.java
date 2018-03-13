@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
 /**
  * ZK Stream. It understands the following.
  * 1. underlying file organization/object structure of stream metadata store.
- * 2. how to evaluate basic read and startUpdate queries defined in the Stream interface.
+ * 2. how to evaluate basic read and update queries defined in the Stream interface.
  * <p>
  * It may cache files read from the store for its lifetime.
  * This shall reduce store round trips for answering queries, thus making them efficient.

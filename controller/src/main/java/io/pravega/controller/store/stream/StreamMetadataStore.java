@@ -98,7 +98,7 @@ public interface StreamMetadataStore {
      * @param state stream state
      * @param context operation context
      * @param executor callers executor
-     * @return Future of boolean if state startUpdate succeeded.
+     * @return Future of boolean if state update succeeded.
      */
     CompletableFuture<Boolean> setState(String scope, String name,
                                         State state, OperationContext context,
@@ -112,7 +112,7 @@ public interface StreamMetadataStore {
      * @param ignoreCached ignore cached value and fetch from store.
      * @param context operation context
      * @param executor callers executor
-     * @return Future of boolean if state startUpdate succeeded.
+     * @return Future of boolean if state update succeeded.
      */
     CompletableFuture<State> getState(final String scope, final String name, final boolean ignoreCached, final OperationContext context, final Executor executor);
 
@@ -165,14 +165,14 @@ public interface StreamMetadataStore {
      * @param executor      callers executor
      * @return Future of operation
      */
-    CompletableFuture<Void> startUpdateConfiguration(final String scope,
+    CompletableFuture<Void> updateConfiguration(final String scope,
                                                      final String name,
                                                      final StreamConfiguration configuration,
                                                      final OperationContext context,
                                                      final Executor executor);
 
     /**
-     * Complete an ongoing startUpdate of stream configuration.
+     * Complete an ongoing update of stream configuration.
      *
      * @param scope         stream scope
      * @param name          stream name.

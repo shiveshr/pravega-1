@@ -454,22 +454,22 @@ public abstract class StreamMetadataStoreTest {
 
         StreamConfigurationRecord configProperty = store.getConfigurationRecord(scope, stream, true, null, executor).join();
         assertFalse(configProperty.isUpdating());
-        // run startUpdate configuration multiple times
-        assertTrue(Futures.await(store.startUpdateConfiguration(scope, stream, configuration2, null, executor)));
+        // run update configuration multiple times
+        assertTrue(Futures.await(store.updateConfiguration(scope, stream, configuration2, null, executor)));
         configProperty = store.getConfigurationRecord(scope, stream, true, null, executor).join();
 
         assertTrue(configProperty.isUpdating());
 
         final StreamConfiguration configuration3 = StreamConfiguration.builder().scope(scope).streamName(stream).scalingPolicy(policy).build();
 
-        assertFalse(Futures.await(store.startUpdateConfiguration(scope, stream, configuration3, null, executor)));
+        assertFalse(Futures.await(store.updateConfiguration(scope, stream, configuration3, null, executor)));
 
         assertTrue(Futures.await(store.completeUpdateConfiguration(scope, stream, null, executor)));
 
         configProperty = store.getConfigurationRecord(scope, stream, true, null, executor).join();
         assertEquals(configuration2, configProperty.getStreamConfiguration());
 
-        assertTrue(Futures.await(store.startUpdateConfiguration(scope, stream, configuration3, null, executor)));
+        assertTrue(Futures.await(store.updateConfiguration(scope, stream, configuration3, null, executor)));
         assertTrue(Futures.await(store.completeUpdateConfiguration(scope, stream, null, executor)));
     }
 
