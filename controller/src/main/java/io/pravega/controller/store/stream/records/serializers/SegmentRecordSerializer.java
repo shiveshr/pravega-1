@@ -12,7 +12,6 @@ package io.pravega.controller.store.stream.records.serializers;
 import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
-import io.pravega.controller.store.stream.State;
 import io.pravega.controller.store.stream.records.SegmentRecord;
 
 import java.io.IOException;

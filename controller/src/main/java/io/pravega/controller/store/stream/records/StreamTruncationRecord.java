@@ -15,15 +15,12 @@ import com.google.common.collect.ImmutableSet;
 import io.pravega.common.ObjectBuilder;
 import io.pravega.common.io.serialization.VersionedSerializer;
 import io.pravega.controller.store.stream.records.serializers.StreamTruncationRecordSerializer;
-import lombok.AccessLevel;
-import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;

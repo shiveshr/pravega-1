@@ -53,13 +53,19 @@ public class UpdateStreamTask implements StreamTask<UpdateStreamEvent> {
         String stream = request.getStream();
 
         return streamMetadataStore.getConfigurationRecord(scope, stream, true, context, executor)
-                .thenCompose(configProperty -> {
-                    if (!configProperty.isUpdating()) {
-                        throw new TaskExceptions.StartException("Update Stream not started yet.");
-                    } else {
-                        return processUpdate(scope, stream, configProperty, context);
-                    }
-                });
+                .thenCompose(configProperty -> streamMetadataStore.getState(scope,  stream, true, context, executor)
+                        .thenCompose(state -> {
+                        if (!configProperty.isUpdating()) {
+                            if (state == State.UPDATING) {
+                                log.debug("Update task already complete for stream {}/{}. Resetting state back to ACTIVE.", scope, stream);
+                                return Futures.toVoid(streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor));
+                            } else {
+                                throw new TaskExceptions.StartException("Update Stream not started yet.");
+                            }
+                        } else {
+                            return processUpdate(scope, stream, configProperty, context);
+                        }
+                    }));
     }
 
     private CompletableFuture<Void> processUpdate(String scope, String stream, StreamConfigurationRecord configProperty,

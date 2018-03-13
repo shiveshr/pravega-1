@@ -11,8 +11,6 @@ package io.pravega.controller.store.stream.records;
 
 import io.pravega.common.ObjectBuilder;
 import io.pravega.common.io.serialization.VersionedSerializer;
-import io.pravega.common.util.BitConverter;
-import com.google.common.base.Preconditions;
 import io.pravega.controller.store.stream.records.serializers.HistoryRecordSerializer;
 import lombok.Builder;
 import lombok.Data;
@@ -49,16 +47,16 @@ public class HistoryRecord {
     private final boolean partial;
 
     @Builder
-    HistoryRecord(int epoch, List<Integer> segments) {
-        this(epoch, segments, Long.MIN_VALUE);
-    }
-
-    @Builder
     HistoryRecord(int epoch, List<Integer> segments, long scaleTime) {
         this.epoch = epoch;
         this.segments = segments;
         this.scaleTime = scaleTime;
         partial = scaleTime == Long.MIN_VALUE;
+    }
+
+    @Builder
+    HistoryRecord(int epoch, List<Integer> segments) {
+        this(epoch, segments, Long.MIN_VALUE);
     }
 
     public byte[] toByteArray() {
@@ -76,25 +74,29 @@ public class HistoryRecord {
      * @param historyIndex  history index
      * @param epoch         epoch to read
      * @param ignorePartial if set, ignore if the record is partial
-     * @return
+     * @return Optional of history record for the epoch if it exists in the table predicated to ignore partial flag.
      */
-    public static Optional<HistoryRecord> readRecord(final byte[] historyTable, final byte[] historyIndex, final int epoch,
+    public static Optional<HistoryRecord> readRecord(final byte[] historyIndex, final byte[] historyTable, final int epoch,
                                                      boolean ignorePartial) {
         Optional<HistoryIndexRecord> historyIndexRecord = HistoryIndexRecord.readRecord(historyIndex, epoch);
-        if (!historyIndexRecord.isPresent()) {
-            return Optional.empty();
-        }
 
-        int offset = historyIndexRecord.get().getHistoryOffset();
+        return historyIndexRecord.map(index -> {
+            int offset = index.getHistoryOffset();
 
-        HistoryRecord record = parse(historyTable, offset);
+            if (offset >= historyTable.length) {
+                // Note: index could be ahead of history table.
+                return null;
+            } else {
+                HistoryRecord record = parse(historyTable, offset);
 
-        if (record.isPartial() && ignorePartial) {
-            // this is a partial record and we have been asked to ignore it.
-            return Optional.empty();
-        } else {
-            return Optional.of(record);
-        }
+                if (record.isPartial() && ignorePartial) {
+                    // this is a partial record and we have been asked to ignore it.
+                    return null;
+                } else {
+                    return record;
+                }
+            }
+        });
     }
 
     /**
@@ -106,36 +108,55 @@ public class HistoryRecord {
      * @return returns the latest history record. If latest entry is partial entry and ignorePartial flag is true
      * then read the previous entry.
      */
-    public static Optional<HistoryRecord> readLatestRecord(final byte[] historyTable, final byte[] historyIndex,
+    public static Optional<HistoryRecord> readLatestRecord(final byte[] historyIndex, final byte[] historyTable,
                                                            boolean ignorePartial) {
         Optional<HistoryIndexRecord> latestIndex = HistoryIndexRecord.readLatestRecord(historyIndex);
         if (!latestIndex.isPresent()) {
             return Optional.empty();
         }
 
-        Optional<HistoryRecord> record = readRecord(historyTable, historyIndex, latestIndex.get().getEpoch(), ignorePartial);
+        Optional<HistoryRecord> record = readRecord(historyIndex, historyTable, latestIndex.get().getEpoch(), ignorePartial);
         if (!record.isPresent()) {
-            // we have the index updated but the history table isnt updated yet. So fetch the previous indexed record.
-            record = readRecord(historyTable, historyIndex, latestIndex.get().getEpoch() - 1, ignorePartial);
+            // This can happen if we have the index updated but the history table isnt updated yet. Or the latest record was partial.
+            // So fetch the previous indexed record.
+            record = readRecord(historyIndex, historyTable, latestIndex.get().getEpoch() - 1, ignorePartial);
+            assert record.isPresent();
         }
 
         if (ignorePartial && record.get().isPartial()) {
-            return fetchPrevious(record.get(), historyTable, historyIndex);
+            return fetchPrevious(record.get(), historyIndex, historyTable);
         } else {
             return record;
         }
     }
 
-    public static Optional<HistoryRecord> fetchNext(final HistoryRecord record, final byte[] historyTable,
-                                                    final byte[] historyIndex, boolean ignorePartial) {
-        return readRecord(historyTable, historyIndex, record.epoch + 1, ignorePartial);
+    /**
+     * Method to fetch record immediately following the given record.
+     * @param record record whose next record is to be found.
+     * @param historyTable history table
+     * @param historyIndex history index
+     * @param ignorePartial ignore partial record
+     * @return returns history record immediately following given record. If the found record is partial entry and
+     * ignorePartial flag is true then return empty.
+     */
+    public static Optional<HistoryRecord> fetchNext(final HistoryRecord record, final byte[] historyIndex, final byte[] historyTable,
+                                                    boolean ignorePartial) {
+        return readRecord(historyIndex, historyTable, record.epoch + 1, ignorePartial);
     }
 
-    public static Optional<HistoryRecord> fetchPrevious(final HistoryRecord record, final byte[] historyTable, final byte[] historyIndex) {
-        return readRecord(historyTable, historyIndex, record.epoch - 1, true);
+    /**
+     * Method to fetch record immediately preceeding the given record.
+     * @param record record whose next record is to be found.
+     * @param historyTable history table
+     * @param historyIndex history index
+     * @return returns history record immediately preceeding given record. If the given record is first record
+     * in the table then return empty.
+     */
+    public static Optional<HistoryRecord> fetchPrevious(final HistoryRecord record, final byte[] historyIndex, final byte[] historyTable) {
+        return readRecord(historyIndex, historyTable, record.epoch - 1, true);
     }
 
-    private static HistoryRecord parse(final byte[] table, final int offset) {
+    public static HistoryRecord parse(final byte[] table, final int offset) {
         InputStream inputStream = new ByteArrayInputStream(table, offset, table.length - offset);
         try {
             return SERIALIZER.deserialize(inputStream);
@@ -144,12 +165,12 @@ public class HistoryRecord {
         }
     }
 
-    public static List<Pair<Long, List<Integer>>> readAllRecords(byte[] historyTable, byte[] historyIndex) {
+    public static List<Pair<Long, List<Integer>>> readAllRecords(byte[] historyIndex, byte[] historyTable) {
         List<Pair<Long, List<Integer>>> result = new LinkedList<>();
-        Optional<HistoryRecord> record = readLatestRecord(historyTable, historyIndex,true);
+        Optional<HistoryRecord> record = readLatestRecord(historyIndex, historyTable, true);
         while (record.isPresent()) {
             result.add(new ImmutablePair<>(record.get().getScaleTime(), record.get().getSegments()));
-            record = fetchPrevious(record.get(), historyTable, historyIndex);
+            record = fetchPrevious(record.get(), historyIndex, historyTable);
         }
         return result;
     }

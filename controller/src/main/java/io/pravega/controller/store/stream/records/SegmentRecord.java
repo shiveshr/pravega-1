@@ -19,17 +19,13 @@ import lombok.Lombok;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 
 @Data
 @Builder
 /**
- * Class represents one row/record in SegmentTable.
- * Segment table is chunked into multiple files, each containing #SEGMENT_CHUNK_SIZE records.
- * New segment chunk-name is highest-chunk-name + 1
- * Row: [segment-number, segment-creation-time, routing-key-floor-inclusive, routing-key-ceiling-exclusive]
+ * Class represents one row/record in SegmentTable. Since segment table records are versioned, we can have variable sized
+ * records. So we maintain a segment index which identifies start offset for each row in the table.
  */
 public class SegmentRecord {
     public static final VersionedSerializer.WithBuilder<SegmentRecord, SegmentRecord.SegmentRecordBuilder>
@@ -43,31 +39,44 @@ public class SegmentRecord {
 
     /**
      * Method to read record for a specific segment number. 
+     * @param segmentIndex segment index
      * @param segmentTable segment table
      * @param number segment number to read
      * @return returns segment record
      */
-    static Optional<SegmentRecord> readRecord(final byte[] segmentTable, final byte[] index, final int number) {
-        Optional<SegmentIndexRecord> record = SegmentIndexRecord.readRecord(index, number);
-        return record.map(segmentIndexRecord -> parse(segmentTable, segmentIndexRecord.getSegmentOffset()));
+    static Optional<SegmentRecord> readRecord(final byte[] segmentIndex, final byte[] segmentTable, final int number) {
+        Optional<SegmentIndexRecord> indexRecord = SegmentIndexRecord.readRecord(segmentIndex, number);
+        return indexRecord.map(segmentIndexRecord -> {
+            if (indexRecord.get().getSegmentOffset() >= segmentTable.length) {
+                // index may be ahead of segment table. So we may not be able to read the record.
+                return null;
+            } else {
+                return parse(segmentTable, segmentIndexRecord.getSegmentOffset());
+            }
+        });
     }
 
     /**
-     * Method to read last 'n' segments from the segment table. Where n is supplied by the caller.
+     * Method to read latest record in segment table.
+     * Note: index may be ahead of segment table. So we will find the last record in segment table and ignore index entries
+     * that are not written to segment table yet.
+     * @param segmentIndex segment index
      * @param segmentTable segment table
-     * @param count number of segments to read.
-     * @return list of last n segments. If number of segments in the table are less than requested, all are returned.
+     * @return returns latest segment record in segment table
      */
-    static List<SegmentRecord> readLastN(final byte[] segmentTable, final byte[] index, final int count) {
-        // get offset and parse
-        List<SegmentRecord> result = new ArrayList<>(count);
-        Optional<SegmentIndexRecord> offset = SegmentIndexRecord.readLatestRecord(index);
-        int last = offset.map(SegmentIndexRecord::getSegmentOffset).orElse(0);
-        for (int i = 0; i < count; i++) {
-            offset = SegmentIndexRecord.readRecord(index, last - i);
-            offset.ifPresent(segmentIndexRecord -> result.add(parse(segmentTable, segmentIndexRecord.getSegmentOffset())));
+    static Optional<SegmentRecord> readLatest(final byte[] segmentIndex, final byte[] segmentTable) {
+        Optional<SegmentIndexRecord> indexRecord = SegmentIndexRecord.readLatestRecord(segmentIndex);
+
+        while (indexRecord.isPresent()) {
+            int segmentNumber = indexRecord.get().getSegmentNumber();
+            if (indexRecord.get().getSegmentOffset() >= segmentTable.length) {
+                indexRecord = SegmentIndexRecord.readRecord(segmentIndex, segmentNumber - 1);
+            } else {
+                return Optional.of(parse(segmentTable, indexRecord.get().getSegmentOffset()));
+            }
         }
-        return result;
+
+        return Optional.empty();
     }
 
     private static SegmentRecord parse(final byte[] table, final int offset) {

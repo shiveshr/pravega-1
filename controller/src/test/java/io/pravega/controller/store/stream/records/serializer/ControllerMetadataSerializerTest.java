@@ -19,6 +19,8 @@ import io.pravega.controller.store.stream.State;
 import io.pravega.controller.store.stream.TxnStatus;
 import io.pravega.controller.store.stream.records.ActiveTxnRecord;
 import io.pravega.controller.store.stream.records.CompletedTxnRecord;
+import io.pravega.controller.store.stream.records.HistoryRecord;
+import io.pravega.controller.store.stream.records.SegmentRecord;
 import io.pravega.controller.store.stream.records.StateRecord;
 import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.records.StreamCutRecord;
@@ -126,6 +128,23 @@ public class ControllerMetadataSerializerTest {
                 .updating(true).build();
         serialized = StreamConfigurationRecord.SERIALIZER.serialize(record).array();
         deserialized = StreamConfigurationRecord.SERIALIZER.deserialize(serialized);
+        assertEquals(record, deserialized);
+    }
+
+    @Test
+    public void segmentRecordTest() throws IOException {
+        SegmentRecord record = SegmentRecord.builder().creationEpoch(0).routingKeyEnd(0.0).routingKeyEnd(0.1).startTime(1L).segmentNumber(1).build();
+        byte[] serialized = SegmentRecord.SERIALIZER.serialize(record).array();
+        SegmentRecord deserialized = SegmentRecord.SERIALIZER.deserialize(serialized);
+        assertEquals(record, deserialized);
+    }
+
+    @Test
+    public void historyRecordTest() throws IOException {
+        List<Integer> segments = Lists.newArrayList(1, 2, 3);
+        HistoryRecord record = HistoryRecord.builder().epoch(0).scaleTime(System.currentTimeMillis()).segments(segments).build();
+        byte[] serialized = HistoryRecord.SERIALIZER.serialize(record).array();
+        HistoryRecord deserialized = HistoryRecord.SERIALIZER.deserialize(serialized);
         assertEquals(record, deserialized);
     }
 }

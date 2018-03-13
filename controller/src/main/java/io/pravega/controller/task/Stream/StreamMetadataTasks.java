@@ -588,20 +588,20 @@ public class StreamMetadataTasks extends TaskBase {
                 runOnlyIfStarted,
                 context,
                 executor), executor)
-                .thenCompose(response -> streamMetadataStore.setState(scaleInput.getScope(), scaleInput.getStream(), State.SCALING, context, executor)
-                        .thenApply(updated -> response))
-                .thenCompose(response -> notifyNewSegments(scaleInput.getScope(), scaleInput.getStream(), response.getSegmentsCreated(), context)
+                .thenCompose(response -> streamMetadataStore.setState(scaleInput.getScope(), scaleInput.getStream(),
+                        State.SCALING, context, executor)
+                    .thenCompose(v -> streamMetadataStore.scaleCreateNewSegments(scaleInput.getScope(),
+                        scaleInput.getStream(), context, executor))
+                    .thenCompose(v -> notifyNewSegments(scaleInput.getScope(), scaleInput.getStream(),
+                        response.getSegmentsCreated(), context)
                         .thenCompose(x -> {
                             assert !response.getSegmentsCreated().isEmpty();
 
-                            long scaleTs = response.getSegmentsCreated().get(0).getStart();
-
-                            return withRetries(() -> streamMetadataStore.scaleNewSegmentsCreated(scaleInput.getScope(), scaleInput.getStream(),
-                                    scaleInput.getSegmentsToSeal(), response.getSegmentsCreated(), response.getActiveEpoch(),
-                                    scaleTs, context, executor), executor);
+                            return withRetries(() -> streamMetadataStore.scaleNewSegmentsCreated(scaleInput.getScope(),
+                                    scaleInput.getStream(), context, executor), executor);
                         })
                         .thenCompose(x -> tryCompleteScale(scaleInput.getScope(), scaleInput.getStream(), response.getActiveEpoch(), context))
-                        .thenApply(y -> response.getSegmentsCreated()));
+                        .thenApply(y -> response.getSegmentsCreated())));
     }
 
     /**
@@ -609,31 +609,48 @@ public class StreamMetadataTasks extends TaskBase {
      * against previous epoch. If so, it will proceed to seal old segments and then complete partial metadata records.
      * @param scope scope
      * @param stream stream
-     * @param epoch epoch
+     * @param activeEpoch active epoch
      * @param context operation context
      * @return returns true if it was able to complete scale. false otherwise
      */
-    public CompletableFuture<Boolean> tryCompleteScale(String scope, String stream, int epoch, OperationContext context) {
+    public CompletableFuture<Boolean> tryCompleteScale(String scope, String stream, int activeEpoch, OperationContext context) {
         // Note: if we cant delete old epoch -- txns against old segments are ongoing..
         // if we can delete old epoch, then only do we proceed to subsequent steps
-        return withRetries(() -> streamMetadataStore.tryDeleteEpochIfScaling(scope, stream, epoch, context, executor), executor)
+        return withRetries(() -> streamMetadataStore.tryDeleteEpochIfScaling(scope, stream, activeEpoch, context, executor), executor)
                 .thenCompose(response -> {
                     if (!response.isDeleted()) {
                         return CompletableFuture.completedFuture(false);
                     }
                     assert !response.getSegmentsCreated().isEmpty() && !response.getSegmentsSealed().isEmpty();
 
-                    long scaleTs = response.getSegmentsCreated().get(0).getStart();
                     return notifySealedSegments(scope, stream, response.getSegmentsSealed())
                             .thenCompose(x -> getSealedSegmentsSize(scope, stream, response.getSegmentsSealed()))
                             .thenCompose(map ->
-                                    withRetries(() -> streamMetadataStore.scaleSegmentsSealed(scope, stream, map,
-                                            response.getSegmentsCreated(), epoch, scaleTs, context, executor), executor)
+                                    withRetries(() -> streamMetadataStore.scaleSegmentsSealed(scope, stream, map, context, executor), executor)
                                     .thenApply(z -> {
-                                        log.info("scale processing for {}/{} epoch {} completed.", scope, stream, epoch);
+                                        log.info("scale processing for {}/{} epoch {} completed.", scope, stream, activeEpoch);
                                         return true;
                                     }));
                 });
+    }
+
+    /**
+     * Reset state of stream to ACTIVE if it matches the supplied state.
+     * @param scope scope
+     * @param stream stream
+     * @param state stream state to match
+     * @param context operation context
+     * @return Future which when completes will have reset the state or failed with appropriate exception.
+     */
+    public CompletableFuture<Void> resetStateIfMatches(String scope, String stream, State state, OperationContext context) {
+        return Futures.toVoid(streamMetadataStore.getState(scope, stream, true, context, executor)
+                .thenCompose(currState -> {
+                    if (currState.equals(state)) {
+                        return streamMetadataStore.setState(scope, stream, State.ACTIVE, context, this.executor);
+                    } else {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                }));
     }
 
     @VisibleForTesting

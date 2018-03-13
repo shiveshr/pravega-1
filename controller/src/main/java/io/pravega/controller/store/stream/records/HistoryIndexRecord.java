@@ -11,8 +11,6 @@ package io.pravega.controller.store.stream.records;
 
 import io.pravega.common.util.BitConverter;
 import lombok.Data;
-import org.apache.commons.lang3.tuple.ImmutablePair;
-import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.Optional;
 
@@ -29,15 +27,15 @@ public class HistoryIndexRecord {
     private final int historyOffset;
 
     public static Optional<HistoryIndexRecord> readRecord(final byte[] indexTable, final int epoch) {
-        if ((epoch + 1) * INDEX_RECORD_SIZE > indexTable.length) {
+        if ((epoch + 1) * INDEX_RECORD_SIZE > indexTable.length || epoch < 0) {
             return Optional.empty();
         } else {
             return Optional.of(parse(indexTable, epoch));
         }
     }
 
-    public static Optional<HistoryIndexRecord> readLatestRecord(final byte[] indexTable) {
-        return readRecord(indexTable, indexTable.length / HistoryIndexRecord.INDEX_RECORD_SIZE - 1);
+    public static Optional<HistoryIndexRecord> readLatestRecord(final byte[] historyIndex) {
+        return readRecord(historyIndex, historyIndex.length / HistoryIndexRecord.INDEX_RECORD_SIZE - 1);
     }
 
     public static Optional<HistoryIndexRecord> search(final long timestamp, final byte[] indexTable) {
@@ -47,7 +45,7 @@ public class HistoryIndexRecord {
     }
 
     private static HistoryIndexRecord parse(final byte[] bytes, int epoch) {
-        int offset = epoch * INDEX_RECORD_SIZE - 1;
+        int offset = epoch * INDEX_RECORD_SIZE;
         final long eventTime = BitConverter.readLong(bytes, offset);
         final int historyOffset = BitConverter.readInt(bytes, offset + Long.BYTES);
         return new HistoryIndexRecord(epoch, eventTime, historyOffset);
@@ -61,7 +59,7 @@ public class HistoryIndexRecord {
             return Optional.empty();
         }
 
-        final int epoch = ((lower + upper) / 2);
+        final int epoch = (lower + upper) / 2;
 
         final HistoryIndexRecord record = HistoryIndexRecord.readRecord(indexTable, epoch).get();
 

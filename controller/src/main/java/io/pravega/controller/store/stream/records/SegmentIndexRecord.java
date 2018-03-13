@@ -16,7 +16,7 @@ import java.util.Optional;
 
 @Data
 /**
- * Class corresponding to a record/row in SegmentIndex table.
+ * Class corresponding to a record/row in SegmentIndex.
  * Each row is fixed size
  * Row: [offset-in-Segment-table]
  */
@@ -26,7 +26,7 @@ public class SegmentIndexRecord {
     private final int segmentOffset;
 
     public static Optional<SegmentIndexRecord> readRecord(final byte[] indexTable, final int segmentNumber) {
-        if ((segmentNumber + 1) * INDEX_RECORD_SIZE > indexTable.length) {
+        if ((segmentNumber + 1) * INDEX_RECORD_SIZE > indexTable.length || segmentNumber < 0) {
             return Optional.empty();
         } else {
             return Optional.of(parse(indexTable, segmentNumber));
@@ -34,7 +34,7 @@ public class SegmentIndexRecord {
     }
 
     public static Optional<SegmentIndexRecord> readLatestRecord(final byte[] indexTable) {
-        return readRecord(indexTable, indexTable.length / INDEX_RECORD_SIZE);
+        return readRecord(indexTable, indexTable.length / INDEX_RECORD_SIZE - 1);
     }
 
     private static SegmentIndexRecord parse(final byte[] bytes, int segmentNumber) {
@@ -45,8 +45,12 @@ public class SegmentIndexRecord {
 
     public byte[] toByteArray() {
         byte[] b = new byte[INDEX_RECORD_SIZE];
-        BitConverter.writeInt(b, Integer.BYTES, segmentOffset);
+        BitConverter.writeInt(b, 0, segmentOffset);
 
         return b;
+    }
+
+    int getIndexOffset() {
+        return segmentNumber * INDEX_RECORD_SIZE;
     }
 }

@@ -54,13 +54,19 @@ public class TruncateStreamTask implements StreamTask<TruncateStreamEvent> {
         String stream = request.getStream();
 
         return streamMetadataStore.getTruncationRecord(scope, stream, true, context, executor)
-                .thenCompose(property -> {
-                    if (!property.isUpdating()) {
-                        throw new TaskExceptions.StartException("Truncate Stream not started yet.");
-                    } else {
-                        return processTruncate(scope, stream, property, context);
-                    }
-                });
+                .thenCompose(property -> streamMetadataStore.getState(scope,  stream, true, context, executor)
+                    .thenCompose(state -> {
+                        if (!property.isUpdating()) {
+                            if (state == State.TRUNCATING) {
+                                log.debug("Truncate task already complete for stream {}/{}. Resetting state back to ACTIVE.", scope, stream);
+                                return Futures.toVoid(streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor));
+                            } else {
+                                throw new TaskExceptions.StartException("Truncate Stream not started yet.");
+                            }
+                        } else {
+                            return processTruncate(scope, stream, property, context);
+                        }
+                }));
     }
 
     private CompletableFuture<Void> processTruncate(String scope, String stream, StreamTruncationRecord truncationRecord,
