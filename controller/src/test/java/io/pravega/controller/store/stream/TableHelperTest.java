@@ -11,17 +11,14 @@ package io.pravega.controller.store.stream;
 
 import com.google.common.collect.Lists;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
-import io.pravega.controller.store.stream.tables.SegmentRecord;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 import io.pravega.controller.store.stream.tables.TableHelper;
 import io.pravega.test.common.AssertExtensions;
-import org.junit.Assert;
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Test;
 
-import java.text.ParseException;
 import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,10 +34,12 @@ public class TableHelperTest {
     public void getSegmentTest() {
         long time = System.currentTimeMillis();
         int epoch = 0;
-        byte[] segmentTable = createSegmentTable(5, time);
-        Assert.assertEquals(segmentTable.length / SegmentRecord.SEGMENT_RECORD_SIZE, 5);
+        Pair<byte[], byte[]> segmentTableAndIndex = createSegmentTableAndIndex(5, time);
+        byte[] segmentTable = segmentTableAndIndex.getKey();
+        byte[] segmentIndex = segmentTableAndIndex.getValue();
+        assertEquals(TableHelper.getSegmentCount(segmentIndex, segmentTable), 5);
 
-        Segment segment = TableHelper.getSegment(0, segmentTable);
+        Segment segment = TableHelper.getSegment(0, segmentIndex, segmentTable);
         assertEquals(segment.getNumber(), 0);
         assertEquals(segment.getStart(), time);
         assertEquals(segment.getKeyStart(), 0, 0);
@@ -48,210 +47,75 @@ public class TableHelperTest {
 
         time = System.currentTimeMillis();
         epoch++;
-        segmentTable = updateSegmentTable(segmentTable, epoch, 5, time);
-        assertEquals(segmentTable.length / SegmentRecord.SEGMENT_RECORD_SIZE, 10);
+        segmentTableAndIndex = updateSegmentTableAndIndex(segmentIndex, segmentTable, 5, epoch, time);
+        segmentTable = segmentTableAndIndex.getKey();
+        segmentIndex = segmentTableAndIndex.getValue();
+        assertEquals(TableHelper.getSegmentCount(segmentIndex, segmentTable), 10);
 
-        segment = TableHelper.getSegment(9, segmentTable);
+        segment = TableHelper.getSegment(9, segmentIndex, segmentTable);
         assertEquals(segment.getNumber(), 9);
         assertEquals(segment.getStart(), time);
         assertEquals(segment.getKeyStart(), 1.0 / 5 * 4, 0);
         assertEquals(segment.getKeyEnd(), 1.0, 0);
+
+        // Test with updated index but stale segment table
+        time = System.currentTimeMillis();
+        segmentTableAndIndex = updateSegmentTableAndIndex(segmentIndex, segmentTable, 5, 2, time);
+        final byte[] segmentIndex2 = segmentTableAndIndex.getValue();
+
+        final byte[] segmentTablecopy = segmentTable;
+        AssertExtensions.assertThrows(StoreException.class, () -> TableHelper.getSegment(10, segmentIndex2, segmentTablecopy));
+        assertEquals(10, TableHelper.getSegmentCount(segmentIndex2, segmentTable));
+
+        segmentTableAndIndex = updateSegmentTableAndIndex(segmentIndex2, segmentTable, 5, 2, time);
+        byte[] segmentTable3 = segmentTableAndIndex.getKey();
+        byte[] segmentIndex3 = segmentTableAndIndex.getValue();
+
+        segment = TableHelper.getSegment(10, segmentIndex3, segmentTable3);
+        assertEquals(segment.getNumber(), 10);
+        assertEquals(15, TableHelper.getSegmentCount(segmentIndex3, segmentTable3));
     }
 
     @Test
     public void getActiveSegmentsTest() {
         final List<Integer> startSegments = Lists.newArrayList(0, 1, 2, 3, 4);
         long timestamp = System.currentTimeMillis();
-
-        byte[] indexTable = TableHelper.createIndexTable(timestamp);
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, startSegments);
-        List<Integer> activeSegments = TableHelper.getActiveSegments(historyTable);
+        byte[] historyIndex = TableHelper.createHistoryIndex(timestamp);
+        List<Integer> activeSegments = TableHelper.getActiveSegments(historyIndex, historyTable);
         assertEquals(activeSegments, startSegments);
 
         List<Integer> newSegments = Lists.newArrayList(5, 6, 7, 8, 9);
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp, historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments);
-        activeSegments = TableHelper.getActiveSegments(historyTable);
+        timestamp = timestamp + 5;
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp, historyTable.length);
+        historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
+        activeSegments = TableHelper.getActiveSegments(historyIndex, historyTable);
         assertEquals(activeSegments, startSegments);
 
-        int epoch = TableHelper.getActiveEpoch(historyTable).getKey();
+        int epoch = TableHelper.getActiveEpoch(historyIndex, historyTable).getKey();
         assertEquals(0, epoch);
-        epoch = TableHelper.getLatestEpoch(historyTable).getKey();
+        epoch = TableHelper.getLatestEpoch(historyIndex, historyTable).getEpoch();
         assertEquals(1, epoch);
 
-        HistoryRecord partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp + 2);
+        timestamp = timestamp + 5;
+        HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
-        activeSegments = TableHelper.getActiveSegments(historyTable);
+        activeSegments = TableHelper.getActiveSegments(historyIndex, historyTable);
         assertEquals(activeSegments, newSegments);
 
-        activeSegments = TableHelper.getActiveSegments(timestamp, new byte[0], historyTable, null, null);
+        activeSegments = TableHelper.getActiveSegments(0, historyIndex, historyTable, null, null, null);
         assertEquals(startSegments, activeSegments);
 
-        activeSegments = TableHelper.getActiveSegments(0, new byte[0], historyTable, null, null);
+        activeSegments = TableHelper.getActiveSegments(timestamp - 1, historyIndex, historyTable, null, null, null);
         assertEquals(startSegments, activeSegments);
 
-        activeSegments = TableHelper.getActiveSegments(timestamp - 1, new byte[0], historyTable, null, null);
-        assertEquals(startSegments, activeSegments);
-
-        activeSegments = TableHelper.getActiveSegments(timestamp + 1, new byte[0], historyTable, null, null);
-        assertEquals(startSegments, activeSegments);
-
-        activeSegments = TableHelper.getActiveSegments(timestamp + 2, new byte[0], historyTable, null, null);
-        assertEquals(newSegments, activeSegments);
-
-        activeSegments = TableHelper.getActiveSegments(timestamp + 3, new byte[0], historyTable, null, null);
+        activeSegments = TableHelper.getActiveSegments(timestamp + 1, historyIndex, historyTable, null, null, null);
         assertEquals(newSegments, activeSegments);
     }
 
     private Segment getSegment(int number, List<Segment> segments) {
         return segments.stream().filter(x -> x.getNumber() == number).findAny().get();
-    }
-
-    @Test(timeout = 10000)
-    public void testSegmentCreationBeforePreviousScale() throws ParseException {
-        List<Segment> segments = new ArrayList<>();
-        List<Integer> newSegments = Lists.newArrayList(0, 1);
-        // create stream
-        long timestamp = 1503933145366L;
-        Segment zero = new Segment(0, 0, timestamp, 0, 0.5);
-        segments.add(zero);
-        Segment one = new Segment(1, 0, timestamp, 0.5, 1.0);
-        segments.add(one);
-
-        byte[] historyTable = TableHelper.createHistoryTable(timestamp, newSegments);
-        byte[] indexTable = TableHelper.createIndexTable(timestamp);
-
-        // scale up 1... 0 -> 2, 3
-        int numOfSplits = 2;
-        double delta = (zero.getKeyEnd() - zero.getKeyStart()) / numOfSplits;
-
-        ArrayList<AbstractMap.SimpleEntry<Double, Double>> simpleEntries = new ArrayList<>();
-        for (int i = 0; i < numOfSplits; i++) {
-            simpleEntries.add(new AbstractMap.SimpleEntry<>(zero.getKeyStart() + delta * i,
-                    zero.getKeyStart() + (delta * (i + 1))));
-        }
-
-        // create segments before scale
-        Segment two = new Segment(2, 1, 1503933266113L, simpleEntries.get(0).getKey(), simpleEntries.get(0).getValue());
-        segments.add(two);
-        Segment three = new Segment(3, 1, 1503933266113L, simpleEntries.get(1).getKey(), simpleEntries.get(1).getValue());
-        segments.add(three);
-
-        newSegments = Lists.newArrayList(1, 2, 3);
-
-        // add partial record to history table
-        indexTable = TableHelper.updateIndexTable(indexTable,
-                1503933266113L,
-                historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments);
-
-        HistoryRecord partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-
-        timestamp = 1503933266862L;
-
-        // complete record in history table by adding time
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
-        HistoryRecord historyRecord = HistoryRecord.readLatestRecord(historyTable, false).get();
-
-        // scale up 2.. 1 -> 4, 5
-        delta = (one.getKeyEnd() - one.getKeyStart()) / numOfSplits;
-
-        simpleEntries = new ArrayList<>();
-        for (int i = 0; i < numOfSplits; i++) {
-            simpleEntries.add(new AbstractMap.SimpleEntry<>(one.getKeyStart() + delta * i,
-                    one.getKeyStart() + (delta * (i + 1))));
-        }
-        // create segments before scale
-        Segment four = new Segment(4, 2, 1503933266188L, simpleEntries.get(0).getKey(), simpleEntries.get(0).getValue());
-        segments.add(four);
-
-        Segment five = new Segment(5, 2, 1503933266188L, simpleEntries.get(1).getKey(), simpleEntries.get(1).getValue());
-        segments.add(five);
-
-        newSegments = Lists.newArrayList(2, 3, 4, 5);
-
-        // add partial record to history table
-        indexTable = TableHelper.updateIndexTable(indexTable,
-                1503933266188L,
-                historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments);
-
-        partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-        // Notice: segment was created at timestamp but we are recording its entry in history table at timestamp + 10000
-        timestamp = 1503933288726L;
-
-        // complete record in history table by adding time
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
-        historyRecord = HistoryRecord.readLatestRecord(historyTable, false).get();
-
-        // scale up 3.. 5 -> 6, 7
-        delta = (five.getKeyEnd() - five.getKeyStart()) / numOfSplits;
-
-        simpleEntries = new ArrayList<>();
-        for (int i = 0; i < numOfSplits; i++) {
-            simpleEntries.add(new AbstractMap.SimpleEntry<>(five.getKeyStart() + delta * i,
-                    five.getKeyStart() + (delta * (i + 1))));
-        }
-
-        // create new segments
-        Segment six = new Segment(6, 3, 1503933409076L, simpleEntries.get(0).getKey(), simpleEntries.get(0).getValue());
-        segments.add(six);
-
-        Segment seven = new Segment(7, 3, 1503933409076L, simpleEntries.get(1).getKey(), simpleEntries.get(1).getValue());
-        segments.add(seven);
-
-        newSegments = Lists.newArrayList(2, 3, 4, 6, 7);
-        // create partial record in history table
-        indexTable = TableHelper.updateIndexTable(indexTable,
-                timestamp,
-                historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments);
-
-        partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-
-        timestamp = 1503933409806L;
-        // find successor candidates before completing scale.
-        List<Integer> candidates5 = TableHelper.findSegmentSuccessorCandidates(five,
-                indexTable,
-                historyTable);
-
-        assertTrue(candidates5.containsAll(Arrays.asList(2, 3, 4, 6, 7)));
-        // complete record in history table by adding time
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
-
-        // verify successor candidates after completing history record
-        candidates5 = TableHelper.findSegmentSuccessorCandidates(five,
-                indexTable,
-                historyTable);
-        assertTrue(candidates5.containsAll(Arrays.asList(2, 3, 4, 6, 7)));
-
-        // scale down 6, 7 -> 8
-
-        // scale down
-        timestamp = 1503933560447L;
-        // add another scale
-        Segment eight = new Segment(8, 3, timestamp, six.keyStart, seven.keyEnd);
-        segments.add(eight);
-
-        newSegments = Lists.newArrayList(2, 3, 4, 8);
-        indexTable = TableHelper.updateIndexTable(indexTable,
-                timestamp,
-                historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments);
-
-        partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-        timestamp = 1503933560448L;
-        // complete scale
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
-        historyRecord = HistoryRecord.readLatestRecord(historyTable, false).get();
-
-        // verify successors again after a new scale entry comes in
-        candidates5 = TableHelper.findSegmentSuccessorCandidates(five,
-                indexTable,
-                historyTable);
-
-        assertTrue(candidates5.containsAll(Arrays.asList(2, 3, 4, 6, 7)));
     }
 
     @Test
@@ -300,7 +164,9 @@ public class TableHelperTest {
         assertEquals(successors, new ArrayList<Integer>());
 
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, newSegments);
-        byte[] indexTable = TableHelper.createIndexTable(timestamp);
+        byte[] historyIndex = TableHelper.createHistoryIndex(timestamp);
+
+        int nextHistoryOffset = historyTable.length;
 
         // 3, 4 -> 5
         epoch++;
@@ -309,13 +175,13 @@ public class TableHelperTest {
         Segment five = new Segment(5, epoch, timestamp, 0.6, 1);
         segments.add(five);
 
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp, historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp, nextHistoryOffset);
+        historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
 
         // check predecessor segment in partial record
         predecessors = TableHelper.getOverlaps(five,
                 TableHelper.findSegmentPredecessorCandidates(five,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
@@ -323,7 +189,7 @@ public class TableHelperTest {
         // check that segment from partial record is returned as successor
         successors = TableHelper.getOverlaps(three,
                 TableHelper.findSegmentSuccessorCandidates(three,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
@@ -331,12 +197,11 @@ public class TableHelperTest {
         assertEquals(predecessors, Lists.newArrayList(3, 4));
         assertEquals(successors, Lists.newArrayList(5));
 
-        HistoryRecord partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-        // Notice: segment was created at timestamp but we are recording its entry in history table at timestamp + 5
-        timestamp = timestamp + 5;
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
+        HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
         // 1 -> 6,7.. 2,5 -> 8
+        nextHistoryOffset = historyTable.length;
         epoch++;
         newSegments = Lists.newArrayList(0, 6, 7, 8);
         timestamp = timestamp + 10;
@@ -347,20 +212,20 @@ public class TableHelperTest {
         Segment eight = new Segment(8, epoch, timestamp, 0.4, 1);
         segments.add(eight);
 
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp, historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp, nextHistoryOffset);
+        historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
 
         // check that previous partial record is not a regular record and its successor and predecessors are returned successfully
         predecessors = TableHelper.getOverlaps(five,
                 TableHelper.findSegmentPredecessorCandidates(five,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
                         .collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(five,
                 TableHelper.findSegmentSuccessorCandidates(five,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
@@ -368,11 +233,12 @@ public class TableHelperTest {
         assertEquals(predecessors, Lists.newArrayList(3, 4));
         assertEquals(successors, Lists.newArrayList(8));
 
-        partial = HistoryRecord.readLatestRecord(historyTable, false).get();
+        partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
         timestamp = timestamp + 5;
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
+        historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
         // 7 -> 9,10.. 8 -> 10, 11
+        nextHistoryOffset = historyTable.length;
         epoch++;
         newSegments = Lists.newArrayList(0, 6, 9, 10, 11);
         timestamp = timestamp + 10;
@@ -383,23 +249,23 @@ public class TableHelperTest {
         Segment eleven = new Segment(11, epoch, timestamp, 0.6, 1);
         segments.add(eleven);
 
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp, historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments);
-        partial = HistoryRecord.readLatestRecord(historyTable, false).get();
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp, nextHistoryOffset);
+        historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
+        partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
         timestamp = timestamp + 5;
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp);
+        historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
         // find predecessor and successor with index table being stale
         predecessors = TableHelper.getOverlaps(ten,
                 TableHelper.findSegmentPredecessorCandidates(ten,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
                         .collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(seven,
                 TableHelper.findSegmentSuccessorCandidates(seven,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
@@ -414,14 +280,14 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(zero,
                 TableHelper.findSegmentPredecessorCandidates(zero,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
                         .collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(zero,
                 TableHelper.findSegmentSuccessorCandidates(zero,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
@@ -432,14 +298,14 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(one,
                 TableHelper.findSegmentPredecessorCandidates(one,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
                         .collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(one,
                 TableHelper.findSegmentSuccessorCandidates(one,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments))
@@ -449,13 +315,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(two,
                 TableHelper.findSegmentPredecessorCandidates(two,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(two,
                 TableHelper.findSegmentSuccessorCandidates(two,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -464,13 +330,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(three,
                 TableHelper.findSegmentPredecessorCandidates(three,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(three,
                 TableHelper.findSegmentSuccessorCandidates(three,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -479,13 +345,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(four,
                 TableHelper.findSegmentPredecessorCandidates(four,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(four,
                 TableHelper.findSegmentSuccessorCandidates(four,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -494,13 +360,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(five,
                 TableHelper.findSegmentPredecessorCandidates(five,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(five,
                 TableHelper.findSegmentSuccessorCandidates(five,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -509,13 +375,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(six,
                 TableHelper.findSegmentPredecessorCandidates(six,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(six,
                 TableHelper.findSegmentSuccessorCandidates(six,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -524,13 +390,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(seven,
                 TableHelper.findSegmentPredecessorCandidates(seven,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(seven,
                 TableHelper.findSegmentSuccessorCandidates(seven,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -539,13 +405,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(eight,
                 TableHelper.findSegmentPredecessorCandidates(eight,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(eight,
                 TableHelper.findSegmentSuccessorCandidates(eight,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -554,13 +420,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(nine,
                 TableHelper.findSegmentPredecessorCandidates(nine,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(nine,
                 TableHelper.findSegmentSuccessorCandidates(nine,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -569,13 +435,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(ten,
                 TableHelper.findSegmentPredecessorCandidates(ten,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(ten,
                 TableHelper.findSegmentSuccessorCandidates(ten,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -584,13 +450,13 @@ public class TableHelperTest {
 
         predecessors = TableHelper.getOverlaps(eleven,
                 TableHelper.findSegmentPredecessorCandidates(eleven,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
         successors = TableHelper.getOverlaps(eleven,
                 TableHelper.findSegmentSuccessorCandidates(eleven,
-                        indexTable,
+                        historyIndex,
                         historyTable)
                         .stream()
                         .map(x -> getSegment(x, segments)).collect(Collectors.toList()));
@@ -602,33 +468,35 @@ public class TableHelperTest {
     public void scaleInputValidityTest() {
         long timestamp = System.currentTimeMillis();
 
-        byte[] segmentTable = createSegmentTable(5, timestamp);
+        Pair<byte[], byte[]> segmentTableAndIndex = createSegmentTableAndIndex(5, timestamp);
+        byte[] segmentTable = segmentTableAndIndex.getKey();
+        byte[] segmentIndex = segmentTableAndIndex.getValue();
         final double keyRangeChunk = 1.0 / 5;
 
         List<AbstractMap.SimpleEntry<Double, Double>> newRanges = new ArrayList<>();
         // 1. empty newRanges
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentIndex, segmentTable));
 
         // 2. simple mismatch
         newRanges.add(new AbstractMap.SimpleEntry<>(0.0, keyRangeChunk));
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentIndex, segmentTable));
 
         // 3. simple valid match
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(0.0, 2 * keyRangeChunk));
-        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentTable));
+        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentIndex, segmentTable));
 
         // 4. valid 2 disjoint merges
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(0.0, 2 * keyRangeChunk));
         newRanges.add(new AbstractMap.SimpleEntry<>(3 * keyRangeChunk, 1.0));
-        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1, 3, 4), newRanges, segmentTable));
+        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1, 3, 4), newRanges, segmentIndex, segmentTable));
 
         // 5. valid 1 merge and 1 disjoint
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(keyRangeChunk, 2 * keyRangeChunk));
         newRanges.add(new AbstractMap.SimpleEntry<>(3 * keyRangeChunk, 1.0));
-        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(1, 3, 4), newRanges, segmentTable));
+        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(1, 3, 4), newRanges, segmentIndex, segmentTable));
 
         // 6. valid 1 merge, 2 splits
         newRanges = new ArrayList<>();
@@ -637,7 +505,7 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<>(0.7, 0.8));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.8, 0.9));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.9, 1.0));
-        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1, 3, 4), newRanges, segmentTable));
+        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1, 3, 4), newRanges, segmentIndex, segmentTable));
 
         // 7. 1 merge, 1 split and 1 invalid split
         newRanges = new ArrayList<>();
@@ -646,7 +514,7 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<>(0.7, 0.8));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.8, 0.9));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.9, 0.99));
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1, 3, 4), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1, 3, 4), newRanges, segmentIndex, segmentTable));
 
         // 8. valid unsorted segments to seal
         newRanges = new ArrayList<>();
@@ -655,7 +523,7 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<>(0.7, 0.8));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.8, 0.9));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.9, 1.0));
-        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(4, 0, 1, 3), newRanges, segmentTable));
+        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(4, 0, 1, 3), newRanges, segmentIndex, segmentTable));
 
         // 9. valid unsorted new ranges
         newRanges = new ArrayList<>();
@@ -664,65 +532,66 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<>(0.7, 0.8));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.0, 2 * keyRangeChunk));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.8, 0.9));
-        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(4, 0, 1, 3), newRanges, segmentTable));
+        assertTrue(TableHelper.isScaleInputValid(Lists.newArrayList(4, 0, 1, 3), newRanges, segmentIndex, segmentTable));
 
         // 10. invalid input range low == high
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(0.0, 0.2));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.2, 0.2));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.2, 0.4));
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentIndex, segmentTable));
 
         // 11. invalid input range low > high
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(0.0, 0.2));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.3, 0.2));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.2, 0.4));
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(0, 1), newRanges, segmentIndex, segmentTable));
 
         // 12. invalid overlapping key ranges
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(0.2, 0.4));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.3, 3 * keyRangeChunk));
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1, 2), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1, 2), newRanges, segmentIndex, segmentTable));
 
         // 13. invalid overlapping key ranges -- a contains b
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(0.2, 0.4));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.3, 0.33));
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1), newRanges, segmentIndex, segmentTable));
 
         // 14. invalid overlapping key ranges -- b contains a (with b.low == a.low)
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(0.2, 0.33));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.2, 0.4));
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1), newRanges, segmentIndex, segmentTable));
 
         // 15. invalid overlapping key ranges b.low < a.high
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(0.2, 0.35));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.3, 0.4));
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1), newRanges, segmentIndex, segmentTable));
 
         // 16. invalid overlapping key ranges.. a.high < b.low
         newRanges = new ArrayList<>();
         newRanges.add(new AbstractMap.SimpleEntry<>(0.2, 0.25));
         newRanges.add(new AbstractMap.SimpleEntry<>(0.3, 0.4));
-        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1), newRanges, segmentTable));
+        assertFalse(TableHelper.isScaleInputValid(Lists.newArrayList(1), newRanges, segmentIndex, segmentTable));
     }
 
-    @Test(timeout = 10000)
+    @Test
     public void truncationTest() {
         final List<Integer> startSegments = Lists.newArrayList(0, 1);
         int epoch = 0;
         // epoch 0
         long timestamp = System.currentTimeMillis();
-        byte[] segmentTable = createSegmentTable(2, timestamp);
-
+        Pair<byte[], byte[]> segmentTableAndIndex = createSegmentTableAndIndex(2, timestamp);
+        byte[] segmentTable = segmentTableAndIndex.getKey();
+        byte[] segmentIndex = segmentTableAndIndex.getValue();
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, startSegments);
-        byte[] indexTable = TableHelper.createIndexTable(timestamp);
+        byte[] historyIndex = TableHelper.createHistoryIndex(timestamp);
 
-        List<Integer> activeSegments = TableHelper.getActiveSegments(historyTable);
+        List<Integer> activeSegments = TableHelper.getActiveSegments(historyIndex, historyTable);
         assertEquals(activeSegments, startSegments);
 
         // epoch 1
@@ -732,11 +601,13 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>(0.5, 0.75));
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>(0.75, 1.0));
 
-        segmentTable = updateSegmentTable(segmentTable, epoch, newRanges, timestamp + 1);
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp + 1, historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments1);
-        HistoryRecord partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp + 1);
+        segmentTableAndIndex = updateSegmentTableAndIndex(2, epoch, segmentIndex, segmentTable, newRanges, timestamp + 1);
+        segmentIndex = segmentTableAndIndex.getValue();
+        segmentTable = segmentTableAndIndex.getKey();
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp + 1, historyTable.length);
+        historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments1);
+        HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 1);
 
         // epoch 2
         epoch++;
@@ -745,11 +616,13 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>(0.75, (0.75 + 1.0) / 2));
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>((0.75 + 1.0) / 2, 1.0));
 
-        segmentTable = updateSegmentTable(segmentTable, epoch, newRanges, timestamp + 2);
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp + 2, historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments2);
-        partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp + 2);
+        segmentTableAndIndex = updateSegmentTableAndIndex(4, epoch, segmentIndex, segmentTable, newRanges, timestamp + 2);
+        segmentIndex = segmentTableAndIndex.getValue();
+        segmentTable = segmentTableAndIndex.getKey();
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp + 2, historyTable.length);
+        historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments2);
+        partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 2);
 
         // epoch 3
         epoch++;
@@ -758,11 +631,13 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>(0.5, (0.75 + 0.5) / 2));
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>((0.75 + 0.5) / 2, 0.75));
 
-        segmentTable = updateSegmentTable(segmentTable, epoch, newRanges, timestamp + 3);
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp + 3, historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments3);
-        partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp + 3);
+        segmentTableAndIndex = updateSegmentTableAndIndex(6, epoch, segmentIndex, segmentTable, newRanges, timestamp + 3);
+        segmentIndex = segmentTableAndIndex.getValue();
+        segmentTable = segmentTableAndIndex.getKey();
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp + 3, historyTable.length);
+        historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments3);
+        partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 3);
 
         // epoch 4
         epoch++;
@@ -771,17 +646,19 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>(0.0, (0.0 + 0.5) / 2));
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>((0.0 + 0.5) / 2, 0.5));
 
-        segmentTable = updateSegmentTable(segmentTable, epoch, newRanges, timestamp + 4);
-        indexTable = TableHelper.updateIndexTable(indexTable, timestamp + 4, historyTable.length);
-        historyTable = TableHelper.addPartialRecordToHistoryTable(historyTable, newSegments4);
-        partial = HistoryRecord.readLatestRecord(historyTable, false).get();
-        historyTable = TableHelper.completePartialRecordInHistoryTable(historyTable, partial, timestamp + 4);
+        segmentTableAndIndex = updateSegmentTableAndIndex(8, epoch, segmentIndex, segmentTable, newRanges, timestamp + 4);
+        segmentIndex = segmentTableAndIndex.getValue();
+        segmentTable = segmentTableAndIndex.getKey();
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp + 4, historyTable.length);
+        historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments4);
+        partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 4);
 
         // happy day
         Map<Integer, Long> streamCut1 = new HashMap<>();
         streamCut1.put(0, 1L);
         streamCut1.put(1, 1L);
-        StreamTruncationRecord truncationRecord = TableHelper.computeTruncationRecord(indexTable, historyTable,
+        StreamTruncationRecord truncationRecord = TableHelper.computeTruncationRecord(historyIndex, historyTable, segmentIndex,
                 segmentTable, streamCut1, StreamTruncationRecord.EMPTY);
 
         assertTrue(truncationRecord.getToDelete().isEmpty());
@@ -795,7 +672,8 @@ public class TableHelperTest {
         streamCut2.put(2, 1L);
         streamCut2.put(4, 1L);
         streamCut2.put(5, 1L);
-        truncationRecord = TableHelper.computeTruncationRecord(indexTable, historyTable, segmentTable, streamCut2, truncationRecord);
+        truncationRecord = TableHelper.computeTruncationRecord(historyIndex, historyTable, segmentIndex, segmentTable,
+                streamCut2, truncationRecord);
         assertTrue(truncationRecord.getToDelete().size() == 2
                 && truncationRecord.getToDelete().contains(1)
                 && truncationRecord.getToDelete().contains(3));
@@ -812,7 +690,7 @@ public class TableHelperTest {
         streamCut3.put(5, 10L);
         streamCut3.put(8, 10L);
         streamCut3.put(9, 10L);
-        truncationRecord = TableHelper.computeTruncationRecord(indexTable, historyTable, segmentTable, streamCut3, truncationRecord);
+        truncationRecord = TableHelper.computeTruncationRecord(historyIndex, historyTable, segmentIndex, segmentTable, streamCut3, truncationRecord);
         assertTrue(truncationRecord.getToDelete().size() == 1
                 && truncationRecord.getToDelete().contains(0));
         assertTrue(truncationRecord.getStreamCut().equals(streamCut3));
@@ -830,13 +708,14 @@ public class TableHelperTest {
         streamCut4.put(5, 1L);
         streamCut4.put(8, 1L);
         streamCut4.put(9, 1L);
-        byte[] finalIndexTable = indexTable;
+        byte[] finalIndexTable = historyIndex;
         byte[] finalHistoryTable = historyTable;
+        byte[] finalSegmentIndex = segmentIndex;
         byte[] finalSegmentTable = segmentTable;
         StreamTruncationRecord finalTruncationRecord = truncationRecord;
         AssertExtensions.assertThrows("",
-                () -> TableHelper.computeTruncationRecord(finalIndexTable, finalHistoryTable, finalSegmentTable, streamCut4, finalTruncationRecord),
-                e -> e instanceof IllegalArgumentException);
+                () -> TableHelper.computeTruncationRecord(finalIndexTable, finalHistoryTable, finalSegmentIndex, finalSegmentTable,
+                        streamCut4, finalTruncationRecord), e -> e instanceof IllegalArgumentException);
 
         Map<Integer, Long> streamCut5 = new HashMap<>();
         streamCut3.put(2, 10L);
@@ -844,11 +723,11 @@ public class TableHelperTest {
         streamCut3.put(5, 10L);
         streamCut3.put(0, 10L);
         AssertExtensions.assertThrows("",
-                () -> TableHelper.computeTruncationRecord(finalIndexTable, finalHistoryTable, finalSegmentTable, streamCut5, finalTruncationRecord),
-                e -> e instanceof IllegalArgumentException);
+                () -> TableHelper.computeTruncationRecord(finalIndexTable, finalHistoryTable, finalSegmentIndex, finalSegmentTable,
+                        streamCut5, finalTruncationRecord), e -> e instanceof IllegalArgumentException);
     }
 
-    private byte[] createSegmentTable(int numSegments, long eventTime) {
+    private Pair<byte[], byte[]> createSegmentTableAndIndex(int numSegments, long eventTime) {
         final double keyRangeChunk = 1.0 / numSegments;
 
         List<AbstractMap.SimpleEntry<Double, Double>> newRanges = IntStream.range(0, numSegments)
@@ -856,23 +735,24 @@ public class TableHelperTest {
                 .map(x -> new AbstractMap.SimpleEntry<>(x * keyRangeChunk, (x + 1) * keyRangeChunk))
                 .collect(Collectors.toList());
 
-        return TableHelper.updateSegmentTable(0, 0, new byte[0], newRanges, eventTime);
+        return TableHelper.createSegmentTableAndIndex(newRanges, eventTime);
     }
 
-    private byte[] updateSegmentTable(byte[] segmentTable, int creationEpoch, int numSegments, long eventTime) {
+    private Pair<byte[], byte[]> updateSegmentTableAndIndex(byte[] segmentIndex, byte[] segmentTable, int numSegments, int newEpoch, long eventTime) {
         final double keyRangeChunk = 1.0 / numSegments;
         List<AbstractMap.SimpleEntry<Double, Double>> newRanges = IntStream.range(0, numSegments)
                 .boxed()
                 .map(x -> new AbstractMap.SimpleEntry<>(x * keyRangeChunk, (x + 1) * keyRangeChunk))
                 .collect(Collectors.toList());
 
-        return updateSegmentTable(segmentTable, creationEpoch, newRanges, eventTime);
+        int startingSegNum = TableHelper.getSegmentCount(segmentIndex, segmentTable);
+        return updateSegmentTableAndIndex(startingSegNum, newEpoch, segmentIndex, segmentTable, newRanges, eventTime);
     }
 
-    private byte[] updateSegmentTable(byte[] segmentTable, int creationEpoch, List<AbstractMap.SimpleEntry<Double, Double>> newRanges, long eventTime) {
-        final int startingSegNum = segmentTable.length / SegmentRecord.SEGMENT_RECORD_SIZE;
+    private Pair<byte[], byte[]> updateSegmentTableAndIndex(int startingSegNum, int newEpoch, byte[] segmentIndex, byte[] segmentTable,
+                                                            List<AbstractMap.SimpleEntry<Double, Double>> newRanges, long eventTime) {
 
-        return TableHelper.updateSegmentTable(startingSegNum, creationEpoch, segmentTable, newRanges, eventTime);
+        return TableHelper.addNewSegmentsToSegmentTableAndIndex(startingSegNum, newEpoch, segmentIndex, segmentTable, newRanges, eventTime);
     }
 
 }

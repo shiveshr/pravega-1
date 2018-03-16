@@ -20,54 +20,50 @@ import java.util.Optional;
  * Each row is fixed size
  * Row: [eventTime, pointer-into-history-table]
  */
-public class IndexRecord {
-    public static final int INDEX_RECORD_SIZE = Long.BYTES + Integer.BYTES;
-
+public class HistoryIndexRecord {
+    private static final int INDEX_RECORD_SIZE = Long.BYTES + Integer.BYTES;
+    private final int epoch;
     private final long eventTime;
-    private final long epoch;
     private final int historyOffset;
 
-    public static Optional<IndexRecord> readRecord(final byte[] indexTable, final int epoch) {
-        int offset = epoch * INDEX_RECORD_SIZE;
-        if (offset >= indexTable.length) {
+    public static Optional<HistoryIndexRecord> readRecord(final byte[] indexTable, final int epoch) {
+        if ((epoch + 1) * INDEX_RECORD_SIZE > indexTable.length || epoch < 0) {
             return Optional.empty();
         } else {
-            return Optional.of(parse(indexTable, offset));
+            return Optional.of(parse(indexTable, epoch));
         }
     }
 
-    public static Optional<IndexRecord> readLatestRecord(final byte[] indexTable) {
-        final int lastIndexedRecordOffset = Integer.max(indexTable.length - IndexRecord.INDEX_RECORD_SIZE, 0);
-        final int epoch = lastIndexedRecordOffset / INDEX_RECORD_SIZE;
-        return readRecord(indexTable, epoch);
+    public static Optional<HistoryIndexRecord> readLatestRecord(final byte[] historyIndex) {
+        return readRecord(historyIndex, historyIndex.length / HistoryIndexRecord.INDEX_RECORD_SIZE - 1);
     }
 
-    public static Optional<IndexRecord> search(final long timestamp, final byte[] indexTable) {
+    public static Optional<HistoryIndexRecord> search(final long timestamp, final byte[] indexTable) {
         final int lower = 0;
-        final int upper = (indexTable.length - IndexRecord.INDEX_RECORD_SIZE) / IndexRecord.INDEX_RECORD_SIZE;
+        final int upper = (indexTable.length - INDEX_RECORD_SIZE) / INDEX_RECORD_SIZE;
         return binarySearchIndex(lower, upper, timestamp, indexTable);
     }
 
-    private static IndexRecord parse(final byte[] bytes, int offset) {
-        final int epoch = offset / INDEX_RECORD_SIZE;
+    private static HistoryIndexRecord parse(final byte[] bytes, int epoch) {
+        int offset = epoch * INDEX_RECORD_SIZE;
         final long eventTime = BitConverter.readLong(bytes, offset);
         final int historyOffset = BitConverter.readInt(bytes, offset + Long.BYTES);
-        return new IndexRecord(eventTime, epoch, historyOffset);
+        return new HistoryIndexRecord(epoch, eventTime, historyOffset);
     }
 
-    private static Optional<IndexRecord> binarySearchIndex(final int lower,
-                                         final int upper,
-                                         final long timestamp,
-                                         final byte[] indexTable) {
+    private static Optional<HistoryIndexRecord> binarySearchIndex(final int lower,
+                                                                  final int upper,
+                                                                  final long timestamp,
+                                                                  final byte[] indexTable) {
         if (upper < lower || indexTable.length == 0) {
             return Optional.empty();
         }
 
-        final int middle = (lower + upper) / 2;
+        final int epoch = (lower + upper) / 2;
 
-        final IndexRecord record = IndexRecord.readRecord(indexTable, middle).get();
+        final HistoryIndexRecord record = HistoryIndexRecord.readRecord(indexTable, epoch).get();
 
-        final Optional<IndexRecord> next = IndexRecord.readRecord(indexTable, middle);
+        final Optional<HistoryIndexRecord> next = HistoryIndexRecord.readRecord(indexTable, epoch + 1);
 
         if (record.getEventTime() <= timestamp) {
             if (!next.isPresent() || (next.get().getEventTime() > timestamp)) {
