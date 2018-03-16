@@ -79,7 +79,7 @@ public class TableHelperTest {
     @Test
     public void getActiveSegmentsTest() {
         final List<Integer> startSegments = Lists.newArrayList(0, 1, 2, 3, 4);
-        long timestamp = System.currentTimeMillis();
+        long timestamp = 1;
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, startSegments);
         byte[] historyIndex = TableHelper.createHistoryIndex(timestamp);
         List<Integer> activeSegments = TableHelper.getActiveSegments(historyIndex, historyTable);
@@ -87,7 +87,7 @@ public class TableHelperTest {
 
         List<Integer> newSegments = Lists.newArrayList(5, 6, 7, 8, 9);
         timestamp = timestamp + 5;
-        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp, historyTable.length);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
         activeSegments = TableHelper.getActiveSegments(historyIndex, historyTable);
         assertEquals(activeSegments, startSegments);
@@ -175,7 +175,7 @@ public class TableHelperTest {
         Segment five = new Segment(5, epoch, timestamp, 0.6, 1);
         segments.add(five);
 
-        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp, nextHistoryOffset);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, nextHistoryOffset);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
 
         // check predecessor segment in partial record
@@ -212,7 +212,7 @@ public class TableHelperTest {
         Segment eight = new Segment(8, epoch, timestamp, 0.4, 1);
         segments.add(eight);
 
-        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp, nextHistoryOffset);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, nextHistoryOffset);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
 
         // check that previous partial record is not a regular record and its successor and predecessors are returned successfully
@@ -249,7 +249,7 @@ public class TableHelperTest {
         Segment eleven = new Segment(11, epoch, timestamp, 0.6, 1);
         segments.add(eleven);
 
-        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp, nextHistoryOffset);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, nextHistoryOffset);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
         timestamp = timestamp + 5;
@@ -604,7 +604,7 @@ public class TableHelperTest {
         segmentTableAndIndex = updateSegmentTableAndIndex(2, epoch, segmentIndex, segmentTable, newRanges, timestamp + 1);
         segmentIndex = segmentTableAndIndex.getValue();
         segmentTable = segmentTableAndIndex.getKey();
-        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp + 1, historyTable.length);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments1);
         HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 1);
@@ -619,7 +619,7 @@ public class TableHelperTest {
         segmentTableAndIndex = updateSegmentTableAndIndex(4, epoch, segmentIndex, segmentTable, newRanges, timestamp + 2);
         segmentIndex = segmentTableAndIndex.getValue();
         segmentTable = segmentTableAndIndex.getKey();
-        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp + 2, historyTable.length);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments2);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 2);
@@ -634,7 +634,7 @@ public class TableHelperTest {
         segmentTableAndIndex = updateSegmentTableAndIndex(6, epoch, segmentIndex, segmentTable, newRanges, timestamp + 3);
         segmentIndex = segmentTableAndIndex.getValue();
         segmentTable = segmentTableAndIndex.getKey();
-        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp + 3, historyTable.length);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments3);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 3);
@@ -649,7 +649,7 @@ public class TableHelperTest {
         segmentTableAndIndex = updateSegmentTableAndIndex(8, epoch, segmentIndex, segmentTable, newRanges, timestamp + 4);
         segmentIndex = segmentTableAndIndex.getValue();
         segmentTable = segmentTableAndIndex.getKey();
-        historyIndex = TableHelper.updateHistoryIndex(historyIndex, timestamp + 4, historyTable.length);
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments4);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 4);

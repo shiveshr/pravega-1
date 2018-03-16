@@ -70,13 +70,13 @@ public class HistoryRecord {
     /**
      * Read record from the history table at the specified offset.
      *
+     * @param epoch         epoch to read
      * @param historyTable  history table
      * @param historyIndex  history index
-     * @param epoch         epoch to read
      * @param ignorePartial if set, ignore if the record is partial
      * @return Optional of history record for the epoch if it exists in the table predicated to ignore partial flag.
      */
-    public static Optional<HistoryRecord> readRecord(final byte[] historyIndex, final byte[] historyTable, final int epoch,
+    public static Optional<HistoryRecord> readRecord(final int epoch, final byte[] historyIndex, final byte[] historyTable,
                                                      boolean ignorePartial) {
         Optional<HistoryIndexRecord> historyIndexRecord = HistoryIndexRecord.readRecord(historyIndex, epoch);
 
@@ -115,11 +115,11 @@ public class HistoryRecord {
             return Optional.empty();
         }
 
-        Optional<HistoryRecord> record = readRecord(historyIndex, historyTable, latestIndex.get().getEpoch(), ignorePartial);
+        Optional<HistoryRecord> record = readRecord(latestIndex.get().getEpoch(), historyIndex, historyTable, ignorePartial);
         if (!record.isPresent()) {
             // This can happen if we have the index updated but the history table isnt updated yet. Or the latest record was partial.
             // So fetch the previous indexed record.
-            record = readRecord(historyIndex, historyTable, latestIndex.get().getEpoch() - 1, ignorePartial);
+            record = readRecord(latestIndex.get().getEpoch() - 1, historyIndex, historyTable, ignorePartial);
             assert record.isPresent();
         }
 
@@ -141,7 +141,7 @@ public class HistoryRecord {
      */
     public static Optional<HistoryRecord> fetchNext(final HistoryRecord record, final byte[] historyIndex, final byte[] historyTable,
                                                     boolean ignorePartial) {
-        return readRecord(historyIndex, historyTable, record.epoch + 1, ignorePartial);
+        return readRecord(record.epoch + 1, historyIndex, historyTable, ignorePartial);
     }
 
     /**
@@ -153,7 +153,7 @@ public class HistoryRecord {
      * in the table then return empty.
      */
     public static Optional<HistoryRecord> fetchPrevious(final HistoryRecord record, final byte[] historyIndex, final byte[] historyTable) {
-        return readRecord(historyIndex, historyTable, record.epoch - 1, true);
+        return readRecord(record.epoch - 1, historyIndex, historyTable, true);
     }
 
     public static HistoryRecord parse(final byte[] table, final int offset) {

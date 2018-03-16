@@ -589,8 +589,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
         // Ensure that segment.creation time is monotonically increasing after each new scale.
         // because scale time could be supplied by a controller with a skewed clock, we should:
         // take max(scaleTime, lastScaleTime + 1, System.currentTimeMillis)
-        long lastScaleTime = HistoryRecord.readRecord(historyIndex, historyTable, activeEpoch, true)
-                .map(HistoryRecord::getScaleTime).orElse(0L);
+        long lastScaleTime = TableHelper.getEpochScaleTime(activeEpoch, historyIndex, historyTable);
         long scaleEventTime = Math.max(System.currentTimeMillis(), scaleStartTime);
         long segmentCreationTimestamp = Math.max(scaleEventTime, lastScaleTime + 1);
 
@@ -1154,7 +1153,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                                         segmentIndex.getData(), segmentTable.getData());
                                                 return latestSegment.getStart();
                                             })))
-                                    .thenCompose(start -> addIndexRecord(newEpoch, start, offset))
+                                    .thenCompose(start -> addIndexRecord(newEpoch, offset))
                                     .thenCompose(v -> updateHistoryTable(updated))
                                     .whenComplete((r, e) -> {
                                         if (e == null) {
@@ -1254,7 +1253,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
         return segments;
     }
 
-    private CompletableFuture<Void> addIndexRecord(final int newEpoch, final long scaleTime, final int historyOffset) {
+    private CompletableFuture<Void> addIndexRecord(final int newEpoch, final int historyOffset) {
         return getHistoryIndex()
                 .thenCompose(indexTable -> {
                     final Optional<HistoryIndexRecord> lastRecord = HistoryIndexRecord.readLatestRecord(indexTable.getData());
@@ -1263,7 +1262,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                         return CompletableFuture.completedFuture(null);
                     }
 
-                    final byte[] updatedTable = TableHelper.updateHistoryIndex(indexTable.getData(), scaleTime, historyOffset);
+                    final byte[] updatedTable = TableHelper.updateHistoryIndex(indexTable.getData(), historyOffset);
                     final Data<T> updated = new Data<>(updatedTable, indexTable.getVersion());
                     return updateHistoryIndex(updated);
                 });
