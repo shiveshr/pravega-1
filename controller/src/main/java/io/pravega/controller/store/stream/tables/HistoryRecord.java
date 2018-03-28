@@ -15,12 +15,11 @@ import io.pravega.controller.store.stream.tables.serializers.HistoryRecordSerial
 import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
-import lombok.Lombok;
+import lombok.SneakyThrows;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.util.LinkedList;
 import java.util.List;
@@ -59,12 +58,9 @@ public class HistoryRecord {
         this(epoch, segments, Long.MIN_VALUE);
     }
 
+    @SneakyThrows
     public byte[] toByteArray() {
-        try {
-            return SERIALIZER.serialize(this).getCopy();
-        } catch (IOException e) {
-            throw Lombok.sneakyThrow(e);
-        }
+        return SERIALIZER.serialize(this).getCopy();
     }
 
     /**
@@ -156,13 +152,10 @@ public class HistoryRecord {
         return readRecord(record.epoch - 1, historyIndex, historyTable, true);
     }
 
+    @SneakyThrows
     public static HistoryRecord parse(final byte[] table, final int offset) {
         InputStream inputStream = new ByteArrayInputStream(table, offset, table.length - offset);
-        try {
-            return SERIALIZER.deserialize(inputStream);
-        } catch (IOException e) {
-            throw Lombok.sneakyThrow(e);
-        }
+        return SERIALIZER.deserialize(inputStream);
     }
 
     public static List<Pair<Long, List<Integer>>> readAllRecords(byte[] historyIndex, byte[] historyTable) {

@@ -14,10 +14,9 @@ import io.pravega.common.io.serialization.VersionedSerializer;
 import io.pravega.controller.store.stream.tables.serializers.SegmentRecordSerializer;
 import lombok.Builder;
 import lombok.Data;
-import lombok.Lombok;
+import lombok.SneakyThrows;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.io.InputStream;
 import java.util.Optional;
 
@@ -79,25 +78,18 @@ public class SegmentRecord {
         return Optional.empty();
     }
 
+    @SneakyThrows
     private static SegmentRecord parse(final byte[] table, final int offset) {
         InputStream bas = new ByteArrayInputStream(table, offset, table.length - offset);
-        try {
-            return SERIALIZER.deserialize(bas);
-        } catch (IOException e) {
-            throw Lombok.sneakyThrow(e);
-        }
+        return SERIALIZER.deserialize(bas);
     }
 
+    @SneakyThrows
     byte[] toByteArray() {
-        try {
-            return SERIALIZER.serialize(this).getCopy();
-        } catch (IOException e) {
-            throw Lombok.sneakyThrow(e);
-        }
+        return SERIALIZER.serialize(this).getCopy();
     }
 
     public static class SegmentRecordBuilder implements ObjectBuilder<SegmentRecord> {
 
     }
-
 }

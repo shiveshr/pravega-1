@@ -10,6 +10,7 @@
 package io.pravega.controller.store.stream;
 
 import com.google.common.collect.Lists;
+import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 import io.pravega.controller.store.stream.tables.TableHelper;
@@ -35,8 +36,8 @@ public class TableHelperTest {
         long time = System.currentTimeMillis();
         int epoch = 0;
         Pair<byte[], byte[]> segmentTableAndIndex = createSegmentTableAndIndex(5, time);
-        byte[] segmentTable = segmentTableAndIndex.getKey();
-        byte[] segmentIndex = segmentTableAndIndex.getValue();
+        byte[] segmentTable = segmentTableAndIndex.getValue();
+        byte[] segmentIndex = segmentTableAndIndex.getKey();
         assertEquals(TableHelper.getSegmentCount(segmentIndex, segmentTable), 5);
 
         Segment segment = TableHelper.getSegment(0, segmentIndex, segmentTable);
@@ -48,8 +49,8 @@ public class TableHelperTest {
         time = System.currentTimeMillis();
         epoch++;
         segmentTableAndIndex = updateSegmentTableAndIndex(segmentIndex, segmentTable, 5, epoch, time);
-        segmentTable = segmentTableAndIndex.getKey();
-        segmentIndex = segmentTableAndIndex.getValue();
+        segmentTable = segmentTableAndIndex.getValue();
+        segmentIndex = segmentTableAndIndex.getKey();
         assertEquals(TableHelper.getSegmentCount(segmentIndex, segmentTable), 10);
 
         segment = TableHelper.getSegment(9, segmentIndex, segmentTable);
@@ -61,15 +62,15 @@ public class TableHelperTest {
         // Test with updated index but stale segment table
         time = System.currentTimeMillis();
         segmentTableAndIndex = updateSegmentTableAndIndex(segmentIndex, segmentTable, 5, 2, time);
-        final byte[] segmentIndex2 = segmentTableAndIndex.getValue();
+        final byte[] segmentIndex2 = segmentTableAndIndex.getKey();
 
         final byte[] segmentTablecopy = segmentTable;
         AssertExtensions.assertThrows(StoreException.class, () -> TableHelper.getSegment(10, segmentIndex2, segmentTablecopy));
         assertEquals(10, TableHelper.getSegmentCount(segmentIndex2, segmentTable));
 
         segmentTableAndIndex = updateSegmentTableAndIndex(segmentIndex2, segmentTable, 5, 2, time);
-        byte[] segmentTable3 = segmentTableAndIndex.getKey();
-        byte[] segmentIndex3 = segmentTableAndIndex.getValue();
+        byte[] segmentTable3 = segmentTableAndIndex.getValue();
+        byte[] segmentIndex3 = segmentTableAndIndex.getKey();
 
         segment = TableHelper.getSegment(10, segmentIndex3, segmentTable3);
         assertEquals(segment.getNumber(), 10);
@@ -465,12 +466,93 @@ public class TableHelperTest {
     }
 
     @Test
+    public void epochTransitionConsistencyTest() {
+        long timestamp = System.currentTimeMillis();
+        final List<Integer> startSegments = Lists.newArrayList(0, 1, 2, 3, 4);
+        int epoch = 0;
+        Pair<byte[], byte[]> segmentTableAndIndex = createSegmentTableAndIndex(5, timestamp);
+        byte[] segmentIndex = segmentTableAndIndex.getKey();
+        byte[] segmentTable = segmentTableAndIndex.getValue();
+        byte[] historyTable = TableHelper.createHistoryTable(timestamp, startSegments);
+        byte[] historyIndex = TableHelper.createHistoryIndex(timestamp);
+
+        // start new scale
+        List<Integer> newSegments = Lists.newArrayList(5, 6, 7, 8, 9);
+        final double keyRangeChunk = 1.0 / 5;
+        final List<AbstractMap.SimpleEntry<Double, Double>> newRanges = IntStream.range(0, 5)
+                .boxed()
+                .map(x -> new AbstractMap.SimpleEntry<>(x * keyRangeChunk, (x + 1) * keyRangeChunk))
+                .collect(Collectors.toList());
+        EpochTransitionRecord consistentEpochTransitionRecord = TableHelper.computeEpochTransition(historyIndex, historyTable,
+                segmentIndex, segmentTable, Lists.newArrayList(0, 1, 2, 3, 4), newRanges, timestamp + 1);
+
+        final double keyRangeChunkInconsistent = 1.0 / 2;
+        final List<AbstractMap.SimpleEntry<Double, Double>> newRangesInconsistent = IntStream.range(0, 2)
+                .boxed()
+                .map(x -> new AbstractMap.SimpleEntry<>(x * keyRangeChunkInconsistent, (x + 1) * keyRangeChunkInconsistent))
+                .collect(Collectors.toList());
+
+        EpochTransitionRecord inconsistentEpochTransitionRecord = TableHelper.computeEpochTransition(historyIndex, historyTable,
+                segmentIndex, segmentTable, Lists.newArrayList(0, 1, 2, 3, 4), newRangesInconsistent, timestamp + 1);
+
+        // before updating segment table, both records should be consistent.
+        assertTrue(TableHelper.isEpochTransitionConsistent(consistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+        assertTrue(TableHelper.isEpochTransitionConsistent(inconsistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+
+        // update segment table corresponding to consistent epoch transition record
+        epoch++;
+        segmentTableAndIndex = updateSegmentTableAndIndex(5, epoch, segmentIndex, segmentTable, newRanges, timestamp + 1);
+        // update index
+        segmentIndex = segmentTableAndIndex.getKey();
+        assertTrue(TableHelper.isEpochTransitionConsistent(consistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+        assertTrue(TableHelper.isEpochTransitionConsistent(inconsistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+
+        // update segment table
+        segmentTable = segmentTableAndIndex.getValue();
+
+        // now only consistentEpochTransitionRecord should return true as only its new range should match the state in
+        // segment table
+        assertTrue(TableHelper.isEpochTransitionConsistent(consistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+        assertFalse(TableHelper.isEpochTransitionConsistent(inconsistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+
+        // update history index
+        historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
+        assertTrue(TableHelper.isEpochTransitionConsistent(consistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+        assertFalse(TableHelper.isEpochTransitionConsistent(inconsistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+
+        // update history table
+        historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
+        // nothing should change the consistency even with history table update
+        assertTrue(TableHelper.isEpochTransitionConsistent(consistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+        assertFalse(TableHelper.isEpochTransitionConsistent(inconsistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+
+        // complete history record
+        HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 2);
+        // nothing should change the consistency even with history table update
+        assertTrue(TableHelper.isEpochTransitionConsistent(consistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+        assertFalse(TableHelper.isEpochTransitionConsistent(inconsistentEpochTransitionRecord, historyIndex, historyTable,
+                segmentIndex, segmentTable));
+    }
+
+    @Test
     public void scaleInputValidityTest() {
         long timestamp = System.currentTimeMillis();
 
         Pair<byte[], byte[]> segmentTableAndIndex = createSegmentTableAndIndex(5, timestamp);
-        byte[] segmentTable = segmentTableAndIndex.getKey();
-        byte[] segmentIndex = segmentTableAndIndex.getValue();
+        byte[] segmentTable = segmentTableAndIndex.getValue();
+        byte[] segmentIndex = segmentTableAndIndex.getKey();
         final double keyRangeChunk = 1.0 / 5;
 
         List<AbstractMap.SimpleEntry<Double, Double>> newRanges = new ArrayList<>();
@@ -586,8 +668,8 @@ public class TableHelperTest {
         // epoch 0
         long timestamp = System.currentTimeMillis();
         Pair<byte[], byte[]> segmentTableAndIndex = createSegmentTableAndIndex(2, timestamp);
-        byte[] segmentTable = segmentTableAndIndex.getKey();
-        byte[] segmentIndex = segmentTableAndIndex.getValue();
+        byte[] segmentTable = segmentTableAndIndex.getValue();
+        byte[] segmentIndex = segmentTableAndIndex.getKey();
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, startSegments);
         byte[] historyIndex = TableHelper.createHistoryIndex(timestamp);
 
@@ -602,8 +684,8 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>(0.75, 1.0));
 
         segmentTableAndIndex = updateSegmentTableAndIndex(2, epoch, segmentIndex, segmentTable, newRanges, timestamp + 1);
-        segmentIndex = segmentTableAndIndex.getValue();
-        segmentTable = segmentTableAndIndex.getKey();
+        segmentIndex = segmentTableAndIndex.getKey();
+        segmentTable = segmentTableAndIndex.getValue();
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments1);
         HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
@@ -617,8 +699,8 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>((0.75 + 1.0) / 2, 1.0));
 
         segmentTableAndIndex = updateSegmentTableAndIndex(4, epoch, segmentIndex, segmentTable, newRanges, timestamp + 2);
-        segmentIndex = segmentTableAndIndex.getValue();
-        segmentTable = segmentTableAndIndex.getKey();
+        segmentIndex = segmentTableAndIndex.getKey();
+        segmentTable = segmentTableAndIndex.getValue();
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments2);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
@@ -632,8 +714,8 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>((0.75 + 0.5) / 2, 0.75));
 
         segmentTableAndIndex = updateSegmentTableAndIndex(6, epoch, segmentIndex, segmentTable, newRanges, timestamp + 3);
-        segmentIndex = segmentTableAndIndex.getValue();
-        segmentTable = segmentTableAndIndex.getKey();
+        segmentIndex = segmentTableAndIndex.getKey();
+        segmentTable = segmentTableAndIndex.getValue();
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments3);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
@@ -647,8 +729,8 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>((0.0 + 0.5) / 2, 0.5));
 
         segmentTableAndIndex = updateSegmentTableAndIndex(8, epoch, segmentIndex, segmentTable, newRanges, timestamp + 4);
-        segmentIndex = segmentTableAndIndex.getValue();
-        segmentTable = segmentTableAndIndex.getKey();
+        segmentIndex = segmentTableAndIndex.getKey();
+        segmentTable = segmentTableAndIndex.getValue();
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments4);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
@@ -738,7 +820,8 @@ public class TableHelperTest {
         return TableHelper.createSegmentTableAndIndex(newRanges, eventTime);
     }
 
-    private Pair<byte[], byte[]> updateSegmentTableAndIndex(byte[] segmentIndex, byte[] segmentTable, int numSegments, int newEpoch, long eventTime) {
+    private Pair<byte[], byte[]> updateSegmentTableAndIndex(byte[] segmentIndex, byte[] segmentTable, int numSegments,
+                                                            int newEpoch, long eventTime) {
         final double keyRangeChunk = 1.0 / numSegments;
         List<AbstractMap.SimpleEntry<Double, Double>> newRanges = IntStream.range(0, numSegments)
                 .boxed()
@@ -749,10 +832,12 @@ public class TableHelperTest {
         return updateSegmentTableAndIndex(startingSegNum, newEpoch, segmentIndex, segmentTable, newRanges, eventTime);
     }
 
-    private Pair<byte[], byte[]> updateSegmentTableAndIndex(int startingSegNum, int newEpoch, byte[] segmentIndex, byte[] segmentTable,
-                                                            List<AbstractMap.SimpleEntry<Double, Double>> newRanges, long eventTime) {
+    private Pair<byte[], byte[]> updateSegmentTableAndIndex(int startingSegNum, int newEpoch, byte[] segmentIndex,
+                                                            byte[] segmentTable, List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
+                                                            long eventTime) {
 
-        return TableHelper.addNewSegmentsToSegmentTableAndIndex(startingSegNum, newEpoch, segmentIndex, segmentTable, newRanges, eventTime);
+        return TableHelper.addNewSegmentsToSegmentTableAndIndex(startingSegNum, newEpoch, segmentIndex, segmentTable,
+                newRanges, eventTime);
     }
 
 }
