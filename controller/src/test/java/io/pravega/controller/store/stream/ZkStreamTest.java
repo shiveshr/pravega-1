@@ -10,9 +10,9 @@
 package io.pravega.controller.store.stream;
 
 import io.pravega.common.Exceptions;
+import io.pravega.controller.store.stream.tables.State;
 import io.pravega.test.common.AssertExtensions;
 import io.pravega.test.common.TestingServerStarter;
-import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.stream.api.grpc.v1.Controller.CreateScopeStatus;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteScopeStatus;
 import io.pravega.client.stream.ScalingPolicy;

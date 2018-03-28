@@ -10,9 +10,9 @@
 package io.pravega.controller.store.stream;
 
 import io.pravega.client.stream.ScalingPolicy;
+import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.test.common.TestingServerStarter;
-import io.pravega.controller.store.stream.tables.State;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.test.common.AssertExtensions;
 import org.apache.curator.framework.CuratorFramework;

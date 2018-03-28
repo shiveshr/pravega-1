@@ -9,14 +9,13 @@
  */
 package io.pravega.controller.store.stream;
 
-import io.pravega.controller.store.stream.tables.Data;
-
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
+import io.pravega.controller.store.stream.tables.Data;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
