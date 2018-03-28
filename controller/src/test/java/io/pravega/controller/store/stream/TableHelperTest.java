@@ -12,8 +12,8 @@ package io.pravega.controller.store.stream;
 import com.google.common.collect.Lists;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
-import io.pravega.controller.store.stream.tables.TableHelper;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
+import io.pravega.controller.store.stream.tables.TableHelper;
 import io.pravega.test.common.AssertExtensions;
 import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Test;
@@ -669,8 +669,8 @@ public class TableHelperTest {
         // epoch 0 -> 0, 1
         long timestamp = System.currentTimeMillis();
         Pair<byte[], byte[]> segmentTableAndIndex = createSegmentTableAndIndex(2, timestamp);
-        byte[] segmentTable = segmentTableAndIndex.getKey();
-        byte[] segmentIndex = segmentTableAndIndex.getValue();
+        byte[] segmentTable = segmentTableAndIndex.getValue();
+        byte[] segmentIndex = segmentTableAndIndex.getKey();
         byte[] historyTable = TableHelper.createHistoryTable(timestamp, startSegments);
         byte[] historyIndex = TableHelper.createHistoryIndex(timestamp);
 
@@ -685,8 +685,8 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>(0.75, 1.0));
 
         segmentTableAndIndex = updateSegmentTableAndIndex(2, epoch, segmentIndex, segmentTable, newRanges, timestamp + 1);
-        segmentIndex = segmentTableAndIndex.getValue();
-        segmentTable = segmentTableAndIndex.getKey();
+        segmentIndex = segmentTableAndIndex.getKey();
+        segmentTable = segmentTableAndIndex.getValue();
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments1);
         HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
@@ -700,8 +700,8 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>((0.75 + 1.0) / 2, 1.0));
 
         segmentTableAndIndex = updateSegmentTableAndIndex(4, epoch, segmentIndex, segmentTable, newRanges, timestamp + 2);
-        segmentIndex = segmentTableAndIndex.getValue();
-        segmentTable = segmentTableAndIndex.getKey();
+        segmentIndex = segmentTableAndIndex.getKey();
+        segmentTable = segmentTableAndIndex.getValue();
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments2);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
@@ -715,8 +715,8 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>((0.75 + 0.5) / 2, 0.75));
 
         segmentTableAndIndex = updateSegmentTableAndIndex(6, epoch, segmentIndex, segmentTable, newRanges, timestamp + 3);
-        segmentIndex = segmentTableAndIndex.getValue();
-        segmentTable = segmentTableAndIndex.getKey();
+        segmentIndex = segmentTableAndIndex.getKey();
+        segmentTable = segmentTableAndIndex.getValue();
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments3);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
@@ -730,8 +730,8 @@ public class TableHelperTest {
         newRanges.add(new AbstractMap.SimpleEntry<Double, Double>((0.0 + 0.5) / 2, 0.5));
 
         segmentTableAndIndex = updateSegmentTableAndIndex(8, epoch, segmentIndex, segmentTable, newRanges, timestamp + 4);
-        segmentIndex = segmentTableAndIndex.getValue();
-        segmentTable = segmentTableAndIndex.getKey();
+        segmentIndex = segmentTableAndIndex.getKey();
+        segmentTable = segmentTableAndIndex.getValue();
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments4);
         partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
