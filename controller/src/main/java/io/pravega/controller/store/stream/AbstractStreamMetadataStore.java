@@ -19,6 +19,7 @@ import io.pravega.common.hash.RandomFactory;
 import io.pravega.common.lang.BigLong;
 import io.pravega.controller.store.index.HostIndex;
 import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
+import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
@@ -670,6 +671,29 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                               final boolean ignoreCached,
                                               final Executor executor) {
         return withCompletion(getStream(scope, stream, context).getActiveEpoch(ignoreCached), executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> createTxnCommitList(String scope, String stream, int epoch, List<UUID> txnsToCommit,
+                                                       OperationContext context, ScheduledExecutorService executor) {
+        return withCompletion(getStream(scope, stream, context).createTxnCommitList(epoch, txnsToCommit), executor);
+    }
+
+    @Override
+    public CompletableFuture<CommittingTransactionsRecord> getTxnCommitList(String scope, String stream, OperationContext context,
+                                                                            ScheduledExecutorService executor) {
+        return withCompletion(getStream(scope, stream, context).getTxnCommitList(), executor);
+    }
+
+    @Override
+    public CompletableFuture<Void> deleteTxnCommitList(String scope, String stream, OperationContext context, ScheduledExecutorService executor) {
+        return withCompletion(getStream(scope, stream, context).deleteTxnCommitList(), executor);
+    }
+
+    @Override
+    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getTransactionsInEpoch(String scope, String stream, int epoch,
+                                                                                OperationContext context, ScheduledExecutorService executor) {
+        return withCompletion(getStream(scope, stream, context).getTransactionsInEpoch(epoch), executor);
     }
 
     protected Stream getStream(String scope, final String name, OperationContext context) {
