@@ -838,7 +838,7 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     public CompletableFuture<Void> notifyTxnCommit(final String scope, final String stream,
-                                                   final List<Integer> segments, final UUID txnId) {
+                                                   final List<Long> segments, final UUID txnId) {
         return Futures.allOf(segments.stream()
                 .parallel()
                 .map(segment -> notifyTxnCommit(scope, stream, segment, txnId))
@@ -846,9 +846,11 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     private CompletableFuture<Controller.TxnStatus> notifyTxnCommit(final String scope, final String stream,
-                                                                    final int segmentNumber, final UUID txnId) {
+                                                                    final long segmentNumber, final UUID txnId) {
         return TaskStepsRetryHelper.withRetries(() -> segmentHelper.commitTransaction(scope,
                 stream,
+                // TODO: shivesh add target segment number and source segment number
+                segmentNumber,
                 segmentNumber,
                 txnId,
                 this.hostControllerStore,

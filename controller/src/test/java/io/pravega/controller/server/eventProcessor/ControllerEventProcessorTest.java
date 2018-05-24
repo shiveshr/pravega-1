@@ -175,7 +175,7 @@ public class ControllerEventProcessorTest {
     private List<VersionedTransactionData> createAndCommitTransactions(int count) {
         List<VersionedTransactionData> retVal = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
-            UUID txnId = UUID.randomUUID();
+            UUID txnId = streamStore.generateTransactionId(SCOPE, STREAM, null, executor).join();
             VersionedTransactionData txnData = streamStore.createTransaction(SCOPE, STREAM, txnId, 10000, 10000, 10000,
                     null, executor).join();
             Assert.assertNotNull(txnData);

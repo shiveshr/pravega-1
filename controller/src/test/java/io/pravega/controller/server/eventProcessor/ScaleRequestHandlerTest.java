@@ -264,7 +264,7 @@ public class ScaleRequestHandlerTest {
                 null, null, null, null, executor);
 
         // 1 create transaction on old epoch and set it to committing
-        UUID txnIdOldEpoch = UUID.randomUUID();
+        UUID txnIdOldEpoch = streamStore.generateTransactionId(scope, stream, null, executor).join();
         VersionedTransactionData txnData = streamStore.createTransaction(scope, stream, txnIdOldEpoch, 10000, 10000, 10000,
                 null, executor).join();
         streamStore.sealTransaction(scope, stream, txnData.getId(), true, Optional.empty(), null, executor).join();
