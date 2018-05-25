@@ -135,8 +135,6 @@ public class StreamMetadataTasksTest {
 
         StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore(1, executor);
         streamStorePartialMock = spy(streamStore); //create a partial mock.
-        doReturn(CompletableFuture.completedFuture(false)).when(streamStorePartialMock).isTransactionOngoing(
-                anyString(), anyString(), any(), any()); //mock only isTransactionOngoing call.
 
         TaskMetadataStore taskMetadataStore = TaskStoreFactory.createZKStore(zkClient, executor);
         HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());

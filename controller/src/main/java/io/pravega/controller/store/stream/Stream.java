@@ -200,15 +200,7 @@ interface Stream {
                                                      final List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
                                                      final long scaleTimestamp,
                                                      final boolean runOnlyIfStarted);
-
-    /**
-     * Called after new segment creation is complete.
-     *
-     * @param epoch epoch
-     * @return future
-     */
-    CompletableFuture<Boolean> tryDeleteEpochIfStale(final int epoch);
-
+    
     /**
      * Called after epochTransition entry is created. Implementation of this method should create new segments that are
      * specified in epochTransition in stream metadata tables.
@@ -409,7 +401,7 @@ interface Stream {
      * @param txnsToCommit transactions to commit within the epoch
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
-    CompletableFuture<Void> createTxnCommitList(final int epoch, final List<UUID> txnsToCommit);
+    CompletableFuture<Void> createCommittingTransactionsRecord(final int epoch, final List<UUID> txnsToCommit);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.
@@ -425,7 +417,7 @@ interface Stream {
      *
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
      */
-    CompletableFuture<Void> deleteTxnCommitList();
+    CompletableFuture<Void> deleteCommittingTransactionsRecord();
 
     /**
      * Method to get all transactions in a given epoch.

@@ -171,7 +171,7 @@ This is an example from io.pravega.segmentstore.server.host.AppendProcessor. In 
 public class AppendProcessor extends DelegatingRequestProcessor {
     ...
     static final StatsLogger STATS_LOGGER = MetricsProvider.getStatsLogger(); < === 1. get logger from MetricsProvider
-    static AtomicLong pendBytes = new AtomicLong(); < === 2. create an AtomicLong to reference the value that we want to keep in Gauge
+    static AtomicLong pendBytes = new AtomicLong(); < === 2. create an AtomicLong to referenceEpoch the value that we want to keep in Gauge
     static { < === 3. use a static statement to execute the register command
         STATS_LOGGER.registerGauge(PENDING_APPEND_BYTES, pendBytes::get);
     }

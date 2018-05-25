@@ -70,7 +70,7 @@ public class AbortRequestHandler extends SerializedRequestHandler<AbortEvent> {
         return Futures.toVoid(streamMetadataStore.getActiveSegmentIds(event.getScope(), event.getStream(), epoch, context, executor)
                 .thenCompose(segments -> streamMetadataTasks.notifyTxnAbort(scope, stream, segments, txId))
                 .thenCompose(x -> streamMetadataStore.abortTransaction(scope, stream, epoch, txId, context, executor))
-                .thenCompose(x -> Futures.toVoid(streamMetadataStore.tryDeleteEpochIfStale(scope, stream, epoch, context, executor)))
+                .thenCompose(x -> Futures.toVoid(streamMetadataStore.tryDeleteEpoch(scope, stream, epoch, context, executor)))
                 .whenComplete((result, error) -> {
                     if (error != null) {
                         log.error("Failed aborting transaction {} on stream {}/{}", event.getTxid(),

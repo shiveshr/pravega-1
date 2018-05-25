@@ -22,8 +22,8 @@ import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.tables.CompletedTxnRecord;
 import io.pravega.controller.store.stream.tables.Data;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
-import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.HistoryIndexRecord;
+import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.RetentionRecord;
 import io.pravega.controller.store.stream.tables.SealedSegmentsRecord;
 import io.pravega.controller.store.stream.tables.State;
@@ -671,48 +671,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
                 });
     }
 
-    /**
-     * If given epoch is behind active epoch, attempt to delete it. If it has no on going transaction then we can safely
-     * delete it.
-     *
-     * @param epoch epoch
-     * @return true if we are able to delete the epoch, false otherwise.
-     */
-    @Override
-    public CompletableFuture<Boolean> tryDeleteEpochIfStale(final int epoch) {
-        return getHistoryIndexFromStore()
-                .thenCompose(historyIndex -> getHistoryTableFromStore()
-                        .thenCompose(historyTable -> {
-                            CompletableFuture<Boolean> result = new CompletableFuture<>();
-
-                            if (TableHelper.getLatestEpoch(historyIndex.getData(), historyTable.getData()).getEpoch() > epoch) {
-                                deleteEpochNode(epoch)
-                                        .whenComplete((r, e) -> {
-                                            if (e != null) {
-                                                Throwable ex = Exceptions.unwrap(e);
-                                                if (ex instanceof StoreException.DataNotEmptyException) {
-                                                    // Can't delete as there are transactions still running under epoch node
-                                                    log.debug("stream {}/{} epoch {} not empty", scope, name, epoch);
-                                                    result.complete(false);
-                                                } else {
-                                                    log.warn("stream {}/{} deleting epoch {} threw exception {}", scope, name,
-                                                            epoch, ex.getClass().getName());
-
-                                                    result.completeExceptionally(ex);
-                                                }
-                                            } else {
-                                                log.debug("stream {}/{} deleted epoch {} ", scope, name, epoch);
-
-                                                result.complete(true);
-                                            }
-                                        });
-                            } else {
-                                result.complete(false);
-                            }
-                            return result;
-                        }));
-    }
-
     private CompletableFuture<Void> clearMarkers(final Set<Long> segments) {
         return Futures.toVoid(Futures.allOfWithResults(segments.stream().parallel()
                 .map(this::removeColdMarker).collect(Collectors.toList())));
@@ -774,7 +732,10 @@ public abstract class PersistentStreamBase<T> implements Stream {
     public CompletableFuture<UUID> generateNewTxnId(int msb32Bit, long lsb64Bit) {
         return getActiveEpoch(false)
                 .thenApply(epochRecord -> {
-                    long msb64Bit = (long) epochRecord.getEpoch() << 32 | msb32Bit & 0xFFFFFFFFL;
+                    // always set transaction epoch as refrence epoch so that all transactions on duplicate epochs
+                    // are collected.
+                    // epochs that are not duplicates will refer to themselves.
+                    long msb64Bit = (long) epochRecord.getReferenceEpoch() << 32 | msb32Bit & 0xFFFFFFFFL;
                     return new UUID(msb64Bit, lsb64Bit);
                 });
     }
@@ -1094,7 +1055,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> createTxnCommitList(final int epoch, final List<UUID> txnsToCommit) {
+    public CompletableFuture<Void> createCommittingTransactionsRecord(final int epoch, final List<UUID> txnsToCommit) {
         return createCommittingTxnRecord(new CommittingTransactionsRecord(epoch, txnsToCommit).toByteArray());
     }
 
@@ -1117,7 +1078,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> deleteTxnCommitList() {
+    public CompletableFuture<Void> deleteCommittingTransactionsRecord() {
         return deleteCommittingTxnRecord();
     }
 
@@ -1146,10 +1107,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
             }
             return null;
         });
-    }
-
-    private CompletableFuture<Void> createNewEpoch(int epoch) {
-        return createEpochNodeIfAbsent(epoch);
     }
 
     /**
@@ -1378,10 +1335,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
     abstract CompletableFuture<Data<T>> getHistoryTable();
 
     abstract CompletableFuture<Data<T>> getHistoryTableFromStore();
-
-    abstract CompletableFuture<Void> createEpochNodeIfAbsent(int epoch);
-
-    abstract CompletableFuture<Void> deleteEpochNode(int epoch);
 
     abstract CompletableFuture<Void> createNewTransaction(final UUID txId,
                                                              final long timestamp,

@@ -26,11 +26,14 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import org.apache.curator.utils.ZKPaths;
 
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 import java.util.stream.Collectors;
 
 /**
@@ -334,13 +337,27 @@ class ZKStream extends PersistentStreamBase<Integer> {
 
     @Override
     public CompletableFuture<Map<String, Data<Integer>>> getCurrentTxns() {
-        return getActiveEpoch(false)
-                .thenCompose(epoch -> getTxnInEpoch(epoch.getKey()));
+        return store.getChildren(activeTxRoot)
+                .thenCompose(children -> {
+                    return Futures.allOfWithResults(children.stream().map(x -> getTxnInEpoch(Integer.parseInt(x))).collect(Collectors.toList()))
+                            .thenApply(list -> {
+                                Map<String, Data<Integer>> map = new HashMap<>();
+                                list.forEach(map::putAll);
+                                return map;
+                            });
+                });
     }
 
     @Override
     public CompletableFuture<Map<String, Data<Integer>>> getTxnInEpoch(int epoch) {
         return store.getChildren(getEpochPath(epoch))
+                .exceptionally(e -> {
+                    if (Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException) {
+                        return Collections.emptyList();
+                    } else {
+                        throw new CompletionException(e);
+                    }
+                })
                 .thenCompose(txIds -> Futures.allOfWithResults(txIds.stream().collect(
                         Collectors.toMap(txId -> txId, txId -> cache.getCachedData(getActiveTxPath(epoch, txId))
                                 .exceptionally(e -> {
@@ -365,7 +382,9 @@ class ZKStream extends PersistentStreamBase<Integer> {
         final String activePath = getActiveTxPath(epoch, txId.toString());
         final byte[] txnRecord = new ActiveTxnRecord(timestamp, leaseExpiryTime, maxExecutionExpiryTime,
                 scaleGracePeriod, TxnStatus.OPEN).toByteArray();
-        // we will always create parent if needed so that transactions are created successfully even if the epoch znode was empty and deleted.
+        // we will always create parent if needed so that transactions are created successfully even if the epoch znode
+        // previously found to be empty and deleted.
+        // For this, send createParent flag = true
         return store.createZNodeIfNotExist(activePath, txnRecord, true)
                 .thenApply(x -> cache.invalidateCache(activePath));
     }
@@ -404,7 +423,8 @@ class ZKStream extends PersistentStreamBase<Integer> {
     @Override
     CompletableFuture<Void> removeActiveTxEntry(final int epoch, final UUID txId) {
         final String activePath = getActiveTxPath(epoch, txId.toString());
-        return store.deletePath(activePath, false)
+        // attempt to delete empty epoch nodes by sending deleteEmptyContainer flag as true.
+        return store.deletePath(activePath, true)
                                 .whenComplete((r, e) -> cache.invalidateCache(activePath));
     }
 
@@ -527,17 +547,6 @@ class ZKStream extends PersistentStreamBase<Integer> {
     CompletableFuture<Data<Integer>> getHistoryTableFromStore() {
         cache.invalidateCache(historyPath);
         return getHistoryTable();
-    }
-
-    @Override
-    CompletableFuture<Void> createEpochNodeIfAbsent(int epoch) {
-        return store.createZNodeIfNotExist(getEpochPath(epoch));
-    }
-
-    @Override
-    CompletableFuture<Void> deleteEpochNode(int epoch) {
-        String epochPath = getEpochPath(epoch);
-        return store.deletePath(epochPath, false).thenAccept(x -> cache.invalidateCache(epochPath));
     }
 
     @Override

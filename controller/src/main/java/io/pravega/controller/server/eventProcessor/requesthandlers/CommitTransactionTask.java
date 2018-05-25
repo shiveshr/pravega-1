@@ -112,7 +112,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
         // This will result in event being posted back in the stream and retried later. Generally if a transaction commit starts, it will come to
         // an end.. but during failover, once we have created the node, we are guaranteed that it will be only that transaction that will be getting
         // committed at that time.
-        CompletableFuture<List<UUID>> txnListFuture = createAndGetCommitTxnListRecord(scope, stream, epoch, context);
+        CompletableFuture<List<UUID>> txnListFuture = createRecordAndGetCommitTxnList(scope, stream, epoch, context);
 
         CompletableFuture<Void> commitFuture = txnListFuture
                 .thenCompose(txnList -> {
@@ -121,18 +121,15 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                         // that died just before updating the state back to ACTIVE.
                         return streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING, context, executor);
                     } else {
-                        // Try to set the state of the stream to COMMITTING.
                         // Once state is set to committing, we are guaranteed that this will be the only processing that can happen on the stream
                         // and we can proceed with committing outstanding transactions collected in the txnList step.
-                        // If we are not able to update the state it means there is some other ongoing
-                        // processing and operation not allowed will mean this processing will be postponed with txn commit node created.
                         return streamMetadataStore.setState(scope, stream, State.COMMITTING, context, executor)
                                 .thenCompose(v -> getEpochRecords(scope, stream, epoch, context)
                                         .thenCompose(records -> {
                                             HistoryRecord epochRecord = records.get(0);
                                             HistoryRecord activeEpochRecord = records.get(1);
                                             if (activeEpochRecord.getEpoch() == epoch ||
-                                                    activeEpochRecord.getReference() == epochRecord.getReference()) {
+                                                    activeEpochRecord.getReferenceEpoch() == epochRecord.getReferenceEpoch()) {
                                                 // if transactions were created on active epoch or a duplicate of active epoch, we can commit transactions immediately
                                                 return commitTransactionsOnActiveEpoch(scope, stream, epoch, epochRecord.getSegments(), txnList, context);
                                             } else {
@@ -142,9 +139,11 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                     }
                 });
 
-        // once all commits are done, reset state to ACTIVE and delete commit txn node.
+        // once all commits are done, delete the committing txn record.
+        // reset state to ACTIVE and delete commit txn node.
         return Futures.toVoid(commitFuture
-                .thenCompose(v -> streamMetadataStore.deleteTxnCommitList(scope, stream, context, executor))
+                .thenCompose(v -> streamMetadataStore.deleteCommittingTransactionsRecord(scope, stream, context, executor))
+                .thenCompose(x -> streamMetadataStore.tryDeleteEpoch(scope, stream, epoch, context, executor))
                 .thenCompose(v -> streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor)));
     }
 
@@ -156,13 +155,23 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
     }
 
     private CompletableFuture<Void> commitTransactionsOnOldEpoch(String scope, String stream, int epoch, List<UUID> txnList, OperationContext context) {
-        // first compute what the epoch transition node will look like.
-        // then try to createEpochTransitionNode if it doesnt exist.
-        // now retrieve epochTransitionNode. if it matches what we intended to create, we can proceed.
-        // else its likely created by a scale operation (either manual or post failover recovery).
-        // throw opeartion not allowed
-        // if we have successfully created
-
+        // 1. compute what the epoch transition node.
+        //      active epoch = current epoch
+        //      new epoch = active epoch + 2
+        //      segments to seal == all from the active set.
+        //      new ranges = all duplicated from segments to seal.
+        // 2. createEpochTransitionNode. if this fails because node exists, get and check if its the same as one we intend to create.
+        // else reset state and throw opeartion not allowed
+        // 3. create duplicate segments for txn epoch
+        // 4. commit txns into new segments
+        // 5. seal segment
+        // 6. create duplicate segments of active epoch
+        // 7. add 2 records to history table ->
+        //      1. duplicate txn epoch segment (with reference to reference of txn.epochRecord) (keep it partial too)
+        //      2. duplicate of active epoch --> partial record
+        // 8. seal active segments
+        // 9. complete partial record in history table
+        // 10. delete epoch transition node
     }
 
     private CompletableFuture<Void> commitTransactionsOnActiveEpoch(String scope, String stream, int epoch, List<Long> segments,
@@ -181,7 +190,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
         return future;
     }
 
-    private CompletableFuture<List<UUID>> createAndGetCommitTxnListRecord(String scope, String stream, int epoch, OperationContext context) {
+    private CompletableFuture<List<UUID>> createRecordAndGetCommitTxnList(String scope, String stream, int epoch, OperationContext context) {
         return streamMetadataStore.getCommittingTransactionsRecord(scope, stream, context, executor)
                 .thenCompose(record -> {
                     if (record == null) {
@@ -209,7 +218,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                 .thenApply(transactions -> transactions.entrySet().stream()
                         .filter(entry -> entry.getValue().getTxnStatus().equals(TxnStatus.COMMITTING))
                         .map(Map.Entry::getKey).collect(Collectors.toList()))
-                .thenCompose(transactions -> streamMetadataStore.createTxnCommitList(scope, stream, epoch, transactions, context, executor)
+                .thenCompose(transactions -> streamMetadataStore.createCommittingTransactionsRecord(scope, stream, epoch, transactions, context, executor)
                         .thenApply(x -> {
                             log.debug("Transactions {} added to commit list for epoch {} stream {}/{}", transactions, epoch, scope, stream);
                             return transactions;

@@ -669,7 +669,7 @@ public abstract class StreamMetadataStoreTest {
         assertEquals(1, tx3.getEpoch());
         assertEquals(1, (int) (tx3.getId().getMostSignificantBits() >> 32));
 
-        DeleteEpochResponse deleteResponse = store.tryDeleteEpochIfStale(scope, stream, 0, null, executor).get(); // should not delete epoch
+        DeleteEpochResponse deleteResponse = store.tryDeleteEpoch(scope, stream, 0, null, executor).get(); // should not delete epoch
         assertEquals(false, deleteResponse.isDeleted());
         assertEquals(null, deleteResponse.getSegmentsCreated());
         assertEquals(null, deleteResponse.getSegmentsSealed());
@@ -677,12 +677,12 @@ public abstract class StreamMetadataStoreTest {
         store.sealTransaction(scope, stream, tx2.getId(), true, Optional.of(tx2.getVersion()), null, executor).get();
         store.commitTransaction(scope, stream, tx2.getEpoch(), tx2.getId(), null, executor).get(); // should not happen
 
-        deleteResponse = store.tryDeleteEpochIfStale(scope, stream, 0, null, executor).get(); // should not delete epoch
+        deleteResponse = store.tryDeleteEpoch(scope, stream, 0, null, executor).get(); // should not delete epoch
         assertEquals(false, deleteResponse.isDeleted());
 
         store.sealTransaction(scope, stream, tx1.getId(), true, Optional.of(tx1.getVersion()), null, executor).get();
         store.commitTransaction(scope, stream, tx1.getEpoch(), tx1.getId(), null, executor).get(); // should not happen
-        deleteResponse = store.tryDeleteEpochIfStale(scope, stream, 0, null, executor).get(); // should not delete epoch
+        deleteResponse = store.tryDeleteEpoch(scope, stream, 0, null, executor).get(); // should not delete epoch
         assertEquals(true, deleteResponse.isDeleted());
 
         store.sealTransaction(scope, stream, tx3.getId(), true, Optional.of(tx3.getVersion()), null, executor).get();
@@ -691,7 +691,7 @@ public abstract class StreamMetadataStoreTest {
         store.scaleSegmentsSealed(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).join();
 
-        deleteResponse = store.tryDeleteEpochIfStale(scope, stream, 1, null, executor).get(); // should not delete epoch
+        deleteResponse = store.tryDeleteEpoch(scope, stream, 1, null, executor).get(); // should not delete epoch
         assertEquals(false, deleteResponse.isDeleted());
         // endregion
 
@@ -715,7 +715,7 @@ public abstract class StreamMetadataStoreTest {
 
         store.sealTransaction(scope, stream, txn.getId(), true, Optional.of(txn.getVersion()), null, executor).get();
         store.commitTransaction(scope, stream, txn.getEpoch(), txn.getId(), null, executor).get(); // should not happen
-        deleteResponse = store.tryDeleteEpochIfStale(scope, stream, 1, null, executor).get(); // should not delete epoch
+        deleteResponse = store.tryDeleteEpoch(scope, stream, 1, null, executor).get(); // should not delete epoch
         // verify that epoch is not deleted as new epoch is not yet created
         assertEquals(false, deleteResponse.isDeleted());
 
@@ -732,7 +732,7 @@ public abstract class StreamMetadataStoreTest {
 
         store.sealTransaction(scope, stream, txn2.getId(), true, Optional.of(txn2.getVersion()), null, executor).get();
         store.commitTransaction(scope, stream, txn2.getEpoch(), txn2.getId(), null, executor).get(); // should not happen
-        deleteResponse = store.tryDeleteEpochIfStale(scope, stream, 1, null, executor).get(); // should not delete epoch
+        deleteResponse = store.tryDeleteEpoch(scope, stream, 1, null, executor).get(); // should not delete epoch
         // now that new segments are created, we should be able to delete old epoch.
         assertEquals(true, deleteResponse.isDeleted());
     }

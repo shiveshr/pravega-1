@@ -445,16 +445,6 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<Boolean> tryDeleteEpochIfStale(final String scope,
-                                                                        final String name,
-                                                                        final int epoch,
-                                                                        final OperationContext context,
-                                                                        final Executor executor) {
-        Stream stream = getStream(scope, name, context);
-        return withCompletion(stream.tryDeleteEpochIfStale(epoch), executor);
-    }
-
-    @Override
     public CompletableFuture<Void> addStreamCutToRetentionSet(final String scope, final String name, final StreamCutRecord streamCut,
                                                               final OperationContext context, final Executor executor) {
         Stream stream = getStream(scope, name, context);
@@ -584,12 +574,6 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<Boolean> isTransactionOngoing(final String scope, final String stream, final OperationContext context, final Executor executor) {
-        return withCompletion(getStream(scope, stream, context).getNumberOfOngoingTransactions(), executor)
-                .thenApply(num -> num > 0);
-    }
-
-    @Override
     public CompletableFuture<Void> addTxnToIndex(String hostId, TxnResource txn, int version) {
         return hostIndex.addEntity(hostId, getTxnResourceString(txn), ByteBuffer.allocate(Integer.BYTES).putInt(version).array());
     }
@@ -671,9 +655,9 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<Void> createTxnCommitList(String scope, String stream, int epoch, List<UUID> txnsToCommit,
-                                                       OperationContext context, ScheduledExecutorService executor) {
-        return withCompletion(getStream(scope, stream, context).createTxnCommitList(epoch, txnsToCommit), executor);
+    public CompletableFuture<Void> createCommittingTransactionsRecord(String scope, String stream, int epoch, List<UUID> txnsToCommit,
+                                                                      OperationContext context, ScheduledExecutorService executor) {
+        return withCompletion(getStream(scope, stream, context).createCommittingTransactionsRecord(epoch, txnsToCommit), executor);
     }
 
     @Override
@@ -683,8 +667,8 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<Void> deleteTxnCommitList(String scope, String stream, OperationContext context, ScheduledExecutorService executor) {
-        return withCompletion(getStream(scope, stream, context).deleteTxnCommitList(), executor);
+    public CompletableFuture<Void> deleteCommittingTransactionsRecord(String scope, String stream, OperationContext context, ScheduledExecutorService executor) {
+        return withCompletion(getStream(scope, stream, context).deleteCommittingTransactionsRecord(), executor);
     }
 
     @Override

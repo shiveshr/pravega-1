@@ -128,9 +128,8 @@ public class TableHelper {
      * is ongoing and returns the latest completed epoch.
      */
     public static List<Long> getActiveSegments(final byte[] historyIndex, final byte[] historyTable) {
-        final Optional<HistoryRecord> record = HistoryRecord.readLatestRecord(historyIndex, historyTable, true);
-
-        return record.isPresent() ? record.get().getSegments() : Collections.emptyList();
+        HistoryRecord record = getActiveEpoch(historyIndex, historyTable);
+        return record.getSegments();
     }
 
     /**
@@ -709,6 +708,12 @@ public class TableHelper {
      */
     public static HistoryRecord getActiveEpoch(final byte[] historyIndex, final byte[] historyTable) {
         HistoryRecord historyRecord = HistoryRecord.readLatestRecord(historyIndex, historyTable, true).get();
+        // if the record is created as a sealed epoch, the previous epoch may not have been sealed yet and hence that will be active.
+        if (historyRecord.isCreatedAsSealed()) {
+            // Note: if an epoch record is created as sealed, it means its predecessor is guaranteed to exist.
+            historyRecord = HistoryRecord.fetchPrevious(historyRecord, historyIndex, historyTable).get();
+        }
+
         return historyRecord;
     }
 
@@ -741,16 +746,6 @@ public class TableHelper {
 
         return record.orElseThrow(() -> StoreException.create(StoreException.Type.DATA_NOT_FOUND,
                 "Epoch: " + epoch + " not found in history table"));
-    }
-
-    /**
-     * Return the active epoch.
-     * @param historyTable history table
-     * @param historyIndex history index
-     * @return active epoch
-     */
-    public static HistoryRecord getLatestEpoch(byte[] historyIndex, byte[] historyTable) {
-        return HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
     }
 
     /**

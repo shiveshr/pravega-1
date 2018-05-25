@@ -33,13 +33,15 @@ public class HistoryRecordSerializer extends VersionedSerializer.WithBuilder<His
     private void read00(RevisionDataInput revisionDataInput, HistoryRecord.HistoryRecordBuilder builder) throws IOException {
         builder.epoch(revisionDataInput.readInt())
                 .reference(revisionDataInput.readInt())
+                .createdAsSealed(revisionDataInput.readBoolean())
                 .segments(revisionDataInput.readCollection(DataInput::readLong, ArrayList::new))
                 .scaleTime(revisionDataInput.readLong());
     }
 
     private void write00(HistoryRecord history, RevisionDataOutput revisionDataOutput) throws IOException {
         revisionDataOutput.writeInt(history.getEpoch());
-        revisionDataOutput.writeInt(history.getReference());
+        revisionDataOutput.writeInt(history.getReferenceEpoch());
+        revisionDataOutput.writeBoolean(history.isCreatedAsSealed());
         revisionDataOutput.writeCollection(history.getSegments(), DataOutput::writeLong);
         revisionDataOutput.writeLong(history.getScaleTime());
     }
