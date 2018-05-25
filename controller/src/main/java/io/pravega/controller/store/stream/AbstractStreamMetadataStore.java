@@ -20,6 +20,7 @@ import io.pravega.common.lang.BigLong;
 import io.pravega.controller.store.index.HostIndex;
 import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
+import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
@@ -54,7 +55,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import static io.pravega.controller.store.stream.Segment.*;
 import static io.pravega.shared.MetricsNames.ABORT_TRANSACTION;
 import static io.pravega.shared.MetricsNames.COMMIT_TRANSACTION;
 import static io.pravega.shared.MetricsNames.CREATE_TRANSACTION;
@@ -445,28 +445,13 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<DeleteEpochResponse> tryDeleteEpochIfScaling(final String scope,
-                                                                          final String name,
-                                                                          final int epoch,
-                                                                          final OperationContext context,
-                                                                          final Executor executor) {
+    public CompletableFuture<Boolean> tryDeleteEpochIfStale(final String scope,
+                                                                        final String name,
+                                                                        final int epoch,
+                                                                        final OperationContext context,
+                                                                        final Executor executor) {
         Stream stream = getStream(scope, name, context);
-        return withCompletion(stream.scaleTryDeleteEpoch(epoch), executor)
-                .thenCompose(deleted -> {
-                    if (deleted) {
-                        return stream.latestScaleData()
-                                .thenCompose(pair -> {
-                                    List<Long> segmentsSealed = pair.getLeft();
-                                    return Futures.allOfWithResults(pair.getRight().stream().map(stream::getSegment)
-                                                                        .collect(Collectors.toList()))
-                                                  .thenApply(segmentsCreated ->
-                                                    new DeleteEpochResponse(true, segmentsSealed, segmentsCreated));
-                                });
-                    } else {
-                        return CompletableFuture.completedFuture(
-                                new DeleteEpochResponse(false, null, null));
-                    }
-                });
+        return withCompletion(stream.tryDeleteEpochIfStale(epoch), executor);
     }
 
     @Override
@@ -668,12 +653,21 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<Pair<Integer, List<Long>>>  getActiveEpoch(final String scope,
-                                                                                     final String stream,
-                                                                                     final OperationContext context,
-                                                                                     final boolean ignoreCached,
-                                                                                     final Executor executor) {
+    public CompletableFuture<HistoryRecord>  getActiveEpoch(final String scope,
+                                                            final String stream,
+                                                            final OperationContext context,
+                                                            final boolean ignoreCached,
+                                                            final Executor executor) {
         return withCompletion(getStream(scope, stream, context).getActiveEpoch(ignoreCached), executor);
+    }
+
+    @Override
+    public CompletableFuture<HistoryRecord>  getEpochRecord(final String scope,
+                                                            final String stream,
+                                                            final int epoch,
+                                                            final OperationContext context,
+                                                            final Executor executor) {
+        return withCompletion(getStream(scope, stream, context).getEpochRecord(epoch), executor);
     }
 
     @Override

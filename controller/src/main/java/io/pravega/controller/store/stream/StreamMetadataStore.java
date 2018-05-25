@@ -15,6 +15,7 @@ import io.pravega.controller.server.retention.BucketChangeListener;
 import io.pravega.controller.server.retention.BucketOwnershipListener;
 import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
+import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
@@ -22,7 +23,6 @@ import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.controller.stream.api.grpc.v1.Controller.CreateScopeStatus;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteScopeStatus;
-import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.AbstractMap.SimpleEntry;
 import java.util.List;
@@ -472,11 +472,11 @@ public interface StreamMetadataStore {
      * @param executor executor
      * @return returns a pair of segments sealed from previous epoch and new segments added in new epoch
      */
-    CompletableFuture<DeleteEpochResponse> tryDeleteEpochIfScaling(final String scope,
-                                                                   final String stream,
-                                                                   final int epoch,
-                                                                   final OperationContext context,
-                                                                   final Executor executor);
+    CompletableFuture<Boolean> tryDeleteEpochIfStale(final String scope,
+                                                                 final String stream,
+                                                                 final int epoch,
+                                                                 final OperationContext context,
+                                                                 final Executor executor);
 
     /**
      * Method to create a new unique transaction id on the stream.
@@ -688,25 +688,41 @@ public interface StreamMetadataStore {
      * @param context  operation context
      * @param ignoreCached  boolean indicating whether to use cached value or force fetch from underlying store.
      * @param executor callers executor
-     * @return         pair containing currently active epoch of the stream, and active segments in current epoch.
+     * @return         Completable future that holds active epoch history record upon completion.
      */
-    CompletableFuture<Pair<Integer, List<Long>>> getActiveEpoch(final String scope,
-                                                                             final String stream,
-                                                                             final OperationContext context,
-                                                                             final boolean ignoreCached,
-                                                                             final Executor executor);
+    CompletableFuture<HistoryRecord> getActiveEpoch(final String scope,
+                                                    final String stream,
+                                                    final OperationContext context,
+                                                    final boolean ignoreCached,
+                                                    final Executor executor);
 
     /**
-     * Api to mark a segment as cold.
+     * Returns the record for the given epoch of the specified stream.
      *
-     * @param scope         scope for stream
-     * @param stream        name of stream
-     * @param segmentId segment number
-     * @param timestamp     time till which this cold marker is valid.
-     * @param context       context in which this operation is taking place.
-     * @param executor      callers executor
-     * @return Completable future
+     * @param scope    scope.
+     * @param stream   stream.
+     * @param epoch    epoch
+     * @param context  operation context
+     * @param executor callers executor
+     * @return         Completable future that, upon completion, holds epoch history record corresponding to request epoch.
      */
+    CompletableFuture<HistoryRecord> getEpochRecord(final String scope,
+                                                    final String stream,
+                                                    final int epoch,
+                                                    final OperationContext context,
+                                                    final Executor executor);
+
+        /**
+         * Api to mark a segment as cold.
+         *
+         * @param scope         scope for stream
+         * @param stream        name of stream
+         * @param segmentId segment number
+         * @param timestamp     time till which this cold marker is valid.
+         * @param context       context in which this operation is taking place.
+         * @param executor      callers executor
+         * @return Completable future
+         */
     CompletableFuture<Void> markCold(final String scope, final String stream, final long segmentId, final long timestamp, final OperationContext context, final Executor executor);
 
     /**

@@ -12,6 +12,7 @@ package io.pravega.controller.store.stream;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
+import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
@@ -206,7 +207,7 @@ interface Stream {
      * @param epoch epoch
      * @return future
      */
-    CompletableFuture<Boolean> scaleTryDeleteEpoch(final int epoch);
+    CompletableFuture<Boolean> tryDeleteEpochIfStale(final int epoch);
 
     /**
      * Called after epochTransition entry is created. Implementation of this method should create new segments that are
@@ -352,21 +353,24 @@ interface Stream {
     CompletableFuture<Map<UUID, ActiveTxnRecord>> getActiveTxns();
 
     /**
-     * Returns the latest stream epoch.
-     * @return latest stream epoch.
-     */
-    CompletableFuture<Pair<Integer, List<Long>>> getLatestEpoch();
-
-    /**
      * Returns the currently active stream epoch.
      *
      * @param ignoreCached if ignore cache is set to true then fetch the value from the store. 
      * @return currently active stream epoch.
      */
-    CompletableFuture<Pair<Integer, List<Long>>> getActiveEpoch(boolean ignoreCached);
+    CompletableFuture<HistoryRecord> getActiveEpoch(boolean ignoreCached);
+
+    /**
+     * Returns the epoch record corresponding to supplied epoch.
+     *
+     * @param epoch epoch to retrieve record for
+     * @return CompletableFuture which on completion will have the epoch record corresponding to the given epoch
+     */
+    CompletableFuture<HistoryRecord> getEpochRecord(int epoch);
 
     /**
      * Method to get stream size till the given stream cut
+     *
      * @param streamCut stream cut
      * @return A CompletableFuture, that when completed, will contain size of stream till given cut.
      */

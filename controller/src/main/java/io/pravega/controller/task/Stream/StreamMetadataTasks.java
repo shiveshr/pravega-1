@@ -520,9 +520,9 @@ public class StreamMetadataTasks extends TaskBase {
                             } else {
                                 Preconditions.checkNotNull(activeEpoch);
 
-                                if (epoch > activeEpoch.getKey()) {
+                                if (epoch > activeEpoch.getEpoch()) {
                                     response.setStatus(ScaleStatusResponse.ScaleStatus.INVALID_INPUT);
-                                } else if (activeEpoch.getKey() == epoch) {
+                                } else if (activeEpoch.getEpoch() == epoch) {
                                     response.setStatus(ScaleStatusResponse.ScaleStatus.IN_PROGRESS);
                                 } else {
                                     response.setStatus(ScaleStatusResponse.ScaleStatus.SUCCESS);
@@ -576,8 +576,6 @@ public class StreamMetadataTasks extends TaskBase {
 
     /**
      * Method to start scale operation. This creates new segments and then creates partial record in history table.
-     * After that it optimistically calls tryCompleteScale.
-     * Complete scale completes if there are no ongoing transactions on older epoch.
      * This method is called from both scale request handler and manual scale.
      * This takes a parameter called runOnlyIfStarted. The parameter is set from manual scale requests.
      * For autoscale, this is always false which means when a scale event is received on scale request event processor, it wil
@@ -617,41 +615,30 @@ public class StreamMetadataTasks extends TaskBase {
                                     return withRetries(() -> streamMetadataStore.scaleNewSegmentsCreated(scaleInput.getScope(),
                                             scaleInput.getStream(), context, executor), executor);
                                 })
-                                .thenCompose(x -> tryCompleteScale(scaleInput.getScope(), scaleInput.getStream(), response.getActiveEpoch(), context, delegationToken))
+                                .thenCompose(x -> completeScale(scaleInput, response.getActiveEpoch(), context, delegationToken))
                                 .thenApply(y -> response.getSegmentsCreated())));
     }
 
-
     /**
-     * Helper method to complete scale operation. It tries to optimistically complete the scale operation if no transaction is running
-     * against previous epoch. If so, it will proceed to seal old segments and then complete partial metadata records.
-     * @param scope scope
-     * @param stream stream
+     * Helper method to complete scale operation. It will proceed to seal old segments and then complete partial metadata records.
+     *
+     * @param event scale Op event which contains the input for scale
      * @param epoch epoch
      * @param context operation context
      * @param delegationToken token to be sent to segmentstore.
-     * @return returns true if it was able to complete scale. false otherwise
+     * @return returns a completable future which will complete successfully if scale is completed or hold the cause for failure otherwise.
      */
-    public CompletableFuture<Boolean> tryCompleteScale(String scope, String stream, int epoch, OperationContext context, String delegationToken) {
-        // Note: if we cant delete old epoch -- txns against old segments are ongoing..
-        // if we can delete old epoch, then only do we proceed to subsequent steps
-        return withRetries(() -> streamMetadataStore.tryDeleteEpochIfScaling(scope, stream, epoch, context, executor), executor)
-                .thenCompose(response -> {
-                    if (!response.isDeleted()) {
-                        return CompletableFuture.completedFuture(false);
-                    }
-                    assert !response.getSegmentsCreated().isEmpty() && !response.getSegmentsSealed().isEmpty();
-
-                    return notifySealedSegments(scope, stream, response.getSegmentsSealed(), delegationToken)
-                            .thenCompose(x -> getSealedSegmentsSize(scope, stream, response.getSegmentsSealed(), delegationToken))
-                            .thenCompose(map ->
-                                    withRetries(() -> streamMetadataStore.scaleSegmentsSealed(scope, stream, map, context,
-                                            executor), executor)
-                                    .thenApply(z -> {
-                                        log.info("scale processing for {}/{} epoch {} completed.", scope, stream, epoch);
-                                        return true;
-                                    }));
-                });
+    public CompletableFuture<Void> completeScale(ScaleOpEvent event, int epoch, OperationContext context, String delegationToken) {
+        String scope = event.getScope();
+        String stream = event.getStream();
+        return withRetries(() -> notifySealedSegments(scope, stream, event.getSegmentsToSeal(), delegationToken)
+                        .thenCompose(x -> getSealedSegmentsSize(scope, stream, event.getSegmentsToSeal(), delegationToken))
+                        .thenCompose(map ->
+                                withRetries(() -> streamMetadataStore.scaleSegmentsSealed(scope, stream, map, context,
+                                        executor), executor)
+                                .thenAccept(z -> {
+                                    log.info("scale processing for {}/{} epoch {} completed.", scope, stream, epoch);
+                                })), executor);
     }
 
     @VisibleForTesting

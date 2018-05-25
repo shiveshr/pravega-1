@@ -16,10 +16,13 @@ import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.TxnStatus;
+import io.pravega.controller.store.stream.tables.HistoryRecord;
+import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.shared.controller.event.CommitEvent;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -60,43 +63,39 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
 
     @Override
     public CompletableFuture<Void> execute(CommitEvent event) {
-        // 1. get epoch.. check if the epoch matches the epoch in commit event.. if true, we can proceed.. else throw OperationNotAllowedException
-        // 2. check if txn-commit-node exists.
+        // 1. check if txn-commit-node exists.
         //      if node exists and has same epoch, process the node.
-        // 3. if node doesnt exist, collect all committing txn in the epoch and create txn-commit-node.
-        // 4. loop over the transactions and commit one transaction at a time until all such transactions are committed.
+        // 2. if node doesnt exist, collect all committing txn in the epoch and create txn-commit-node.
+        // 3. set state to committing. // this ensures no scale can happen even if we failover and resume from an older checkpoint.
+        // 4.1 if epoch is same as active epoch, we can simply merge the transaction segments into parent segments.
+        // 4.1.a loop over the transactions and commit one transaction at a time until all such transactions are committed.
+        // 4.2 if epoch is behind active epoch, try creating epochTransitionNode. If we fail to create it because it exists and
+        // is different from what we intend to post, that can only be if it is posted by SCALING and we cant proceed for now.
+        // Reset state to ACTIVE and throw OperationNotAllowed. That will get the commit processing postponed and retried later.
+        // 4.2.a create duplicate epoch segments.
+        // 4.2.b merge transactions on duplicate epoch segments.
+        // 4.2.c seal duplicate epoch segments.
+        // 4.2.d create duplicate segments for active epoch
+        // 4.2.e add completed record for txnCommitEpoch and partial record For duplicateActiveEpoch to history table.
+        // 4.2.f seal active record.
         // 5. delete txn-commit-node
-        // 6. try complete scale.
-        // Note: Once scale is completed, all events for this epoch will become a no-op as all transactions would have been committed already.
         String scope = event.getScope();
         String stream = event.getStream();
         int epoch = event.getEpoch();
         OperationContext context = streamMetadataStore.createContext(scope, stream);
         log.debug("Attempting to commit available transactions on epoch {} on stream {}/{}", event.getEpoch(), event.getScope(), event.getStream());
 
-        return streamMetadataStore.getActiveEpoch(scope, stream, context, false, executor).thenCompose(pair -> {
-            if (epoch < pair.getKey()) {
-                log.debug("Epoch {} on stream {}/{} is already complete.", epoch, scope, stream);
-                return CompletableFuture.completedFuture(null);
-            } else if (epoch == pair.getKey()) {
-                // If the transaction's epoch is same as the stream's current epoch, commit it.
-                return tryCommitTransactions(scope, stream, epoch, context, this.streamMetadataTasks.retrieveDelegationToken());
-            } else {
-                // If commit request if from higher epoch, throw OperationNotAllowed. This will result in event being posted back.
-                String message = String.format("Transaction on old epoch should complete before allowing commits on new epoch %d on stream %s/%s",
-                        epoch, scope, stream);
-                throw StoreException.create(StoreException.Type.OPERATION_NOT_ALLOWED, message);
-            }
-        }).whenCompleteAsync((result, error) -> {
-            if (error != null) {
-                log.error("Exception while attempting to committ transaction on epoch {} on stream {}/{}", epoch, scope, stream, error);
-            } else {
-                log.debug("Successfully committed transactions on epoch {} on stream {}/{}", epoch, scope, stream);
-                if (processedEvents != null) {
-                    processedEvents.offer(event);
-                }
-            }
-        }, executor);
+        return tryCommitTransactions(scope, stream, epoch, context, this.streamMetadataTasks.retrieveDelegationToken())
+                .whenCompleteAsync((result, error) -> {
+                    if (error != null) {
+                        log.error("Exception while attempting to committ transaction on epoch {} on stream {}/{}", epoch, scope, stream, error);
+                    } else {
+                        log.debug("Successfully committed transactions on epoch {} on stream {}/{}", epoch, scope, stream);
+                        if (processedEvents != null) {
+                            processedEvents.offer(event);
+                        }
+                    }
+                }, executor);
     }
 
     @Override
@@ -109,12 +108,81 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                                                   final int epoch,
                                                   final OperationContext context,
                                                   final String delegationToken) {
-        // if node already exists and doesnt match event.transactionId, throw operation not allowed. dont worry,
-        // it will be posted back in the stream and retried later. Generally if a transaction commit starts, it will come to
-        // an end.. but during failover,
-        // once we have created the node, we are guaranteed that it will be only that transaction that will be getting
-        // committed at that time.. so post failover even when we recover, we will handle one transaction at a time.
-        CompletableFuture<List<UUID>> txnListFuture = streamMetadataStore.getTxnCommitList(scope, stream, context, executor)
+        // try creating txn commit list first. if node already exists and doesnt match the processing in the event, throw operation not allowed.
+        // This will result in event being posted back in the stream and retried later. Generally if a transaction commit starts, it will come to
+        // an end.. but during failover, once we have created the node, we are guaranteed that it will be only that transaction that will be getting
+        // committed at that time.
+        CompletableFuture<List<UUID>> txnListFuture = createAndGetCommitTxnListRecord(scope, stream, epoch, context);
+
+        CompletableFuture<Void> commitFuture = txnListFuture
+                .thenCompose(txnList -> {
+                    if (txnList.isEmpty()) {
+                        // reset state conditionally in case we were left with stale committing state from a previous execution
+                        // that died just before updating the state back to ACTIVE.
+                        return streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING, context, executor);
+                    } else {
+                        // Try to set the state of the stream to COMMITTING.
+                        // Once state is set to committing, we are guaranteed that this will be the only processing that can happen on the stream
+                        // and we can proceed with committing outstanding transactions collected in the txnList step.
+                        // If we are not able to update the state it means there is some other ongoing
+                        // processing and operation not allowed will mean this processing will be postponed with txn commit node created.
+                        return streamMetadataStore.setState(scope, stream, State.COMMITTING, context, executor)
+                                .thenCompose(v -> getEpochRecords(scope, stream, epoch, context)
+                                        .thenCompose(records -> {
+                                            HistoryRecord epochRecord = records.get(0);
+                                            HistoryRecord activeEpochRecord = records.get(1);
+                                            if (activeEpochRecord.getEpoch() == epoch ||
+                                                    activeEpochRecord.getReference() == epochRecord.getReference()) {
+                                                // if transactions were created on active epoch or a duplicate of active epoch, we can commit transactions immediately
+                                                return commitTransactionsOnActiveEpoch(scope, stream, epoch, epochRecord.getSegments(), txnList, context);
+                                            } else {
+                                                return commitTransactionsOnOldEpoch(scope, stream, epoch, txnList, context);
+                                            }
+                                        }));
+                    }
+                });
+
+        // once all commits are done, reset state to ACTIVE and delete commit txn node.
+        return Futures.toVoid(commitFuture
+                .thenCompose(v -> streamMetadataStore.deleteTxnCommitList(scope, stream, context, executor))
+                .thenCompose(v -> streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor)));
+    }
+
+    private CompletableFuture<List<HistoryRecord>> getEpochRecords(String scope, String stream, int epoch, OperationContext context) {
+        List<CompletableFuture<HistoryRecord>> list = new ArrayList<>();
+        list.add(streamMetadataStore.getEpochRecord(scope, stream, epoch, context, executor));
+        list.add(streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor));
+        return Futures.allOfWithResults(list);
+    }
+
+    private CompletableFuture<Void> commitTransactionsOnOldEpoch(String scope, String stream, int epoch, List<UUID> txnList, OperationContext context) {
+        // first compute what the epoch transition node will look like.
+        // then try to createEpochTransitionNode if it doesnt exist.
+        // now retrieve epochTransitionNode. if it matches what we intended to create, we can proceed.
+        // else its likely created by a scale operation (either manual or post failover recovery).
+        // throw opeartion not allowed
+        // if we have successfully created
+
+    }
+
+    private CompletableFuture<Void> commitTransactionsOnActiveEpoch(String scope, String stream, int epoch, List<Long> segments,
+                                                                    List<UUID> transactionsToCommit, OperationContext context) {
+        // Chain all transaction commit futures one after the other. This will ensure that order of commit
+        // if honoured and is based on the order in the list.
+        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+        for (UUID txnId : transactionsToCommit) {
+            log.debug("Committing transaction {} on stream {}/{}", txnId, scope, stream);
+            future = future.thenCompose(v -> streamMetadataTasks.notifyTxnCommit(scope, stream, segments, txnId)
+                    .thenCompose(x -> streamMetadataStore.commitTransaction(scope, stream, epoch, txnId, context, executor)
+                            .thenAccept(done -> {
+                                log.debug("transaction {} on stream {}/{} committed successfully", txnId, scope, stream);
+                            })));
+        }
+        return future;
+    }
+
+    private CompletableFuture<List<UUID>> createAndGetCommitTxnListRecord(String scope, String stream, int epoch, OperationContext context) {
+        return streamMetadataStore.getTxnCommitList(scope, stream, context, executor)
                 .thenCompose(record -> {
                     if (record == null) {
                         // no ongoing commits on transactions.
@@ -133,28 +201,6 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                         }
                     }
                 });
-
-        CompletableFuture<Void> commitFuture = txnListFuture
-                .thenCompose(transactionsToCommit -> streamMetadataStore.getActiveSegmentIds(scope, stream, epoch, context, executor)
-                .thenCompose(segments -> {
-                    // Chain all transaction commit futures one after the other. This will ensure that order of commit
-                    // if honoured and is based on the order in the list.
-                    CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-                    for (UUID txnId : transactionsToCommit) {
-                        log.debug("Committing transaction {} on stream {}/{}", txnId, scope, stream);
-                        future = future.thenCompose(v -> streamMetadataTasks.notifyTxnCommit(scope, stream, segments, txnId)
-                                .thenCompose(x -> streamMetadataStore.commitTransaction(scope, stream, epoch, txnId, context, executor)
-                                        .thenAccept(done -> {
-                                            log.debug("transaction {} on stream {}/{} committed successfully", txnId, scope, stream);
-                                        })));
-                    }
-
-                    return future;
-                }));
-
-        // once all commits are done, delete commit txn node
-        return commitFuture.thenCompose(v -> streamMetadataStore.deleteTxnCommitList(scope, stream, context, executor)
-                .thenCompose(x -> Futures.toVoid(streamMetadataTasks.tryCompleteScale(scope, stream, epoch, context, delegationToken))));
     }
 
     private CompletableFuture<List<UUID>> createNewTxnCommitList(String scope, String stream, int epoch,

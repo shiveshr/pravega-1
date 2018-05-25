@@ -39,6 +39,12 @@ public class HistoryRecord {
     @Getter
     private final int epoch;
     /**
+     * This refers to epoch whose duplicate this epoch HistoryRecord may be.
+     * If reference is same as epoch, then this is a clean creation of epoch rather than a duplicate.
+     */
+    @Getter
+    private final int reference;
+    /**
      * Segment ids have two parts, primary id and secondary id.
      * Primary Id is encoded in LSB of each long and secondary id is encoded in MSB.
      * Note: secondary id is optional and 0 value will signify its absence.
@@ -51,16 +57,27 @@ public class HistoryRecord {
     private final boolean partial;
 
     @Builder
-    HistoryRecord(int epoch, List<Long> segments, long scaleTime) {
+    HistoryRecord(int epoch, int reference, List<Long> segments, long scaleTime) {
         this.epoch = epoch;
+        this.reference = reference;
         this.segments = segments;
         this.scaleTime = scaleTime;
         partial = scaleTime == Long.MIN_VALUE;
     }
 
     @Builder
+    HistoryRecord(int epoch, List<Long> segments, long scaleTime) {
+        this(epoch, epoch, segments, scaleTime);
+    }
+
+    @Builder
     HistoryRecord(int epoch, List<Long> segments) {
         this(epoch, segments, Long.MIN_VALUE);
+    }
+
+    @Builder
+    HistoryRecord(int epoch, int reference, List<Long> segments) {
+        this(epoch, reference, segments, Long.MIN_VALUE);
     }
 
     @SneakyThrows(IOException.class)

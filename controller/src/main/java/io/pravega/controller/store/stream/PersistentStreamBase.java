@@ -111,14 +111,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
                         .thenCompose((Void v) -> createStateIfAbsent(State.CREATING))
                         .thenCompose((Void v) -> createNewSegmentTableWithIndex(createStreamResponse.getConfiguration(),
                                 createStreamResponse.getTimestamp()))
-                        .thenCompose((Void v) -> getState(true))
-                        .thenCompose(state -> {
-                            if (state.equals(State.CREATING)) {
-                                return createNewEpoch(0);
-                            } else {
-                                return CompletableFuture.completedFuture(null);
-                            }
-                        })
                         .thenCompose((Void v) -> createHistoryIndexIfAbsent(new Data<>(
                                 TableHelper.createHistoryIndex(), null)))
                         .thenCompose((Void v) -> {
@@ -680,19 +672,20 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     /**
-     * If scale is ongoing, try to delete the epoch node.
+     * If given epoch is behind active epoch, attempt to delete it. If it has no on going transaction then we can safely
+     * delete it.
      *
      * @param epoch epoch
      * @return true if we are able to delete the epoch, false otherwise.
      */
     @Override
-    public CompletableFuture<Boolean> scaleTryDeleteEpoch(final int epoch) {
+    public CompletableFuture<Boolean> tryDeleteEpochIfStale(final int epoch) {
         return getHistoryIndexFromStore()
                 .thenCompose(historyIndex -> getHistoryTableFromStore()
                         .thenCompose(historyTable -> {
                             CompletableFuture<Boolean> result = new CompletableFuture<>();
 
-                            if (TableHelper.isNewEpochCreated(historyIndex.getData(), historyTable.getData())) {
+                            if (TableHelper.getLatestEpoch(historyIndex.getData(), historyTable.getData()).getEpoch() > epoch) {
                                 deleteEpochNode(epoch)
                                         .whenComplete((r, e) -> {
                                             if (e != null) {
@@ -779,9 +772,9 @@ public abstract class PersistentStreamBase<T> implements Stream {
 
     @Override
     public CompletableFuture<UUID> generateNewTxnId(int msb32Bit, long lsb64Bit) {
-        return getLatestEpoch()
-                .thenApply(epoch -> {
-                    long msb64Bit = (long) epoch.getKey() << 32 | msb32Bit & 0xFFFFFFFFL;
+        return getActiveEpoch(false)
+                .thenApply(epochRecord -> {
+                    long msb64Bit = (long) epochRecord.getEpoch() << 32 | msb32Bit & 0xFFFFFFFFL;
                     return new UUID(msb64Bit, lsb64Bit);
                 });
     }
@@ -1011,7 +1004,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     @Override
-    public CompletableFuture<Pair<Integer, List<Long>>> getActiveEpoch(boolean ignoreCached) {
+    public CompletableFuture<HistoryRecord> getActiveEpoch(boolean ignoreCached) {
 
         return (ignoreCached ? getHistoryIndexFromStore() : getHistoryIndex())
                 .thenCompose(historyIndex -> (ignoreCached ? getHistoryTableFromStore() :
@@ -1020,7 +1013,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     @Override
-    public CompletableFuture<Pair<Integer, List<Long>>> getLatestEpoch() {
+    public CompletableFuture<Pair<Integer, List<Long>>> getEpoch() {
         return getHistoryIndex()
                 .thenCompose(historyIndex -> getHistoryTable()
                         .thenApply(historyTable -> TableHelper.getLatestEpoch(historyIndex.getData(), historyTable.getData())))
@@ -1203,8 +1196,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                     historyTable.getData(), newActiveSegments);
                             final Data<T> updated = new Data<>(updatedTable, historyTable.getVersion());
 
-                            return createNewEpoch(newEpoch)
-                                    .thenCompose(v -> addHistoryIndexRecord(newEpoch, offset))
+                            return addHistoryIndexRecord(newEpoch, offset)
                                     .thenCompose(v -> updateHistoryTable(updated))
                                     .whenComplete((r, e) -> {
                                         if (e == null) {

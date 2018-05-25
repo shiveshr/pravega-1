@@ -365,8 +365,8 @@ class ZKStream extends PersistentStreamBase<Integer> {
         final String activePath = getActiveTxPath(epoch, txId.toString());
         final byte[] txnRecord = new ActiveTxnRecord(timestamp, leaseExpiryTime, maxExecutionExpiryTime,
                 scaleGracePeriod, TxnStatus.OPEN).toByteArray();
-        // Note: this can throw DataNotFoundException as the epoch node (parent) may have been deleted.
-        return store.createZNodeIfNotExist(activePath, txnRecord, false)
+        // we will always create parent if needed so that transactions are created successfully even if the epoch znode was empty and deleted.
+        return store.createZNodeIfNotExist(activePath, txnRecord, true)
                 .thenApply(x -> cache.invalidateCache(activePath));
     }
 

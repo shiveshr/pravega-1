@@ -646,7 +646,7 @@ public class TableHelper {
      * @return true if a scale operation can be performed, false otherwise
      */
     public static boolean canScaleFor(final List<Long> segmentsToSeal, final byte[] historyIndex, final byte[] historyTable) {
-        return getActiveEpoch(historyIndex, historyTable).getValue().containsAll(segmentsToSeal);
+        return getActiveEpoch(historyIndex, historyTable).getSegments().containsAll(segmentsToSeal);
     }
 
     /**
@@ -707,9 +707,9 @@ public class TableHelper {
      * @param historyIndex history index
      * @return active epoch
      */
-    public static Pair<Integer, List<Long>> getActiveEpoch(final byte[] historyIndex, final byte[] historyTable) {
+    public static HistoryRecord getActiveEpoch(final byte[] historyIndex, final byte[] historyTable) {
         HistoryRecord historyRecord = HistoryRecord.readLatestRecord(historyIndex, historyTable, true).get();
-        return new ImmutablePair<>(historyRecord.getEpoch(), historyRecord.getSegments());
+        return historyRecord;
     }
 
     /**
@@ -897,16 +897,16 @@ public class TableHelper {
     public static EpochTransitionRecord computeEpochTransition(byte[] historyIndex, byte[] historyTable, byte[] segmentIndex,
                                                                byte[] segmentTable, List<Long> segmentsToSeal,
                                                                List<AbstractMap.SimpleEntry<Double, Double>> newRanges, long scaleTimestamp) {
-        Pair<Integer, List<Long>> activeEpoch = getActiveEpoch(historyIndex, historyTable);
-        Preconditions.checkState(activeEpoch.getValue().containsAll(segmentsToSeal), "Invalid epoch transition request");
+        HistoryRecord activeEpoch = getActiveEpoch(historyIndex, historyTable);
+        Preconditions.checkState(activeEpoch.getSegments().containsAll(segmentsToSeal), "Invalid epoch transition request");
 
-        int newEpoch = activeEpoch.getKey() + 1;
+        int newEpoch = activeEpoch.getEpoch() + 1;
         int segmentCount = getSegmentCount(segmentIndex, segmentTable);
         Map<Long, AbstractMap.SimpleEntry<Double, Double>> newSegments = new HashMap<>();
         IntStream.range(0, newRanges.size()).forEach(x -> {
             newSegments.put(computeSegmentId(segmentCount + x, newEpoch), newRanges.get(x));
         });
-        return new EpochTransitionRecord(activeEpoch.getKey(), newEpoch, scaleTimestamp, ImmutableSet.copyOf(segmentsToSeal),
+        return new EpochTransitionRecord(activeEpoch.getEpoch(), newEpoch, scaleTimestamp, ImmutableSet.copyOf(segmentsToSeal),
                 ImmutableMap.copyOf(newSegments));
     }
 
