@@ -728,6 +728,22 @@ public class TableHelper {
     }
 
     /**
+     * Method to fetch history record corresponding to the given epoch.
+     *
+     * @param historyTable history table
+     * @param historyIndex history index
+     * @param epoch            epoch
+     *
+     * @return History record corresponding to the epoch
+     */
+    public static HistoryRecord getEpoch(final byte[] historyIndex, final byte[] historyTable, final int epoch) {
+        Optional<HistoryRecord> record = HistoryRecord.readRecord(epoch, historyIndex, historyTable, false);
+
+        return record.orElseThrow(() -> StoreException.create(StoreException.Type.DATA_NOT_FOUND,
+                "Epoch: " + epoch + " not found in history table"));
+    }
+
+    /**
      * Return the active epoch.
      * @param historyTable history table
      * @param historyIndex history index

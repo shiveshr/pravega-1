@@ -1013,11 +1013,10 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     @Override
-    public CompletableFuture<Pair<Integer, List<Long>>> getEpoch() {
+    public CompletableFuture<HistoryRecord> getEpochRecord(int epoch) {
         return getHistoryIndex()
                 .thenCompose(historyIndex -> getHistoryTable()
-                        .thenApply(historyTable -> TableHelper.getLatestEpoch(historyIndex.getData(), historyTable.getData())))
-                .thenApply(historyRecord -> new ImmutablePair<>(historyRecord.getEpoch(), historyRecord.getSegments()));
+                        .thenApply(historyTable -> TableHelper.getEpoch(historyIndex.getData(), historyTable.getData(), epoch)));
     }
 
     @Override
@@ -1100,7 +1099,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     @Override
-    public CompletableFuture<CommittingTransactionsRecord> getTxnCommitList() {
+    public CompletableFuture<CommittingTransactionsRecord> getCommittingTransactionsRecord() {
         CompletableFuture<CommittingTransactionsRecord> result = new CompletableFuture<>();
         getCommittingTxnRecord()
                 .whenComplete((r, e) -> {

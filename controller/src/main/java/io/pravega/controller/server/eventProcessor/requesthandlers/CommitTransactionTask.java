@@ -182,7 +182,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
     }
 
     private CompletableFuture<List<UUID>> createAndGetCommitTxnListRecord(String scope, String stream, int epoch, OperationContext context) {
-        return streamMetadataStore.getTxnCommitList(scope, stream, context, executor)
+        return streamMetadataStore.getCommittingTransactionsRecord(scope, stream, context, executor)
                 .thenCompose(record -> {
                     if (record == null) {
                         // no ongoing commits on transactions.
