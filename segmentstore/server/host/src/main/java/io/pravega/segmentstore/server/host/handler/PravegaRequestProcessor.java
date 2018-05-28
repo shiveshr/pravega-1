@@ -466,7 +466,6 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
                             connection.send(new WireCommands.SegmentsMerged(requestId, mergeSegments.getTarget(), mergeSegments.getSource()));
                             return null;
                         } else {
-                            // TODO: shivesh
                             return handleException(requestId, mergeSegments.getSource(), "Merge Segments", e);
                         }
                     });

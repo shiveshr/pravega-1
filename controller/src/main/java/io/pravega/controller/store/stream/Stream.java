@@ -12,6 +12,7 @@ package io.pravega.controller.store.stream;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
+import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
@@ -196,10 +197,10 @@ interface Stream {
      * @param runOnlyIfStarted run only if scale is started
      * @return sequence of newly created segments
      */
-    CompletableFuture<StartScaleResponse> startScale(final List<Long> sealedSegments,
-                                                     final List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
-                                                     final long scaleTimestamp,
-                                                     final boolean runOnlyIfStarted);
+    CompletableFuture<EpochTransitionRecord> startScale(final List<Long> sealedSegments,
+                                                        final List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
+                                                        final long scaleTimestamp,
+                                                        final boolean runOnlyIfStarted);
     
     /**
      * Called after epochTransition entry is created. Implementation of this method should create new segments that are
@@ -223,10 +224,37 @@ interface Stream {
     CompletableFuture<Void> scaleOldSegmentsSealed(Map<Long, Long> sealedSegmentSizes);
 
     /**
-     * Returns the latest sets of segments created and removed by doing a diff of last two epochs.
-     * @return returns a pair of list of segments sealed and list of segments created in latest(including ongoing) scale event.
+     * Start rolling transaction method is first step for committing transations on old epoch. This method will create an epoch transition record
+     * entry in metadata. If it is able to successfully create the entry then rolling transaction can continue.
+     *
+     * @param activeEpoch currently active epoch.
+     * @param txnEpoch epoch in which transaction was created.
+     * @param transactionsToCommit
+     * @param timestamp
+     * @return
      */
-    CompletableFuture<Pair<List<Long>, List<Long>>> latestScaleData();
+    CompletableFuture<EpochTransitionRecord> startRollingTransaction(int activeEpoch, int txnEpoch, List<UUID> transactionsToCommit, long timestamp);
+
+    /**
+     * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
+     * have been created successfully in segment store.
+     * This method should only be called after successful execution of startRollingTxn which will create an epochtransition record.
+     * This method will update metadata records for epoch to add two new epochs, one for duplicate txn epoch where transactions
+     * are merged and the other for duplicate active epoch.
+     *
+     * @param sealedTxnEpochSegments sealed segments from intermediate txn epoch with size at the time of sealing
+     * @return CompletableFuture which upon completion will indicate that we have successfully created new epoch entries.
+     */
+    CompletableFuture<Void> rollingTxnNewSegmentsCreated(Map<Long, Long> sealedTxnEpochSegments);
+
+    /**
+     * This is final step of rolling transaction and is called after old segments are sealed in segment store.
+     * This should complete the epoch transition in the metadata store.
+     *
+     * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing
+     * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.
+     */
+    CompletableFuture<Void> rollingTxnActiveEpochSealed(Map<Long, Long> sealedActiveEpochSegments);
 
     /**
      * Sets cold marker which is valid till the specified time stamp.
@@ -317,22 +345,20 @@ interface Stream {
      * If already committed, return TxnStatus.Committed.
      * If aborting/aborted, return a failed future with IllegalStateException.
      *
-     * @param epoch transaction epoch.
      * @param txId  transaction identifier.
      * @return      transaction status.
      */
-    CompletableFuture<TxnStatus> commitTransaction(final int epoch, final UUID txId);
+    CompletableFuture<TxnStatus> commitTransaction(final UUID txId);
 
     /**
      * Aborts a transaction.
      * If already aborted, return TxnStatus.Aborted.
      * If committing/committed, return a failed future with IllegalStateException.
      *
-     * @param epoch transaction epoch.
      * @param txId  transaction identifier.
      * @return      transaction status.
      */
-    CompletableFuture<TxnStatus> abortTransaction(final int epoch, final UUID txId);
+    CompletableFuture<TxnStatus> abortTransaction(final UUID txId);
 
     /**
      * Return whether any transaction is active on the stream.

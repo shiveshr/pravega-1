@@ -56,6 +56,10 @@ import io.pravega.shared.controller.event.UpdateStreamEvent;
 import io.pravega.shared.metrics.DynamicLogger;
 import io.pravega.shared.metrics.MetricsProvider;
 import io.pravega.shared.protocol.netty.WireCommands;
+import io.pravega.shared.segment.StreamSegmentNameUtils;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.NotImplementedException;
+
 import java.io.Serializable;
 import java.time.Duration;
 import java.util.AbstractMap;
@@ -63,8 +67,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -74,10 +78,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-
-import io.pravega.shared.segment.StreamSegmentNameUtils;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.NotImplementedException;
 
 import static io.pravega.controller.task.Stream.TaskStepsRetryHelper.withRetries;
 import static io.pravega.shared.MetricsNames.RETENTION_FREQUENCY;
@@ -485,7 +485,7 @@ public class StreamMetadataTasks extends TaskBase {
                                 log.info("scale for stream {}/{} started successfully", scope, stream);
                                 response.setStatus(ScaleResponse.ScaleStreamStatus.STARTED);
                                 response.addAllSegments(
-                                        startScaleResponse.getSegmentsCreated()
+                                        startScaleResponse.getNewSegmentsWithRange().entrySet()
                                                 .stream()
                                                 .map(segment -> convert(scope, stream, segment))
                                                 .collect(Collectors.toList()));
@@ -574,73 +574,6 @@ public class StreamMetadataTasks extends TaskBase {
         return requestEventWriterRef.get();
     }
 
-    /**
-     * Method to start scale operation. This creates new segments and then creates partial record in history table.
-     * This method is called from both scale request handler and manual scale.
-     * This takes a parameter called runOnlyIfStarted. The parameter is set from manual scale requests.
-     * For autoscale, this is always false which means when a scale event is received on scale request event processor, it wil
-     * be processed.
-     * However, if a scale operation is started as part of a manual scale request, we want to make sure that manual scale operation
-     * does not get stuck in an incomplete state and hence we also post a request for its processing in scale event stream.
-     * However we want to process the scale request inline with the callers call so that we can send the response. And we want to
-     * make sure that we dont do any processing on the scale request if caller may have responded with some pre condition failure.
-     * So we send this flag to the event processor to process the scale request only if it was already started. Otherwise ignore.
-     *
-     * @param scaleInput scale input
-     * @param runOnlyIfStarted run only if the scale operation was already running. It will ignore requests if the operation isnt started
-     *                         by the caller.
-     * @param context operation context
-     * @param delegationToken token to be sent to segmentstore.
-     * @return returns list of new segments created as part of this scale operation.
-     */
-    public CompletableFuture<List<Segment>> startScale(ScaleOpEvent scaleInput, boolean runOnlyIfStarted, OperationContext context, String delegationToken) { // called upon event read from requeststream
-        return withRetries(() -> streamMetadataStore.startScale(scaleInput.getScope(),
-                        scaleInput.getStream(),
-                        scaleInput.getSegmentsToSeal(),
-                        scaleInput.getNewRanges(),
-                        scaleInput.getScaleTime(),
-                        runOnlyIfStarted,
-                        context,
-                        executor), executor)
-                .thenCompose(response -> streamMetadataStore.setState(scaleInput.getScope(), scaleInput.getStream(),
-                        State.SCALING, context, executor)
-                        .thenCompose(v -> streamMetadataStore.scaleCreateNewSegments(scaleInput.getScope(),
-                                scaleInput.getStream(), context, executor))
-                        .thenCompose(v -> notifyNewSegments(scaleInput.getScope(), scaleInput.getStream(),
-                                response.getSegmentsCreated(), context, delegationToken)
-
-                                .thenCompose(x -> {
-                                    assert !response.getSegmentsCreated().isEmpty();
-
-                                    return withRetries(() -> streamMetadataStore.scaleNewSegmentsCreated(scaleInput.getScope(),
-                                            scaleInput.getStream(), context, executor), executor);
-                                })
-                                .thenCompose(x -> completeScale(scaleInput, response.getActiveEpoch(), context, delegationToken))
-                                .thenApply(y -> response.getSegmentsCreated())));
-    }
-
-    /**
-     * Helper method to complete scale operation. It will proceed to seal old segments and then complete partial metadata records.
-     *
-     * @param event scale Op event which contains the input for scale
-     * @param epoch epoch
-     * @param context operation context
-     * @param delegationToken token to be sent to segmentstore.
-     * @return returns a completable future which will complete successfully if scale is completed or hold the cause for failure otherwise.
-     */
-    public CompletableFuture<Void> completeScale(ScaleOpEvent event, int epoch, OperationContext context, String delegationToken) {
-        String scope = event.getScope();
-        String stream = event.getStream();
-        return withRetries(() -> notifySealedSegments(scope, stream, event.getSegmentsToSeal(), delegationToken)
-                        .thenCompose(x -> getSealedSegmentsSize(scope, stream, event.getSegmentsToSeal(), delegationToken))
-                        .thenCompose(map ->
-                                withRetries(() -> streamMetadataStore.scaleSegmentsSealed(scope, stream, map, context,
-                                        executor), executor)
-                                .thenAccept(z -> {
-                                    log.info("scale processing for {}/{} epoch {} completed.", scope, stream, epoch);
-                                })), executor);
-    }
-
     @VisibleForTesting
     CompletableFuture<CreateStreamStatus.Status> createStreamBody(String scope, String stream,
                                                                           StreamConfiguration config, long timestamp) {
@@ -709,13 +642,12 @@ public class StreamMetadataTasks extends TaskBase {
         return retVal;
     }
 
-    private CompletableFuture<Void> notifyNewSegments(String scope, String stream, List<Segment> segmentNumbers, OperationContext context, String controllerToken) {
+    public CompletableFuture<Void> notifyNewSegments(String scope, String stream, List<Long> segmentIds, OperationContext context, String controllerToken) {
         return withRetries(() -> streamMetadataStore.getConfiguration(scope, stream, context, executor), executor)
-                .thenCompose(configuration -> notifyNewSegments(scope, stream, configuration,
-                        segmentNumbers.stream().map(Segment::getSegmentId).collect(Collectors.toList()), controllerToken));
+                .thenCompose(configuration -> notifyNewSegments(scope, stream, configuration, segmentIds, controllerToken));
     }
 
-    private CompletableFuture<Void> notifyNewSegments(String scope, String stream, StreamConfiguration configuration, List<Long> segmentIds, String controllerToken) {
+    public CompletableFuture<Void> notifyNewSegments(String scope, String stream, StreamConfiguration configuration, List<Long> segmentIds, String controllerToken) {
         return Futures.toVoid(Futures.allOfWithResults(segmentIds
                 .stream()
                 .parallel()
@@ -723,7 +655,7 @@ public class StreamMetadataTasks extends TaskBase {
                 .collect(Collectors.toList())));
     }
 
-    private CompletableFuture<Void> notifyNewSegment(String scope, String stream, long segmentId, ScalingPolicy policy, String controllerToken) {
+    public CompletableFuture<Void> notifyNewSegment(String scope, String stream, long segmentId, ScalingPolicy policy, String controllerToken) {
         return Futures.toVoid(withRetries(() -> segmentHelper.createSegment(scope,
                 stream, segmentId, policy, hostControllerStore, this.connectionFactory, controllerToken), executor));
     }
@@ -799,9 +731,9 @@ public class StreamMetadataTasks extends TaskBase {
                 this.connectionFactory, delegationToken), executor);
     }
 
-    private SegmentRange convert(String scope, String stream, Segment segment) {
-        return ModelHelper.createSegmentRange(scope, stream, segment.getSegmentId(), segment.getKeyEnd(),
-                segment.getKeyEnd());
+    private SegmentRange convert(String scope, String stream, Map.Entry<Long, AbstractMap.SimpleEntry<Double, Double>> segment) {
+        return ModelHelper.createSegmentRange(scope, stream, segment.getKey(), segment.getValue().getKey(),
+                segment.getValue().getValue());
     }
 
     private UpdateStreamStatus.Status handleUpdateStreamError(Throwable ex) {
@@ -836,7 +768,6 @@ public class StreamMetadataTasks extends TaskBase {
                                                                     final long segmentNumber, final UUID txnId) {
         return TaskStepsRetryHelper.withRetries(() -> segmentHelper.commitTransaction(scope,
                 stream,
-                // TODO: shivesh add target segment number and source segment number
                 segmentNumber,
                 segmentNumber,
                 txnId,

@@ -15,6 +15,7 @@ import io.pravega.controller.server.retention.BucketChangeListener;
 import io.pravega.controller.server.retention.BucketOwnershipListener;
 import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
+import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
@@ -397,7 +398,7 @@ public interface StreamMetadataStore {
      * @param executor       callers executor
      * @return the list of newly created segments
      */
-    CompletableFuture<StartScaleResponse> startScale(final String scope, final String name,
+    CompletableFuture<EpochTransitionRecord> startScale(final String scope, final String name,
                                                             final List<Long> sealedSegments,
                                                             final List<SimpleEntry<Double, Double>> newRanges,
                                                             final long scaleTimestamp,
@@ -434,7 +435,7 @@ public interface StreamMetadataStore {
                                                     final Executor executor);
 
     /**
-     * Called after old segments are sealed in pravega.
+     * Called after old segments are sealed in segment store.
      *
      * @param scope          stream scope
      * @param name           stream name.
@@ -447,6 +448,59 @@ public interface StreamMetadataStore {
                                                 final Map<Long, Long> sealedSegmentSizes,
                                                 final OperationContext context,
                                                 final Executor executor);
+
+    /**
+     * Start rolling transaction for committing transations on old epoch. This method will create an epoch transition record
+     * entry in metadata. If it is able to successfully create the entry then rolling transaction can continue.
+     *
+     * @param scope          stream scope
+     * @param name           stream name.
+     * @param activeEpoch    active epoch.
+     * @param transactionEpoch transaction epoch.
+     * @param transactionsToCommit transaction to commit.
+     * @param context        operation context
+     * @param executor       callers executor
+     * @return the list of newly created segments
+     */
+    CompletableFuture<EpochTransitionRecord> startRollingTxn(final String scope, final String name,
+                                                             final HistoryRecord activeEpoch,
+                                                             final HistoryRecord transactionEpoch,
+                                                             final List<UUID> transactionsToCommit,
+                                                             final long timestamp,
+                                                             final OperationContext context,
+                                                             final Executor executor);
+
+    /**
+     * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
+     * have been created successfully in segment store.
+     * This method should only be called after successful execution of startRollingTxn which will create an epochtransition record.
+     * This method will update metadata records for epoch to add two new epochs, one for duplicate txn epoch where transactions
+     * are merged and the other for duplicate active epoch.
+     *
+     * @param scope          stream scope
+     * @param name           stream name.
+     * @param sealedTxnEpochSegments sealed segments from intermediate txn epoch with size at the time of sealing
+     * @param context        operation context
+     * @param executor       callers executor
+     * @return CompletableFuture which upon completion will indicate that we have successfully created new epoch entries.
+     */
+    CompletableFuture<Void> rollingTxnNewSegmentsCreated(final String scope, final String name, Map<Long, Long> sealedTxnEpochSegments,
+                                                         final OperationContext context, final Executor executor);
+
+    /**
+     * This is final step of rolling transaction and is called after old segments are sealed in segment store.
+     * This should complete the epoch transition in the metadata store.
+     *
+     * @param scope          stream scope
+     * @param name           stream name.
+     * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing
+     * @param context        operation context
+     * @param executor       callers executor
+     * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.
+     */
+    CompletableFuture<Void> rollingTxnActiveEpochSealed(final String scope, final String name, final Map<Long, Long> sealedActiveEpochSegments,
+                                                        final OperationContext context, final Executor executor);
+
 
     /**
      * If the state of the stream in the store matches supplied state, reset.
@@ -544,13 +598,12 @@ public interface StreamMetadataStore {
      *
      * @param scope    scope
      * @param stream   stream
-     * @param epoch    transaction epoch
      * @param txId     transaction id
      * @param context  operation context
      * @param executor callers executor
      * @return transaction status.
      */
-    CompletableFuture<TxnStatus> commitTransaction(final String scope, final String stream, final int epoch,
+    CompletableFuture<TxnStatus> commitTransaction(final String scope, final String stream,
                                                    final UUID txId, final OperationContext context,
                                                    final Executor executor);
 
@@ -577,13 +630,12 @@ public interface StreamMetadataStore {
      *
      * @param scope    scope
      * @param stream   stream
-     * @param epoch    transaction epoch
      * @param txId     transaction id
      * @param context  operation context
      * @param executor callers executor
      * @return transaction status
      */
-    CompletableFuture<TxnStatus> abortTransaction(final String scope, final String stream, final int epoch,
+    CompletableFuture<TxnStatus> abortTransaction(final String scope, final String stream,
                                                   final UUID txId, final OperationContext context,
                                                   final Executor executor);
 
@@ -680,11 +732,11 @@ public interface StreamMetadataStore {
      * @param executor callers executor
      * @return         Completable future that, upon completion, holds epoch history record corresponding to request epoch.
      */
-    CompletableFuture<HistoryRecord> getEpochRecord(final String scope,
-                                                    final String stream,
-                                                    final int epoch,
-                                                    final OperationContext context,
-                                                    final Executor executor);
+    CompletableFuture<HistoryRecord> getEpoch(final String scope,
+                                              final String stream,
+                                              final int epoch,
+                                              final OperationContext context,
+                                              final Executor executor);
 
         /**
          * Api to mark a segment as cold.
@@ -856,9 +908,8 @@ public interface StreamMetadataStore {
                                                  final OperationContext context, final ScheduledExecutorService executor);
 
     /**
-     * Method to fetch committing transaction record from the store for a given stream.
-     * Note: this will not throw data not found exception if the committing transaction node is not found. Instead
-     * it returns null.
+     * Method to create committing transaction record in the store for a given stream.
+     * Note: this will not throw data exists exception if the committing transaction node already exists.
      *
      * @param scope scope name
      * @param stream stream name
@@ -866,7 +917,7 @@ public interface StreamMetadataStore {
      * @param txnsToCommit transactions to commit within the epoch
      * @param context operation context
      * @param executor executor
-     * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
+     * @return A completableFuture which, when completed, mean that the record has been created successfully.
      */
     CompletableFuture<Void> createCommittingTransactionsRecord(final String scope, final String stream, final int epoch, final List<UUID> txnsToCommit,
                                                                final OperationContext context, final ScheduledExecutorService executor);

@@ -37,6 +37,7 @@ import io.pravega.controller.util.Config;
 import io.pravega.controller.util.RetryHelper;
 import io.pravega.shared.controller.event.AbortEvent;
 import io.pravega.shared.controller.event.CommitEvent;
+import io.pravega.shared.segment.StreamSegmentNameUtils;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
@@ -348,7 +349,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                 }
                             });
 
-                    // Step 3. Create txn node in the store.
+                    // Step 3. Create txn node in the store. This node will get created under the epoch that is extracted
+                    // from transaction id.
                     CompletableFuture<VersionedTransactionData> txnFuture = addIndex.thenComposeAsync(ignore ->
                             streamMetadataStore.createTransaction(scope, stream, txnId, lease, maxExecutionPeriod,
                                     scaleGracePeriod, ctx, executor), executor).whenComplete((v, e) -> {

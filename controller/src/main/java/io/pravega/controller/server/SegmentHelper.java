@@ -9,6 +9,7 @@
  */
 package io.pravega.controller.server;
 
+import com.google.common.base.Preconditions;
 import io.pravega.client.netty.impl.ClientConnection;
 import io.pravega.client.netty.impl.ConnectionFactory;
 import io.pravega.client.stream.ScalingPolicy;
@@ -31,10 +32,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
-import io.pravega.shared.segment.StreamSegmentNameUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
+
+import static io.pravega.shared.segment.StreamSegmentNameUtils.getPrimaryId;
+import static io.pravega.shared.segment.StreamSegmentNameUtils.getQualifiedStreamSegmentName;
+import static io.pravega.shared.segment.StreamSegmentNameUtils.getTransactionNameFromId;
 
 @Slf4j
 public class SegmentHelper {
@@ -56,7 +60,7 @@ public class SegmentHelper {
                                                     final HostControllerStore hostControllerStore,
                                                     final ConnectionFactory clientCF, String controllerToken) {
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
-        final String qualifiedStreamSegmentName = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, segmentId);
+        final String qualifiedStreamSegmentName = getQualifiedStreamSegmentName(scope, stream, segmentId);
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
         final WireCommandType type = WireCommandType.CREATE_SEGMENT;
 
@@ -116,7 +120,7 @@ public class SegmentHelper {
                                                       final ConnectionFactory clientCF, String delegationToken) {
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
-        final String qualifiedName = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, segmentId);
+        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, segmentId);
         final WireCommandType type = WireCommandType.TRUNCATE_SEGMENT;
 
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
@@ -173,7 +177,7 @@ public class SegmentHelper {
                                                     final ConnectionFactory clientCF, String delegationToken) {
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
-        final String qualifiedName = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, segmentId);
+        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, segmentId);
         final WireCommandType type = WireCommandType.DELETE_SEGMENT;
 
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
@@ -241,7 +245,7 @@ public class SegmentHelper {
                                                   final HostControllerStore hostControllerStore,
                                                   final ConnectionFactory clientCF, String delegationToken) {
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
-        final String qualifiedName = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, segmentId);
+        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, segmentId);
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
         final WireCommandType type = WireCommandType.SEAL_SEGMENT;
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
@@ -298,8 +302,7 @@ public class SegmentHelper {
                                                      final HostControllerStore hostControllerStore,
                                                      final ConnectionFactory clientCF, String delegationToken) {
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
-        final String qualifiedName = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, segmentId);
-        final String transactionName = StreamSegmentNameUtils.getTransactionNameFromId(qualifiedName, txId);
+        final String transactionName = getTransactionName(scope, stream, segmentId, txId);
         final CompletableFuture<UUID> result = new CompletableFuture<>();
         final WireCommandType type = WireCommandType.CREATE_SEGMENT;
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
@@ -349,6 +352,14 @@ public class SegmentHelper {
         return result;
     }
 
+    private String getTransactionName(String scope, String stream, long segmentId, UUID txId) {
+        // Transaction segments are created against a logical primary such that all transaction segments become mergable.
+        // So we will erase secondary id while creating transaction's qualified name.
+        final int primaryId = getPrimaryId(segmentId);
+        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, primaryId);
+        return getTransactionNameFromId(qualifiedName, txId);
+    }
+
     public CompletableFuture<TxnStatus> commitTransaction(final String scope,
                                                           final String stream,
                                                           final long targetSegmentId,
@@ -356,11 +367,10 @@ public class SegmentHelper {
                                                           final UUID txId,
                                                           final HostControllerStore hostControllerStore,
                                                           final ConnectionFactory clientCF, String delegationToken) {
-
+        Preconditions.checkArgument(getPrimaryId(targetSegmentId) == getPrimaryId(sourceSegmentId));
         final Controller.NodeUri uri = getSegmentUri(scope, stream, sourceSegmentId, hostControllerStore);
-        final String qualifiedNameTarget = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, targetSegmentId);
-        final String qualifiedNameSource = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, sourceSegmentId);
-        final String transactionName = StreamSegmentNameUtils.getTransactionNameFromId(qualifiedNameSource, txId);
+        final String qualifiedNameTarget = getQualifiedStreamSegmentName(scope, stream, targetSegmentId);
+        final String transactionName = getTransactionName(scope, stream, sourceSegmentId, txId);
         final CompletableFuture<TxnStatus> result = new CompletableFuture<>();
         final WireCommandType type = WireCommandType.MERGE_SEGMENTS;
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
@@ -423,8 +433,7 @@ public class SegmentHelper {
                                                          final UUID txId,
                                                          final HostControllerStore hostControllerStore,
                                                          final ConnectionFactory clientCF, String delegationToken) {
-        final String qualifiedName = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, segmentId);
-        final String transactionName = StreamSegmentNameUtils.getTransactionNameFromId(qualifiedName, txId);
+        final String transactionName = getTransactionName(scope, stream, segmentId, txId);
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
         final CompletableFuture<TxnStatus> result = new CompletableFuture<>();
         final WireCommandType type = WireCommandType.DELETE_SEGMENT;
@@ -476,7 +485,7 @@ public class SegmentHelper {
     public CompletableFuture<Void> updatePolicy(String scope, String stream, ScalingPolicy policy,
                                                 long segmentId, HostControllerStore hostControllerStore,
                                                 ConnectionFactory clientCF, String delegationToken) {
-        final String qualifiedName = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, segmentId);
+        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, segmentId);
         final CompletableFuture<Void> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
 
@@ -526,7 +535,7 @@ public class SegmentHelper {
     public CompletableFuture<WireCommands.StreamSegmentInfo> getSegmentInfo(String scope, String stream, long segmentId,
                                                                             HostControllerStore hostControllerStore, ConnectionFactory clientCF, String delegationToken) {
         final CompletableFuture<WireCommands.StreamSegmentInfo> result = new CompletableFuture<>();
-        final String qualifiedName = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, segmentId);
+        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, segmentId);
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
 
         final WireCommandType type = WireCommandType.GET_STREAM_SEGMENT_INFO;

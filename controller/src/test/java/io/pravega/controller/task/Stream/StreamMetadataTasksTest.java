@@ -41,7 +41,6 @@ import io.pravega.controller.store.host.HostStoreFactory;
 import io.pravega.controller.store.host.impl.HostMonitorConfigImpl;
 import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.Segment;
-import io.pravega.controller.store.stream.StartScaleResponse;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
@@ -1004,7 +1003,7 @@ public class StreamMetadataTasksTest {
         OperationContext context = streamStorePartialMock.createContext(SCOPE, "test");
         assertEquals(streamStorePartialMock.getState(SCOPE, "test", false, context, executor).get(), State.ACTIVE);
 
-        // Now when startScale runs even after that we should get the state as active.
+        // Now when runScale runs even after that we should get the state as active.
         StartScaleResponse response = streamStorePartialMock.startScale(SCOPE, "test", Collections.singletonList(0L), newRanges, 30, true, null, executor).get();
         assertEquals(response.getActiveEpoch(), 0);
         assertEquals(streamStorePartialMock.getState(SCOPE, "test", true, context, executor).get(), State.ACTIVE);
@@ -1012,7 +1011,7 @@ public class StreamMetadataTasksTest {
         AssertExtensions.assertThrows("", () -> streamStorePartialMock.scaleNewSegmentsCreated(SCOPE, "test",
                 context, executor).get(), ex -> Exceptions.unwrap(ex) instanceof StoreException.IllegalStateException);
 
-        List<Segment> segments = streamMetadataTasks.startScale((ScaleOpEvent) requestEventWriter.getEventQueue().take(), true, context, "").get();
+        List<Segment> segments = streamMetadataTasks.runScale((ScaleOpEvent) requestEventWriter.getEventQueue().take(), true, context, "").get();
 
         assertTrue(segments.stream().anyMatch(x -> x.getSegmentId() == computeSegmentId(1, 1) && x.getKeyStart() == 0.0 && x.getKeyEnd() == 0.5));
         assertTrue(segments.stream().anyMatch(x -> x.getSegmentId() == computeSegmentId(2, 1) && x.getKeyStart() == 0.5 && x.getKeyEnd() == 1.0));
