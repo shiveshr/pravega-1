@@ -535,54 +535,54 @@ public class TableHelperTest {
                 segmentIndex, segmentTable, Lists.newArrayList(0L, 1L, 2L, 3L, 4L), newRangesInconsistent, timestamp + 1);
 
         // before updating segment table, both records should be consistent.
-        assertTrue(TableHelper.checkScaleSegmentTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
-        assertTrue(TableHelper.checkScaleSegmentTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleSegmentTableIdempotantConsistency(consistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleHistoryTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable));
+        assertTrue(TableHelper.checkScaleSegmentTableIdempotantConsistency(inconsistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleHistoryTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable));
 
         // update segment table corresponding to consistent epoch transition record
         epoch++;
         segmentTableAndIndex = updateSegmentTableAndIndex(5, epoch, segmentIndex, segmentTable, newRanges, timestamp + 1);
         // update index
         segmentIndex = segmentTableAndIndex.getKey();
-        assertTrue(TableHelper.checkScaleSegmentTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
-        assertTrue(TableHelper.checkScaleSegmentTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleSegmentTableIdempotantConsistency(consistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleHistoryTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable));
+        assertTrue(TableHelper.checkScaleSegmentTableIdempotantConsistency(inconsistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleHistoryTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable));
 
         // update segment table
         segmentTable = segmentTableAndIndex.getValue();
 
         // now only consistentEpochTransitionRecord should return true as only its new range should match the state in
         // segment table
-        assertTrue(TableHelper.checkScaleSegmentTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
-        assertFalse(TableHelper.checkScaleSegmentTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleSegmentTableIdempotantConsistency(consistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleHistoryTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable));
+        assertFalse(TableHelper.checkScaleSegmentTableIdempotantConsistency(inconsistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertFalse(TableHelper.checkScaleHistoryTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable));
 
         // update history index
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
-        assertTrue(TableHelper.checkScaleSegmentTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
-        assertFalse(TableHelper.checkScaleSegmentTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleSegmentTableIdempotantConsistency(consistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleHistoryTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable));
+        assertFalse(TableHelper.checkScaleSegmentTableIdempotantConsistency(inconsistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertFalse(TableHelper.checkScaleHistoryTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable));
 
         // update history table
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
         // nothing should change the consistency even with history table update
-        assertTrue(TableHelper.checkScaleSegmentTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
-        assertFalse(TableHelper.checkScaleSegmentTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleSegmentTableIdempotantConsistency(consistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleHistoryTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable));
+        assertFalse(TableHelper.checkScaleSegmentTableIdempotantConsistency(inconsistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertFalse(TableHelper.checkScaleHistoryTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable));
 
         // complete history record
         HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 2);
         // nothing should change the consistency even with history table update
-        assertTrue(TableHelper.checkScaleSegmentTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
-        assertFalse(TableHelper.checkScaleSegmentTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable,
-                segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleSegmentTableIdempotantConsistency(consistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertTrue(TableHelper.checkScaleHistoryTableIdempotanceConsistency(consistentEpochTransitionRecord, historyIndex, historyTable));
+        assertFalse(TableHelper.checkScaleSegmentTableIdempotantConsistency(inconsistentEpochTransitionRecord, segmentIndex, segmentTable));
+        assertFalse(TableHelper.checkScaleHistoryTableIdempotanceConsistency(inconsistentEpochTransitionRecord, historyIndex, historyTable));
     }
 
     @Test

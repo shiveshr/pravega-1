@@ -10,7 +10,6 @@
 package io.pravega.controller.store.stream;
 
 import com.google.common.base.Preconditions;
-import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.Exceptions;
@@ -56,9 +55,11 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
 import static java.util.stream.Collectors.toMap;
 
 @Slf4j
@@ -118,7 +119,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                         .thenCompose((Void v) -> {
                             final int numSegments = createStreamResponse.getConfiguration().getScalingPolicy().getMinNumSegments();
                             final byte[] historyTable = TableHelper.createHistoryTable(createStreamResponse.getTimestamp(),
-                                    IntStream.range(0, numSegments).boxed().map(x -> StreamSegmentNameUtils.computeSegmentId(x, 0)).collect(Collectors.toList()));
+                                    IntStream.range(0, numSegments).boxed().map(x -> computeSegmentId(x, 0)).collect(Collectors.toList()));
                             return createHistoryTableIfAbsent(new Data<>(historyTable, null));
                         })
                         .thenCompose((Void v) -> createSealedSegmentsRecord(new SealedSegmentsRecord(Collections.emptyMap()).toByteArray()))
@@ -264,7 +265,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                     } else {
                         return Futures.failedFuture(StoreException.create(
                                 StoreException.Type.OPERATION_NOT_ALLOWED,
-                                "Stream: " + getName() + " State: " + state.name()));
+                                "Stream: " + getName() + " State: " + state.name() + " current state = " + StateRecord.parse(currState.getData()).getState()));
                     }
                 });
     }
@@ -434,6 +435,26 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                                         segmentIndex.getData(), segmentTable.getData(), from, to)))));
     }
 
+    @Override
+    public CompletableFuture<Void> cancelOutstandingScale() {
+        return getState(true)
+            .thenCompose(state -> getEpochTransition()
+                .thenCompose(record -> {
+                    checkState(state, State.SEALING);
+                    if (record.isScale()) {
+                        // If stream is already waiting to be sealed, delete the non-starter scale request.
+                        // However, let rolling transactions continue as we want to commit all promised transactions before
+                        // completing scale
+                        // Note: if scale had started, the state would have been scaling. Since the state is sealing,
+                        // it means the epochTransitionRecord has not been worked upon and can be safely removed.
+                        log.info("Discarding scale request as stream {}{} is already marked for seal", scope, name);
+                        return deleteEpochTransitionNode();
+                    } else {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                }));
+    }
+
     /**
      * This method attpemts to start a new scale workflow. For this it first computes epoch transition and stores it in the metadastore.
      * Epoch Transition record's creation is done by either scale or commit of transactions on old epoch.
@@ -525,32 +546,36 @@ public abstract class PersistentStreamBase<T> implements Stream {
                     }
                 })
                 .thenCompose(epochTransition -> {
-                    // There is a very small probability that between epoch transition computation and persistence in the store,
+                    // This check is useful in two cases:
+                    // 1. scale completed but process crashed before removing epoch transition node. In rerun, we will find
+                    // epoch transition consistent with input, but not with the state in the table. We should reject it here
+                    // instead of wasting cycles in running subsequent steps.
+                    // 2. There is a small probability that between epoch transition computation and persistence in the store,
                     // another scale or commit may have created the node, performed processing and deleted the node. Such happenstance
                     // would render the computed epoch transition record inconsistent with the state in the tables.
-                    // So after creating the epoch transition, in the next step, before before proceeding with subsequent processing, we should
-                    // revalidate the epoch transition for consistency.
+                    //
+                    // So before proceeding with subsequent processing, we should revalidate the epoch transition for consistency.
                     // Note: This block is the last step before proceeding to process workflow corresponding to this epochTransition.
                     // so we will validate here, and it will be relevant for first and every possible retry.
                     // If a retry of scale workflow happens after completing the scale but before deleting epochTransition node,
                     // this step will find it to be inconsistent with metadata and duly clean it up.
-                    return validateEpochTransition(epochTransition).thenApply(x -> epochTransition);
+                    return validateEpochTransition(epochTransition, State.SCALING).thenApply(x -> epochTransition);
                 });
     }
 
-    private CompletableFuture<Void> validateEpochTransition(EpochTransitionRecord epochTransition) {
+    private CompletableFuture<Void> validateEpochTransition(EpochTransitionRecord epochTransition, State state) {
         return getHistoryIndexFromStore()
                 .thenCompose(historyIndex -> getHistoryTableFromStore()
                         .thenCompose(historyTable -> {
-                            boolean isConsistent = TableHelper.getActiveEpoch(historyIndex.getData(),
-                                    historyTable.getData()).getEpoch() == epochTransition.getActiveEpoch();
+                            boolean isConsistent = TableHelper.getActiveEpoch(historyIndex.getData(), historyTable.getData()).getEpoch()
+                                    == epochTransition.getActiveEpoch();
                             if (isConsistent) {
                                 return CompletableFuture.completedFuture(null);
                             } else {
                                 return deleteEpochTransitionNode()
-                                        .thenCompose(x -> resetStateConditionally(State.SCALING))
+                                        .thenCompose(x -> resetStateConditionally(state))
                                         .thenApply(x -> {
-                                            log.debug("Scale epoch transition record is inconsistent with state in the table. epochTransition = {}",
+                                            log.debug("Epoch transition record is inconsistent with state in the table. epochTransition = {}",
                                                     epochTransition);
                                             throw new EpochTransitionOperationExceptions.ConflictException();
                                         });
@@ -583,27 +608,30 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                         // Perform idempotent update to segment index and segment table.
                                         // Note: in scale we always create fresh new segments so there will be entry added to
                                         // segment table. So for idempotent update we can simply check for last record in segment table.
-                                        final SegmentRecord latestSegmentRecord = TableHelper.getLatestSegmentRecord(segmentIndex.getData(), segmentTable.getData());
-                                        if (latestSegmentRecord .getCreationEpoch() < epochTransition.getNewEpoch()) {
+                                        int newEpoch = epochTransition.getNewEpoch();
+
+                                        final SegmentRecord latestSegment = TableHelper.getLatestSegmentRecord(segmentIndex.getData(), segmentTable.getData());
+                                        if (latestSegment.getCreationEpoch() < newEpoch) {
                                             log.info("Scale {}/{} for segments started. Creating new segments. SegmentsToSeal {}",
                                                     scope, name, epochTransition.getSegmentsToSeal());
 
-                                            List<SimpleEntry<Double, Double>> newRanges = epochTransition.getNewSegmentsWithRange().entrySet()
-                                                    .stream().sorted(Comparator.comparingLong(Map.Entry::getKey)).map(Map.Entry::getValue)
-                                                    .collect(Collectors.toList());
                                             return createNewSegments(
-                                                    newRanges,
                                                     historyIndex.getData(), historyTable.getData(), segmentIndex, segmentTable,
                                                     epochTransition);
                                         } else {
-                                            if (TableHelper.checkScaleSegmentTableIdempotanceConsistency(epochTransition,
+                                            if (TableHelper.checkScaleSegmentTableIdempotantConsistency(epochTransition,
                                                     segmentIndex.getData(), segmentTable.getData())) {
                                                 log.debug("CreateNewSegments step for stream {}/{} is idempotent, " +
                                                         "segments are already present in segment table.", scope, name);
                                             } else {
-                                                // we should never reach here!!
-                                                log.error("Epoch transition does not match the state in the table");
-                                                throw new EpochTransitionOperationExceptions.ConditionInvalidException();
+                                                // we should never reach here! As the inconsistent epoch transition should
+                                                // have been rejected in startScale itself.
+                                                // As a failsafe we will still call validate
+                                                return validateEpochTransition(epochTransition, State.SCALING)
+                                                        .thenApply(x -> {
+                                                            log.error("Epoch transition does not match the state in the table");
+                                                            throw new EpochTransitionOperationExceptions.ConditionInvalidException();
+                                                        });
                                             }
                                             return CompletableFuture.completedFuture(null);
                                         }
@@ -611,8 +639,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                 });
     }
 
-    private CompletableFuture<Void> createNewSegments(final List<SimpleEntry<Double, Double>> newRanges,
-                                                           final byte[] historyIndex,
+    private CompletableFuture<Void> createNewSegments(final byte[] historyIndex,
                                                            final byte[] historyTable,
                                                            final Data<T> segmentIndex,
                                                            final Data<T> segmentTable,
@@ -629,6 +656,10 @@ public abstract class PersistentStreamBase<T> implements Stream {
         // This is because new offsets may be different. we cannot update segment table before index because then
         // we would not be able to read from segment table as we don't know the starting offsets for segments.
         assert !epochTransitionRecord.getNewSegmentsWithRange().isEmpty();
+        List<SimpleEntry<Double, Double>> newRanges = epochTransitionRecord.getNewSegmentsWithRange().entrySet()
+                .stream().sorted(Comparator.comparingLong(Map.Entry::getKey)).map(Map.Entry::getValue)
+                .collect(Collectors.toList());
+
         int nextSegmentNumber = epochTransitionRecord.getNewSegmentsWithRange().keySet().stream().mapToInt(StreamSegmentNameUtils::getPrimaryId).min().getAsInt();
         final Pair<byte[], byte[]> updated = TableHelper.addNewSegmentsToSegmentTableAndIndex(nextSegmentNumber,
                 epochTransitionRecord.getNewEpoch(), segmentIndex.getData(), segmentTable.getData(), newRanges, segmentCreationTimestamp);
@@ -669,17 +700,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                 .thenCompose(state -> {
                     checkState(state, State.SCALING);
                     return getEpochTransition()
-                            .thenCompose(epochTransition -> {
-                                if (epochTransition == null) {
-                                    log.debug("epochTransition for stream {}/{} is already removed, " +
-                                            "which means ongoing scaling is finished.", scope, name);
-                                    return Futures.toVoid(updateState(State.ACTIVE));
-                                }
-                                ImmutableSet<Long> createdSegments = epochTransition.getNewSegmentsWithRange().keySet();
-                                return addPartialHistoryRecordAndIndex(epochTransition, lastRecord ->
-                                        lastRecord.isPartial() && lastRecord.getEpoch() == epochTransition.getNewEpoch() &&
-                                                lastRecord.getSegments().containsAll(createdSegments));
-                            });
+                            .thenCompose(epochTransition -> addPartialHistoryRecordAndIndex(epochTransition));
                 });
     }
 
@@ -707,9 +728,9 @@ public abstract class PersistentStreamBase<T> implements Stream {
                             .thenCompose(epochTransition -> Futures.toVoid(clearMarkers(epochTransition.getSegmentsToSeal())
                                     .thenCompose(x -> {
                                         ImmutableSet<Long> newSegments = epochTransition.getNewSegmentsWithRange().keySet();
-                                            return completePartialRecordInHistory(sealedSegmentSizes, epochTransition,
-                                                    lastRecord -> lastRecord.getSegments().stream().noneMatch(sealedSegmentSizes::containsKey) &&
-                                                            newSegments.stream().allMatch(r -> lastRecord.getSegments().contains(r)));
+                                        return completePartialRecordInHistory(sealedSegmentSizes, epochTransition,
+                                                lastRecord -> lastRecord.getSegments().stream().noneMatch(sealedSegmentSizes::containsKey) &&
+                                                newSegments.stream().allMatch(r -> lastRecord.getSegments().contains(r)));
                                     })));
                 });
     }
@@ -723,35 +744,50 @@ public abstract class PersistentStreamBase<T> implements Stream {
             .thenCompose(state -> getEpochTransition()
                 .thenCompose(record -> {
                     if (record != null) {
-                        if (record.isScale()) {
-                            if (state.equals(State.SEALING) && record.isScale()) {
-                                // If stream is already waiting to be sealed, delete the non-starter scale request and recursively call
-                                // startRollingTransactions.
-                                return deleteEpochTransitionNode()
-                                        .thenCompose(v -> startRollingTransaction(activeEpoch, txnEpoch, txnIds, timestamp));
+                        if (!record.isScale()) {
+                            if (record.getActiveEpoch() == activeEpoch && record.getTransactionEpoch() == txnEpoch) {
+                                return CompletableFuture.completedFuture(record);
+                            } else if (record.getNewEpoch() == activeEpoch) {
+                                // Check idempotent start
+                                // rolling transaction may have completed but we crashed before epoch transition node was cleaned up.
+                                // Since only commitTxn can initiate rolling transaction there is no possibility that someone
+                                // else started this.
+                                // We will delete the epoch transition node and return null.
+                                log.debug("rolling transaction already completed");
+                                return deleteEpochTransitionNode().thenApply(x -> null);
+                            } else {
+                                throw new EpochTransitionOperationExceptions.InputInvalidException();
                             }
-
-                            log.info("Cannot start rolling txn on stream {}/{} for rolling txn attempt {} as there is a " +
+                        } else {
+                            log.info("Cannot start rolling txn on stream {}/{} for transaction epoch {} as there is a " +
                                     "conflict with another scale operation that is requested", scope, name, txnEpoch);
                             String errorMessage = "cannot start rolling transaction as a scale is requested";
                             throw StoreException.create(StoreException.Type.OPERATION_NOT_ALLOWED, errorMessage);
                         }
-
-                        assert record.getActiveEpoch() == activeEpoch && record.getTransactionEpoch() == txnEpoch;
-                        // if sealing has started, we need to commit all transactions.
-                        return CompletableFuture.completedFuture(record);
                     } else {
                         EpochTransitionRecord epochTransition = EpochTransitionRecord.createForRollingTxn(activeEpoch, txnEpoch, timestamp);
-                        return createEpochTransitionNode(txnIds.get(0), epochTransition);
+                        return checkTransactionStatus(txnIds.get(0))
+                                .thenCompose(status -> {
+                                    if (!status.equals(TxnStatus.COMMITTING)) {
+                                        // if all transactions are no longer in committing state while epoch transition is null, it can only
+                                        // mean that this is a rerun. We dont want to create a new epoch transition and seal and recreate empty segments
+                                        // so we will return null.
+                                        log.debug("rolling transaction already completed");
+                                        return CompletableFuture.completedFuture(null);
+                                    } else {
+                                        return createEpochTransitionRecord(epochTransition);
+                                    }
+                                });
                     }
+
                 }));
     }
 
     @Override
     public CompletableFuture<Void> rollingTxnNewSegmentsCreated(Map<Long, Long> sealedTxnEpochSegments) {
-        // 1. create new entries in history table in idempotent fashion
-        //
-        return null;
+        return addSealedSegmentsToRecord(sealedTxnEpochSegments)
+            .thenCompose(x -> getEpochTransition()
+                .thenCompose(this::rollingTxnAddNewDuplicateEpochs));
     }
 
     @Override
@@ -768,129 +804,22 @@ public abstract class PersistentStreamBase<T> implements Stream {
                         })));
     }
 
-    /**
-     * Update history table in idempotent fashion
-     *
-     * @return : future of history table offset for last entry
-     */
-    private CompletableFuture<Void> addPartialHistoryRecordAndIndex(final EpochTransitionRecord epochTransitionRecord, Predicate<HistoryRecord> idempotentCheck) {
-        return getHistoryIndexFromStore()
-                .thenCompose(historyIndex -> getHistoryTableFromStore()
-                        .thenCompose(historyTable -> {
-                            final int activeEpoch = epochTransitionRecord.getActiveEpoch();
-                            final HistoryRecord lastRecord = HistoryRecord.readLatestRecord(historyIndex.getData(), historyTable.getData(),
-                                    false).get();
-
-                            // idempotent check
-                            if (lastRecord.getEpoch() > epochTransitionRecord.getActiveEpoch()) {
-                                if (idempotentCheck.apply(lastRecord)) {
-                                    log.debug("{}/{} epoch transition for epoch {} - history record already added", scope, name, activeEpoch);
-                                    return CompletableFuture.completedFuture(null);
-                                } else {
-                                    // we should never reach here!
-                                    log.warn("{}/{} epoch transition for epoch {} already completed.", scope, name, activeEpoch);
-                                    throw new EpochTransitionOperationExceptions.ConditionInvalidException();
-                                }
-                            }
-
-                            ImmutableSet<Long> createdSegments = epochTransitionRecord.getNewSegmentsWithRange().keySet();
-                            ImmutableSet<Long> segmentsToSeal = epochTransitionRecord.getSegmentsToSeal();
-                            final List<Long> newActiveSegments = getNewActiveSegments(createdSegments, segmentsToSeal, lastRecord);
-                            final int offset = historyTable.getData().length;
-                            // now we know the offset at which we want to add.
-                            final byte[] updatedTable = TableHelper.addPartialRecordToHistoryTable(historyIndex.getData(),
-                                    historyTable.getData(), newActiveSegments);
-                            final Data<T> updated = new Data<>(updatedTable, historyTable.getVersion());
-
-                            return addHistoryIndexRecord(epochTransitionRecord.getNewEpoch(), offset)
-                                    .thenCompose(v -> updateHistoryTable(updated))
-                                    .whenComplete((r, e) -> {
-                                        if (e == null) {
-                                            log.debug("{}/{} scale op for epoch {}. Creating new epoch and updating history table.",
-                                                    scope, name, activeEpoch);
-                                        } else {
-                                            log.warn("{}/{} scale op for epoch {}. Failed to add partial record to history table. {}",
-                                                    scope, name, activeEpoch, e.getClass().getName());
-                                        }
-                                    });
-                        }));
-    }
-
-    private CompletableFuture<Void> completePartialRecordInHistory(final Map<Long, Long> sealedSegments, EpochTransitionRecord epochTransitionRecord,
-                                                                   Predicate<HistoryRecord> idempotentCheck) {
-        return getHistoryIndexFromStore()
-                .thenCompose(historyIndex -> getHistoryTableFromStore()
-                        .thenCompose(historyTable -> {
-                            final Optional<HistoryRecord> lastRecordOpt = HistoryRecord.readLatestRecord(historyIndex.getData(),
-                                    historyTable.getData(), false);
-                            assert lastRecordOpt.isPresent();
-                            final HistoryRecord lastRecord = lastRecordOpt.get();
-
-                            // idempotent check
-                            int activeEpoch = epochTransitionRecord.getActiveEpoch();
-                            if (!lastRecord.isPartial()) {
-                                if (idempotentCheck.apply(lastRecord)) {
-                                    log.debug("{}/{} epoch transition already completed for epoch {}.", scope, name, activeEpoch);
-
-                                    return CompletableFuture.completedFuture(null);
-                                } else {
-                                    log.debug("{}/{} epoch transition completion attempt invalid for epoch {}.", scope, name, activeEpoch);
-                                    throw new EpochTransitionOperationExceptions.ConditionInvalidException();
-                                }
-                            }
-
-                            long timestamp = Math.max(System.currentTimeMillis(), epochTransitionRecord.getTime());
-                            final HistoryRecord previous = HistoryRecord.fetchPrevious(lastRecord, historyIndex.getData(),
-                                    historyTable.getData()).get();
-                            // To ensure that we always have ascending time in history records irrespective of controller
-                            // clock mismatches.
-                            timestamp = Math.max(timestamp, previous.getScaleTime() + 1);
-
-                            byte[] updatedTable = TableHelper.completePartialRecordInHistoryTable(historyIndex.getData(), historyTable.getData(),
-                                    lastRecord, timestamp);
-                            final Data<T> updated = new Data<>(updatedTable, historyTable.getVersion());
-
-                            return addSealedSegmentsToRecord(sealedSegments)
-                                    .thenCompose(x -> updateHistoryTable(updated))
-                                    .thenCompose(x -> deleteEpochTransitionNode())
-                                    .whenComplete((r, e) -> {
-                                        if (e != null) {
-                                            log.warn("{}/{} attempt to complete epoch transition for epoch {}. {}", scope, name, activeEpoch,
-                                                    e.getClass().getName());
-                                        } else {
-                                            log.debug("{}/{} epoch transition complete, index and history tables updated for epoch {}.",
-                                                    scope, name, activeEpoch);
-                                        }
-                                    });
-                        }));
-    }
-
-    private CompletableFuture<EpochTransitionRecord> createEpochTransitionNode(UUID txnId, EpochTransitionRecord epochTransition) {
-        return checkTransactionStatus(txnId)
-                .thenCompose(status -> {
-                    if (!status.equals(TxnStatus.COMMITTING)) {
-                        // if all transactions are no longer in committing state while epoch transition is null, it can only
-                        // mean that this is a rerun. We dont want to create a new epoch transition and seal and recreate empty segments
-                        // so we will return null.
-                        return CompletableFuture.completedFuture(null);
+    private CompletableFuture<EpochTransitionRecord> createEpochTransitionRecord(EpochTransitionRecord epochTransition) {
+        return createEpochTransitionNode(epochTransition.toByteArray())
+                .handle((r, e) -> {
+                    if (e != null) {
+                        if (Exceptions.unwrap(e) instanceof StoreException.DataExistsException) {
+                            log.info("Cannot start rolling txn on stream {}/{} for rolling txn attempt {} as there is a " +
+                                    "conflict with another scale operation that is requested", scope, name, epochTransition.getTransactionEpoch());
+                            String errorMessage = "cannot start rolling transaction as a scale is requested";
+                            throw StoreException.create(StoreException.Type.OPERATION_NOT_ALLOWED, errorMessage);
+                        } else {
+                            throw new CompletionException(e);
+                        }
                     } else {
-                        return createEpochTransitionNode(epochTransition.toByteArray())
-                                .handle((r, e) -> {
-                                    if (e != null) {
-                                        if (Exceptions.unwrap(e) instanceof StoreException.DataExistsException) {
-                                            log.info("Cannot start rolling txn on stream {}/{} for rolling txn attempt {} as there is a " +
-                                                    "conflict with another scale operation that is requested", scope, name, epochTransition.getTransactionEpoch());
-                                            String errorMessage = "cannot start rolling transaction as a scale is requested";
-                                            throw StoreException.create(StoreException.Type.OPERATION_NOT_ALLOWED, errorMessage);
-                                        } else {
-                                            throw new CompletionException(e);
-                                        }
-                                    } else {
-                                        log.info("rolling txn for stream {}/{} accepted. Active epoch = {}, txn epoch = {}",
-                                                scope, name, epochTransition.getActiveEpoch(), epochTransition.getTransactionEpoch());
-                                        return epochTransition;
-                                    }
-                                });
+                        log.info("rolling txn for stream {}/{} accepted. Active epoch = {}, txn epoch = {}",
+                                scope, name, epochTransition.getActiveEpoch(), epochTransition.getTransactionEpoch());
+                        return epochTransition;
                     }
                 });
     }
@@ -1017,7 +946,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     /**
-     * Seal a transaction in OPEN/COMMITTING/ABORTING state. This method does CAS on the transaction data node if
+     * Seal a transaction in OPEN/COMMITTING_TXN/ABORTING state. This method does CAS on the transaction data node if
      * the transaction is in OPEN state, optionally checking version of transaction data node, if required.
      *
      * @param epoch   transaction epoch.
@@ -1293,6 +1222,173 @@ public abstract class PersistentStreamBase<T> implements Stream {
             }
             return null;
         });
+    }
+
+    /**
+     * update history table if not already updated:
+     * fetch last record from history table.
+     * if eventTime is >= scale.scaleTimeStamp do nothing, else create record
+     *
+     * @return : future of history table offset for last entry
+     */
+    private CompletableFuture<Void> addPartialHistoryRecordAndIndex(final EpochTransitionRecord epochTransition) {
+        final Set<Long> segmentsToSeal = epochTransition.getSegmentsToSeal();
+        final Set<Long> createdSegments = epochTransition.getNewSegmentsWithRange().keySet();
+        final int activeEpoch = epochTransition.getActiveEpoch();
+        final int newEpoch = epochTransition.getNewEpoch();
+
+        return getHistoryIndexFromStore()
+                .thenCompose(historyIndex -> getHistoryTableFromStore()
+                        .thenCompose(historyTable -> {
+                            final HistoryRecord lastRecord = HistoryRecord.readLatestRecord(historyIndex.getData(), historyTable.getData(),
+                                    false).get();
+
+                            // idempotent check
+                            if (lastRecord.getEpoch() > activeEpoch) {
+                                boolean idempotent = lastRecord.isPartial() && lastRecord.getSegments().containsAll(createdSegments);
+                                if (idempotent) {
+                                    HistoryRecord previous = HistoryRecord.fetchPrevious(lastRecord, historyIndex.getData(),
+                                            historyTable.getData()).get();
+
+                                    idempotent = previous.getSegments().stream().noneMatch(createdSegments::contains);
+                                }
+
+                                if (idempotent) {
+                                    log.debug("{}/{} scale op for epoch {} - history record already added", scope, name, activeEpoch);
+                                    return CompletableFuture.completedFuture(null);
+                                } else {
+                                    // we should never reach here! As the inconsistent epoch transition should
+                                    // have been rejected in startScale itself.
+                                    // As a failsafe we will still call validate nevertheless.
+                                    return validateEpochTransition(epochTransition, State.SCALING)
+                                            .thenApply(x -> {
+                                                log.warn("{}/{} scale op for epoch {}. Scale already completed.", scope, name, activeEpoch);
+                                                throw new EpochTransitionOperationExceptions.InputInvalidException();
+                                            });
+                                }
+                            }
+
+                            final List<Long> newActiveSegments = getNewActiveSegments(createdSegments, segmentsToSeal, lastRecord);
+                            final int offset = historyTable.getData().length;
+                            // now we know the offset at which we want to add.
+                            final byte[] updatedTable = TableHelper.addPartialRecordToHistoryTable(historyIndex.getData(),
+                                    historyTable.getData(), newActiveSegments);
+                            final Data<T> updated = new Data<>(updatedTable, historyTable.getVersion());
+
+                            return addHistoryIndexRecord(newEpoch, offset)
+                                    .thenCompose(v -> updateHistoryTable(updated))
+                                    .whenComplete((r, e) -> {
+                                        if (e == null) {
+                                            log.debug("{}/{} scale op for epoch {}. Creating new epoch and updating history table.",
+                                                    scope, name, activeEpoch);
+                                        } else {
+                                            log.warn("{}/{} scale op for epoch {}. Failed to add partial record to history table. {}",
+                                                    scope, name, activeEpoch, e.getClass().getName());
+                                        }
+                                    });
+                        }));
+    }
+
+    private CompletableFuture<Void> rollingTxnAddNewDuplicateEpochs(final EpochTransitionRecord epochTransitionRecord) {
+        return getHistoryIndexFromStore()
+                .thenCompose(historyIndex -> getHistoryTableFromStore()
+                        .thenCompose(historyTable -> {
+                            int transactionEpoch = epochTransitionRecord.getTransactionEpoch();
+                            int activeEpoch = epochTransitionRecord.getActiveEpoch();
+
+                            final HistoryRecord lastRecord = HistoryRecord.readLatestRecord(historyIndex.getData(), historyTable.getData(),
+                                    false).get();
+
+                            // idempotent check
+                            if (lastRecord.getEpoch() > activeEpoch) {
+                                boolean idempotent = lastRecord.isPartial() && lastRecord.getEpoch() == epochTransitionRecord.getNewEpoch() &&
+                                        lastRecord.getReferenceEpoch() == activeEpoch;
+
+                                if (idempotent) {
+                                    HistoryRecord previous = HistoryRecord.fetchPrevious(lastRecord, historyIndex.getData(),
+                                            historyTable.getData()).get();
+                                    idempotent &= previous.getReferenceEpoch() == transactionEpoch;
+                                }
+
+                                if (idempotent) {
+                                    log.debug("{}/{} rolling transaction for epoch {} - history record already added", scope, name,
+                                            transactionEpoch);
+                                    return CompletableFuture.completedFuture(null);
+                                } else {
+                                    // we should never reach here!!
+                                    log.warn("{}/{} rolling txn for epoch {}. Scale already completed.", scope, name,
+                                            transactionEpoch);
+                                    throw new EpochTransitionOperationExceptions.InputInvalidException();
+                                }
+                            }
+
+                            final Pair<byte[], byte[]> updatedIndexAndTable = TableHelper.insertDuplicateRecordsInHistoryTable(historyIndex.getData(),
+                                    historyTable.getData(), transactionEpoch, epochTransitionRecord.getTime());
+                            final Data<T> updatedIndex = new Data<>(updatedIndexAndTable.getKey(), historyIndex.getVersion());
+                            final Data<T> updatedHistory = new Data<>(updatedIndexAndTable.getValue(), historyTable.getVersion());
+
+                            return updateHistoryIndex(updatedIndex)
+                                    .thenCompose(v -> updateHistoryTable(updatedHistory))
+                                    .whenComplete((r, e) -> {
+                                        if (e == null) {
+                                            log.debug("{}/{} rolling transaction for epoch {}. Creating new epoch and updating history table.",
+                                                    scope, name, transactionEpoch);
+                                        } else {
+                                            log.warn("{}/{} rollingTransaction for epoch {}. Failed to add partial record to history table.",
+                                                    scope, name, activeEpoch, e);
+                                        }
+                                    });
+                        }));
+    }
+
+    private CompletableFuture<Void> completePartialRecordInHistory(final Map<Long, Long> sealedSegments,
+                                                                   final EpochTransitionRecord epochTransitionRecord,
+                                                                   final Predicate<HistoryRecord> idempotentCheck) {
+        return getHistoryIndexFromStore()
+                .thenCompose(historyIndex -> getHistoryTableFromStore()
+                        .thenCompose(historyTable -> {
+                            final Optional<HistoryRecord> lastRecordOpt = HistoryRecord.readLatestRecord(historyIndex.getData(),
+                                    historyTable.getData(), false);
+                            assert lastRecordOpt.isPresent();
+                            final HistoryRecord lastRecord = lastRecordOpt.get();
+
+                            // idempotent check
+                            int activeEpoch = epochTransitionRecord.getActiveEpoch();
+                            if (!lastRecord.isPartial()) {
+                                if (idempotentCheck.test(lastRecord)) {
+                                    log.debug("{}/{} epoch transition already completed for epoch {}.", scope, name, activeEpoch);
+
+                                    return CompletableFuture.completedFuture(null);
+                                } else {
+                                    log.debug("{}/{} epoch transition completion attempt invalid for epoch {}.", scope, name, activeEpoch);
+                                    throw new EpochTransitionOperationExceptions.ConditionInvalidException();
+                                }
+                            }
+
+                            long timestamp = Math.max(System.currentTimeMillis(), epochTransitionRecord.getTime());
+                            final HistoryRecord previous = HistoryRecord.fetchPrevious(lastRecord, historyIndex.getData(),
+                                    historyTable.getData()).get();
+                            // To ensure that we always have ascending time in history records irrespective of controller
+                            // clock mismatches.
+                            timestamp = Math.max(timestamp, previous.getScaleTime() + 1);
+
+                            byte[] updatedTable = TableHelper.completePartialRecordInHistoryTable(historyIndex.getData(), historyTable.getData(),
+                                    lastRecord, timestamp);
+                            final Data<T> updated = new Data<>(updatedTable, historyTable.getVersion());
+
+                            return addSealedSegmentsToRecord(sealedSegments)
+                                    .thenCompose(x -> updateHistoryTable(updated))
+                                    .thenCompose(x -> deleteEpochTransitionNode())
+                                    .whenComplete((r, e) -> {
+                                        if (e != null) {
+                                            log.warn("{}/{} attempt to complete epoch transition for epoch {}. {}", scope, name, activeEpoch,
+                                                    e.getClass().getName());
+                                        } else {
+                                            log.debug("{}/{} epoch transition complete, index and history tables updated for epoch {}.",
+                                                    scope, name, activeEpoch);
+                                        }
+                                    });
+                        }));
     }
 
     private CompletableFuture<Void> addSealedSegmentsToRecord(Map<Long, Long> sealedSegments) {

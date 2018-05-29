@@ -37,7 +37,6 @@ import io.pravega.controller.util.Config;
 import io.pravega.controller.util.RetryHelper;
 import io.pravega.shared.controller.event.AbortEvent;
 import io.pravega.shared.controller.event.CommitEvent;
-import io.pravega.shared.segment.StreamSegmentNameUtils;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
@@ -515,16 +514,16 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     }
 
     /**
-     * Seals a txn and transitions it to COMMITTING (resp. ABORTING) state if commit param is true (resp. false).
+     * Seals a txn and transitions it to COMMITTING_TXN (resp. ABORTING) state if commit param is true (resp. false).
      *
      * Post-condition:
      * 1. If seal completes successfully, then
-     *     (a) txn state is COMMITTING/ABORTING,
+     *     (a) txn state is COMMITTING_TXN/ABORTING,
      *     (b) CommitEvent/AbortEvent is present in the commit stream/abort stream,
      *     (c) txn is removed from host-txn index,
      *     (d) txn is removed from the timeout service.
      *
-     * 2. If process fails after transitioning txn to COMMITTING/ABORTING state, but before responding to client, then
+     * 2. If process fails after transitioning txn to COMMITTING_TXN/ABORTING state, but before responding to client, then
      * since txn is present in the host-txn index, some other controller process shall put CommitEvent/AbortEvent to
      * commit stream/abort stream.
      *

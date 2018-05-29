@@ -523,35 +523,52 @@ public class TableHelper {
      * This method takes a reference epoch, seals the active epoch, creates a duplicate entry for referenced epoch.
      * Follows it up with creating a partial duplicate entry for active epoch.
      *
-     * @param historyTable      history table
+     * @param historyIndex      history index
      * @param historyTable      history table
      * @param referenceEpoch    reference epoch to duplicate
      * @param timestamp         timestamp to add to duplicate of the referenced epoch
      * @return serialized history table as byte array
      */
     @SneakyThrows
-    public static byte[] insertDuplicateRecordsInHistoryTable(final byte[] historyIndex, final byte[] historyTable,
+    public static Pair<byte[], byte[]> insertDuplicateRecordsInHistoryTable(final byte[] historyIndex, final byte[] historyTable,
                                                            int referenceEpoch, long timestamp) {
-        final ByteArrayOutputStream historyStream = new ByteArrayOutputStream();
         HistoryRecord activeRecord = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        int nextEpoch = activeRecord.getEpoch() + 1;
+        // if nextepoch was already previously indexed, overwrite the index
+        int startingOffset = HistoryIndexRecord.readRecord(historyIndex, nextEpoch)
+                .map(index -> index.getIndexOffset()).orElse(historyIndex.length);
+
+        final ByteArrayOutputStream indexStream = new ByteArrayOutputStream();
+        indexStream.write(historyIndex, 0, startingOffset);
+
+        final ByteArrayOutputStream historyStream = new ByteArrayOutputStream();
         historyStream.write(historyTable);
+        int historyOffset = historyTable.length;
+        final HistoryIndexRecord lastIndex = HistoryIndexRecord.readLatestRecord(historyIndex).get();
 
         // duplicate the reference epoch
-        int intermediateEpoch = activeRecord.getEpoch() + 1;
         HistoryRecord referenceRecord = HistoryRecord.readRecord(referenceEpoch, historyIndex, historyTable, true).get();
-        List<Long> newSegments = referenceRecord.getSegments().stream().map(segmentId -> computeSegmentId(getPrimaryId(segmentId), intermediateEpoch)).collect(Collectors.toList());
-        HistoryRecord record = new HistoryRecord(intermediateEpoch, referenceRecord.getReferenceEpoch(), newSegments, timestamp);
+        List<Long> newSegments = referenceRecord.getSegments().stream().map(segmentId -> computeSegmentId(getPrimaryId(segmentId),
+                nextEpoch)).collect(Collectors.toList());
+        HistoryRecord record = new HistoryRecord(nextEpoch, referenceRecord.getReferenceEpoch(), newSegments, timestamp);
         ArrayView arrayView = record.toArrayView();
+        // add to history table and index
+        indexStream.write(new HistoryIndexRecord(nextEpoch, historyOffset).toByteArray());
         historyStream.write(arrayView.array(), arrayView.arrayOffset(), arrayView.getLength());
 
+        historyOffset = historyStream.size();
+
         // duplicate active epoch as a partial record
-        int newEpoch = intermediateEpoch + 1;
+        int newEpoch = nextEpoch + 1;
         newSegments = activeRecord.getSegments().stream().map(segmentId -> computeSegmentId(getPrimaryId(segmentId), newEpoch)).collect(Collectors.toList());
         record = new HistoryRecord(newEpoch, activeRecord.getReferenceEpoch(), newSegments);
         arrayView = record.toArrayView();
         historyStream.write(arrayView.array(), arrayView.arrayOffset(), arrayView.getLength());
+        indexStream.write(new HistoryIndexRecord(newEpoch, historyOffset).toByteArray());
 
-        return historyStream.toByteArray();
+        byte[] updatedHistoryTable = historyStream.toByteArray();
+        byte[] updatedIndex = indexStream.toByteArray();
+        return new ImmutablePair<>(updatedIndex, updatedHistoryTable);
     }
 
     /**
@@ -662,9 +679,9 @@ public class TableHelper {
         return getActiveEpoch(historyIndex, historyTable).getSegments().containsAll(segmentsToSeal);
     }
 
-    public static boolean checkScaleSegmentTableIdempotanceConsistency(final EpochTransitionRecord epochTransitionRecord,
-                                                                       final byte[] segmentIndex,
-                                                                       final byte[] segmentTable) {
+    public static boolean checkScaleSegmentTableIdempotantConsistency(final EpochTransitionRecord epochTransitionRecord,
+                                                                      final byte[] segmentIndex,
+                                                                      final byte[] segmentTable) {
         AtomicBoolean isConsistent = new AtomicBoolean(true);
         SegmentRecord latest = SegmentRecord.readLatest(segmentIndex, segmentTable).get();
         // verify that epoch transition record is consistent with segment table

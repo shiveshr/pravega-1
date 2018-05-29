@@ -14,15 +14,14 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.pravega.common.ObjectBuilder;
 import io.pravega.controller.store.stream.tables.serializers.EpochTransitionRecordSerializer;
-
-import java.io.IOException;
-import java.util.AbstractMap;
-import java.util.Optional;
-
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.SneakyThrows;
+
+import java.io.IOException;
+import java.util.AbstractMap;
+import java.util.Optional;
 
 /**
  * Transient record that is created while epoch transition takes place and captures the transition. This record is deleted
@@ -84,7 +83,7 @@ public class EpochTransitionRecord {
         return EpochTransitionRecord.builder().activeEpoch(activeEpoch)
                 .transactionEpoch(Optional.of(transactionEpoch))
                 .segmentsToSeal(ImmutableSet.<Long>builder().build()).time(time)
-                .newSegmentsWithRange(ImmutableMap.<Long, AbstractMap.SimpleEntry<Double,Double>>builder().build()).build();
+                .newSegmentsWithRange(ImmutableMap.<Long, AbstractMap.SimpleEntry<Double, Double>>builder().build()).build();
     }
 
     public static class EpochTransitionRecordBuilder implements ObjectBuilder<EpochTransitionRecord> {

@@ -386,6 +386,19 @@ public interface StreamMetadataStore {
                                                            final Executor executor);
 
     /**
+     * If the stream is set to be sealed, this method deletes any outstanding epoch transitions for scale.
+     * However, it ignores if the epoch transition is for rolling transaction.
+     *
+     * @param scope scope
+     * @param name stream
+     * @param context operation context
+     * @param executor executor
+     * @return CompletableFuture which when complete will mean the outstanding scale epoch transition has been deleted.
+     */
+    CompletableFuture<Void> cancelOutstandingScale(String scope, String name, OperationContext context,
+                                                   Executor executor);
+
+    /**
      * Scales in or out the currently set of active segments of a stream.
      *
      * @param scope          stream scope
@@ -458,6 +471,7 @@ public interface StreamMetadataStore {
      * @param activeEpoch    active epoch.
      * @param transactionEpoch transaction epoch.
      * @param transactionsToCommit transaction to commit.
+     * @param timestamp      time.
      * @param context        operation context
      * @param executor       callers executor
      * @return the list of newly created segments
@@ -738,17 +752,17 @@ public interface StreamMetadataStore {
                                               final OperationContext context,
                                               final Executor executor);
 
-        /**
-         * Api to mark a segment as cold.
-         *
-         * @param scope         scope for stream
-         * @param stream        name of stream
-         * @param segmentId segment number
-         * @param timestamp     time till which this cold marker is valid.
-         * @param context       context in which this operation is taking place.
-         * @param executor      callers executor
-         * @return Completable future
-         */
+    /**
+     * Api to mark a segment as cold.
+     *
+     * @param scope         scope for stream
+     * @param stream        name of stream
+     * @param segmentId segment number
+     * @param timestamp     time till which this cold marker is valid.
+     * @param context       context in which this operation is taking place.
+     * @param executor      callers executor
+     * @return Completable future
+     */
     CompletableFuture<Void> markCold(final String scope, final String stream, final long segmentId, final long timestamp, final OperationContext context, final Executor executor);
 
     /**

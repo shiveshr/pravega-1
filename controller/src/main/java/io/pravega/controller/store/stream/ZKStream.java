@@ -33,7 +33,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.CompletionStage;
 import java.util.stream.Collectors;
 
 /**
@@ -580,7 +579,7 @@ class ZKStream extends PersistentStreamBase<Integer> {
 
     @Override
     CompletableFuture<Void> deleteCommittingTxnRecord() {
-        return store.deleteNode(committingTxnsPath);
+        return store.deletePath(committingTxnsPath, false);
     }
 
     // endregion

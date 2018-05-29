@@ -9,10 +9,12 @@
  */
 package io.pravega.controller.store.stream;
 
+import com.google.common.collect.ImmutableMap;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.lang.BigLong;
 import io.pravega.controller.store.stream.tables.Data;
+import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.test.common.TestingServerStarter;
 import io.pravega.controller.store.stream.tables.State;
@@ -353,9 +355,9 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
 
         long scaleTimestamp = System.currentTimeMillis();
         List<Long> existingSegments = segments.stream().map(Segment::getSegmentId).collect(Collectors.toList());
-        StartScaleResponse response = store.startScale(scope, stream, existingSegments, newRanges,
+        EpochTransitionRecord response = store.startScale(scope, stream, existingSegments, newRanges,
                 scaleTimestamp, false, null, executor).join();
-        List<Segment> segmentsCreated = response.getSegmentsCreated();
+        ImmutableMap<Long, SimpleEntry<Double, Double>> segmentsCreated = response.getNewSegmentsWithRange();
         store.setState(scope, stream, State.SCALING, null, executor).join();
         store.scaleCreateNewSegments(scope, stream, null, executor).join();
         store.scaleNewSegmentsCreated(scope, stream, null, executor).join();

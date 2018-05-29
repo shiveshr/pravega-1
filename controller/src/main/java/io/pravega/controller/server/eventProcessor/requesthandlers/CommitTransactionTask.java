@@ -155,19 +155,24 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                                 if (txnList == null) {
                                     // reset state conditionally in case we were left with stale committing state from a previous execution
                                     // that died just before updating the state back to ACTIVE but after having completed all the work.
-                                    return streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING, context, executor);
+                                    return streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING_TXN, context, executor);
                                 } else {
                                     // Once state is set to committing, we are guaranteed that this will be the only processing that can happen on the stream
                                     // and we can proceed with committing outstanding transactions collected in the txnList step.
-                                    CompletableFuture<Void> future = new CompletableFuture<>();
+                                    CompletableFuture<Void> future;
                                     // if state is sealing, we should continue with commit so that we allow for completion of transactions
                                     // in commit state.
-                                    if (!state.equals(State.SEALING)) {
+                                    if (state.equals(State.SEALING)) {
+                                        future = new CompletableFuture<>();
+                                    } else {
                                         // In normal course set the state to committing before proceeding.
-                                        // If we are unable to set the state to COMMITTING, it will get OPERATION_NOT_ALLOWED
+                                        // If we are unable to set the state to COMMITTING_TXN, it will get OPERATION_NOT_ALLOWED
                                         // and the processing will be retried later.
-                                        future = Futures.toVoid(streamMetadataStore.setState(scope, stream, State.COMMITTING, context, executor));
+                                        future = Futures.toVoid(streamMetadataStore.setState(scope, stream, State.COMMITTING_TXN, context, executor));
                                     }
+
+                                    // Note: since we have set the state to COMMITTING_TXN, the active epoch that we fetch now
+                                    // cannot change until we either perform rolling txn or postpone it.
                                     return future.thenCompose(v -> getEpochRecords(scope, stream, txnEpoch, context)
                                             .thenCompose(records -> {
                                                 HistoryRecord txnEpochRecord = records.get(0);
@@ -185,10 +190,10 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                             });
 
                     // once all commits are done, delete the committing txn record.
-                    // reset state to ACTIVE if it was COMMITTING
+                    // reset state to ACTIVE if it was COMMITTING_TXN
                     return Futures.toVoid(commitFuture
                             .thenCompose(v -> streamMetadataStore.deleteCommittingTransactionsRecord(scope, stream, context, executor))
-                            .thenCompose(v -> streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING, context, executor)));
+                            .thenCompose(v -> streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING_TXN, context, executor)));
                 });
     }
 
@@ -241,7 +246,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                         if (Exceptions.unwrap(e) instanceof EpochTransitionOperationExceptions.ConflictException) {
                             log.debug("Rolling transaction on stream {}/{} couldnt start because of conflict. Attempted to commit txns {} with txn epoch {}, rolling on active epoch {}",
                                     scope, stream, transactionsToCommit, txnEpoch.getEpoch(), activeEpoch.getEpoch());
-                            streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING, context, executor)
+                            streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING_TXN, context, executor)
                                     .thenAccept(x -> startRollingTxnFuture.completeExceptionally(e));
                         } else {
                             log.warn("Exception thrown trying to start rolling transaction", e);
@@ -276,7 +281,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
         List<Long> activeEpochDuplicate = activeEpoch.getSegments().stream()
                 .map(segment -> computeSegmentId(getPrimaryId(segment), epochTransitionRecord.getNewEpoch())).collect(Collectors.toList());
 
-        return duplicateTxnEpochAndCommitTxns(scope, stream, transactionsToCommit, txnEpochDuplicate, context)
+        return copyTxnEpochSegmentsAndCommitTxns(scope, stream, transactionsToCommit, txnEpochDuplicate, context)
                 .thenCompose(v -> streamMetadataTasks.notifyNewSegments(scope, stream, activeEpochDuplicate, context, delegationToken))
                 .thenCompose(v -> streamMetadataTasks.getSealedSegmentsSize(scope, stream, txnEpochDuplicate, delegationToken))
                 .thenCompose(sealedSegmentsMap -> {
@@ -298,14 +303,14 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
      * This method creates duplicate segments for transaction epoch. It then merges all transactions from the list into
      * those duplicate segments.
      */
-    private CompletableFuture<Void> duplicateTxnEpochAndCommitTxns(String scope, String stream, List<UUID> transactionsToCommit,
-                                                                   List<Long> segmentIds, OperationContext context) {
+    private CompletableFuture<Void> copyTxnEpochSegmentsAndCommitTxns(String scope, String stream, List<UUID> transactionsToCommit,
+                                                                      List<Long> segmentIds, OperationContext context) {
         // 1. create duplicate segments
-        // 2. merge transactions
+        // 2. merge transactions in those segments
         // 3. seal txn epoch segments
         String delegationToken = streamMetadataTasks.retrieveDelegationToken();
         CompletableFuture<Void> createSegmentsFuture = Futures.allOf(segmentIds.stream().map(segment -> {
-            // Use fixed scaling policy for these segments as they are created and sealed and are not
+            // Use fixed scaling policy for these segments as they are created, merged into and sealed and are not
             // supposed to auto scale.
             return streamMetadataTasks.notifyNewSegment(scope, stream, segment, ScalingPolicy.fixed(1), delegationToken);
         }).collect(Collectors.toList()));
@@ -332,12 +337,17 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
         for (UUID txnId : transactionsToCommit) {
             log.debug("Committing transaction {} on stream {}/{}", txnId, scope, stream);
             // commit transaction in segment store
-            future = future.thenCompose(v -> streamMetadataTasks.notifyTxnCommit(scope, stream, segments, txnId)
+            future = future
+                    // Important: seal transaction segment. Note, we can use the same segments and transaction id as only
+                    // primary id is taken for creation of txn-segment name and secondary part is erased.
+                    // And we are creating duplicates of txn epoch keeping the primary same.
+                    .thenCompose(v -> streamMetadataTasks.notifyTxnSeal(scope, stream, segments, txnId))
+                    .thenCompose(v -> streamMetadataTasks.notifyTxnCommit(scope, stream, segments, txnId))
                     // mark transaction as committed in metadata store.
                     .thenCompose(x -> streamMetadataStore.commitTransaction(scope, stream, txnId, context, executor)
                             .thenAccept(done -> {
                                 log.debug("transaction {} on stream {}/{} committed successfully", txnId, scope, stream);
-                            })));
+                            }));
         }
         return future;
     }

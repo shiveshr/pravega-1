@@ -116,7 +116,8 @@ public class ControllerEventProcessorTest {
         checkTransactionState(SCOPE, STREAM, txnData.getId(), TxnStatus.COMMITTED);
     }
 
-    @Test(timeout = 10000)
+    // TODO Shivesh
+    @Test(timeout = 10000000)
     public void testMultipleTransactionsSuccess() {
         // 1. commit request for an older epoch
         // this should be ignored

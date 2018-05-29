@@ -27,14 +27,14 @@ import io.pravega.shared.protocol.netty.ReplyProcessor;
 import io.pravega.shared.protocol.netty.WireCommand;
 import io.pravega.shared.protocol.netty.WireCommandType;
 import io.pravega.shared.protocol.netty.WireCommands;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
+
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
-
-import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.tuple.ImmutablePair;
-import org.apache.commons.lang3.tuple.Pair;
 
 import static io.pravega.shared.segment.StreamSegmentNameUtils.getPrimaryId;
 import static io.pravega.shared.segment.StreamSegmentNameUtils.getQualifiedStreamSegmentName;
@@ -229,7 +229,6 @@ public class SegmentHelper {
 
     /**
      * This method sends segment sealed message for the specified segment.
-     * It owns up the responsibility of retrying the operation on failures until success.
      *
      * @param scope               stream scope
      * @param stream              stream name
@@ -246,6 +245,13 @@ public class SegmentHelper {
                                                   final ConnectionFactory clientCF, String delegationToken) {
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
         final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, segmentId);
+        return sealSegment(qualifiedName, uri, clientCF, delegationToken);
+    }
+
+    private CompletableFuture<Boolean> sealSegment(final String qualifiedName,
+                                                   final Controller.NodeUri uri,
+                                                   final ConnectionFactory clientCF,
+                                                   final String delegationToken) {
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
         final WireCommandType type = WireCommandType.SEAL_SEGMENT;
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
@@ -350,6 +356,18 @@ public class SegmentHelper {
                 WireCommands.CreateSegment.NO_SCALE, 0, delegationToken);
         sendRequestAsync(request, replyProcessor, result, clientCF, ModelHelper.encode(uri));
         return result;
+    }
+
+    public CompletableFuture<Boolean> sealTransaction(final String scope,
+                                                      final String stream,
+                                                      final long segmentId,
+                                                      final UUID txId,
+                                                      final HostControllerStore hostControllerStore,
+                                                      final ConnectionFactory clientCF,
+                                                      String delegationToken) {
+        final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId, hostControllerStore);
+        final String transactionName = getTransactionName(scope, stream, segmentId, txId);
+        return sealSegment(transactionName, uri, clientCF, delegationToken);
     }
 
     private String getTransactionName(String scope, String stream, long segmentId, UUID txId) {

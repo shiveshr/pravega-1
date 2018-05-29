@@ -34,7 +34,7 @@ public class HistoryRecordSerializer extends VersionedSerializer.WithBuilder<His
         builder.epoch(revisionDataInput.readInt())
                 .referenceEpoch(revisionDataInput.readInt())
                 .segments(revisionDataInput.readCollection(DataInput::readLong, ArrayList::new))
-                .scaleTime(revisionDataInput.readLong());
+                .creationTime(revisionDataInput.readLong());
     }
 
     private void write00(HistoryRecord history, RevisionDataOutput revisionDataOutput) throws IOException {

@@ -9,9 +9,9 @@
  */
 package io.pravega.controller.server.eventProcessor.requesthandlers;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import io.pravega.common.Exceptions;
-import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.RetriesExhaustedException;
 import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StreamMetadataStore;
@@ -82,7 +82,8 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
         return streamMetadataTasks.writeEvent(event);
     }
 
-    private CompletableFuture<EpochTransitionRecord> runScale(ScaleOpEvent scaleInput, boolean runOnlyIfStarted, OperationContext context, String delegationToken) { // called upon event read from requeststream
+    @VisibleForTesting
+    public CompletableFuture<EpochTransitionRecord> runScale(ScaleOpEvent scaleInput, boolean runOnlyIfStarted, OperationContext context, String delegationToken) { // called upon event read from requeststream
         String scope = scaleInput.getScope();
         String stream = scaleInput.getStream();
         // 1. create epoch transition node (metadatastore.startScale)

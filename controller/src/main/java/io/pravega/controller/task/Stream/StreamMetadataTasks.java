@@ -28,8 +28,8 @@ import io.pravega.controller.server.eventProcessor.requesthandlers.TaskException
 import io.pravega.controller.server.rpc.auth.PravegaInterceptor;
 import io.pravega.controller.store.host.HostControllerStore;
 import io.pravega.controller.store.stream.CreateStreamResponse;
+import io.pravega.controller.store.stream.EpochTransitionOperationExceptions;
 import io.pravega.controller.store.stream.OperationContext;
-import io.pravega.controller.store.stream.ScaleOperationExceptions;
 import io.pravega.controller.store.stream.Segment;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
@@ -475,7 +475,7 @@ public class StreamMetadataTasks extends TaskBase {
 
                             if (e != null) {
                                 Throwable cause = Exceptions.unwrap(e);
-                                if (cause instanceof ScaleOperationExceptions.ScalePreConditionFailureException) {
+                                if (cause instanceof EpochTransitionOperationExceptions.PreConditionFailureException) {
                                     response.setStatus(ScaleResponse.ScaleStreamStatus.PRECONDITION_FAILED);
                                 } else {
                                     log.warn("Scale for stream {}/{} failed with exception {}", scope, stream, cause);
@@ -754,6 +754,24 @@ public class StreamMetadataTasks extends TaskBase {
             log.warn("Delete stream failed.", ex);
             return DeleteStreamStatus.Status.FAILURE;
         }
+    }
+
+    public CompletableFuture<Void> notifyTxnSeal(final String scope, final String stream,
+                                                 final List<Long> segments, final UUID txnId) {
+        return Futures.allOf(segments.stream()
+                .parallel()
+                .map(segment -> notifyTxnSeal(scope, stream, segment, txnId))
+                .collect(Collectors.toList()));
+    }
+
+    private CompletableFuture<Boolean> notifyTxnSeal(final String scope, final String stream,
+                                                     final long segmentNumber, final UUID txnId) {
+        return TaskStepsRetryHelper.withRetries(() -> segmentHelper.sealTransaction(scope,
+                stream,
+                segmentNumber,
+                txnId,
+                this.hostControllerStore,
+                this.connectionFactory, this.retrieveDelegationToken()), executor);
     }
 
     public CompletableFuture<Void> notifyTxnCommit(final String scope, final String stream,

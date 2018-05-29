@@ -18,7 +18,6 @@ import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
-import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.AbstractMap;
 import java.util.AbstractMap.SimpleEntry;
@@ -188,6 +187,14 @@ interface Stream {
      * @return list of numbers of segments active in the specified epoch.
      */
     CompletableFuture<List<Long>> getActiveSegments(int epoch);
+
+    /**
+     * If the stream is set to be sealed, this method deletes any outstanding epoch transitions for scale.
+     * However, it ignores if the epoch transition is for rolling transaction.
+     *
+     * @return CompletableFuture which when complete will mean the outstanding scale epoch transition has been deleted.
+     */
+    CompletableFuture<Void> cancelOutstandingScale();
 
     /**
      * Called to start metadata updates to stream store wrt new scale event.
