@@ -93,11 +93,12 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
         // 4. update metadata store with new partial epoch (metadatastore.scaleNewSegmentsCreated)
         // 5. seal old segments in segment store (streamMetadataTasks.notifySealedSegments)
         // 6. complete scale (metadataStore.scaleSegmentsSealed)
-        //      update metadata store to complete partial epoch + delete epoch transition node + set state to active
+        //      update metadata store to complete partial epoch + delete epoch transition node
+        // 7. set state to active
         //      Note: if we crash before deleting epoch transition, then in rerun (retry) it will be rendered inconsistent
         //      and deleted in startScale method.
         //      if we crash before setting state to active, in rerun (retry) we will find epoch transition to be null and
-        //      hence reset the state in startScale method.
+        //      hence reset the state in startScale method before attempting to start scale in idempotent fashion.
         return streamMetadataStore.startScale(scope, stream, scaleInput.getSegmentsToSeal(), scaleInput.getNewRanges(),
                 scaleInput.getScaleTime(), runOnlyIfStarted, context, executor)
                 .thenCompose(response -> streamMetadataStore.setState(scope, stream, State.SCALING, context, executor)

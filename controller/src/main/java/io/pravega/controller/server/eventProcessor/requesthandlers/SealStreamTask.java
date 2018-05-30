@@ -67,7 +67,6 @@ public class SealStreamTask implements StreamTask<SealStreamEvent> {
                         throw new TaskExceptions.StartException("Seal stream task not started yet.");
                     }
                 })
-                .thenCompose(x -> streamMetadataStore.cancelOutstandingScale(scope, stream, context, executor))
                 .thenCompose(x -> abortTransaction(context, scope, stream)
                         .thenAccept(noTransactions -> {
                             if (!noTransactions) {

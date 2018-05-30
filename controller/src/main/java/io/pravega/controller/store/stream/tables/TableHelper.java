@@ -558,7 +558,7 @@ public class TableHelper {
 
         historyOffset = historyStream.size();
 
-        // duplicate active epoch as a partial record
+        // duplicate active epoch as a partial record. no time added here
         int newEpoch = nextEpoch + 1;
         newSegments = activeRecord.getSegments().stream().map(segmentId -> computeSegmentId(getPrimaryId(segmentId), newEpoch)).collect(Collectors.toList());
         record = new HistoryRecord(newEpoch, activeRecord.getReferenceEpoch(), newSegments);

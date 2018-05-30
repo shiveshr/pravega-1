@@ -21,7 +21,6 @@ import lombok.SneakyThrows;
 
 import java.io.IOException;
 import java.util.AbstractMap;
-import java.util.Optional;
 
 /**
  * Transient record that is created while epoch transition takes place and captures the transition. This record is deleted
@@ -32,17 +31,11 @@ import java.util.Optional;
 @AllArgsConstructor
 public class EpochTransitionRecord {
     public static final EpochTransitionRecordSerializer SERIALIZER = new EpochTransitionRecordSerializer();
-    private static final int NO_REFERENCE = Integer.MIN_VALUE;
 
     /**
      * Active epoch at the time of requested transition.
      */
     final int activeEpoch;
-    /**
-     * This field is Optional and only used in rolling transactional transition to capture the original epoch in which
-     * transaction was created.
-     */
-    final Optional<Integer> transactionEpoch;
     /**
      * Time when this epoch creation request was started.
      */
@@ -56,23 +49,15 @@ public class EpochTransitionRecord {
      */
     ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> newSegmentsWithRange;
 
-    public boolean isScale() {
-        return !transactionEpoch.isPresent();
-    }
-
-    public int getTransactionEpoch() {
-        return transactionEpoch.orElse(NO_REFERENCE);
-    }
-
     public int getNewEpoch() {
-        return this.transactionEpoch.isPresent() ? activeEpoch + 2 : activeEpoch + 1;
+        return activeEpoch + 1;
     }
 
     public static EpochTransitionRecord createForScale(int activeEpoch, long time, ImmutableSet<Long> segmentsToSeal,
                                                        ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> newSegmentsWithRange) {
         Preconditions.checkArgument(segmentsToSeal != null && !segmentsToSeal.isEmpty());
         Preconditions.checkArgument(newSegmentsWithRange != null && !newSegmentsWithRange.isEmpty());
-        return EpochTransitionRecord.builder().activeEpoch(activeEpoch).transactionEpoch(Optional.empty()).segmentsToSeal(segmentsToSeal).time(time)
+        return EpochTransitionRecord.builder().activeEpoch(activeEpoch).segmentsToSeal(segmentsToSeal).time(time)
                 .newSegmentsWithRange(newSegmentsWithRange).build();
     }
 
@@ -81,7 +66,6 @@ public class EpochTransitionRecord {
         // seal and segments to create are redundant and hence we set empty sets and maps respectively.
         Preconditions.checkArgument(activeEpoch > transactionEpoch);
         return EpochTransitionRecord.builder().activeEpoch(activeEpoch)
-                .transactionEpoch(Optional.of(transactionEpoch))
                 .segmentsToSeal(ImmutableSet.<Long>builder().build()).time(time)
                 .newSegmentsWithRange(ImmutableMap.<Long, AbstractMap.SimpleEntry<Double, Double>>builder().build()).build();
     }

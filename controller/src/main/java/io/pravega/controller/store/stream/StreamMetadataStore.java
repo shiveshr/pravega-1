@@ -386,19 +386,6 @@ public interface StreamMetadataStore {
                                                            final Executor executor);
 
     /**
-     * If the stream is set to be sealed, this method deletes any outstanding epoch transitions for scale.
-     * However, it ignores if the epoch transition is for rolling transaction.
-     *
-     * @param scope scope
-     * @param name stream
-     * @param context operation context
-     * @param executor executor
-     * @return CompletableFuture which when complete will mean the outstanding scale epoch transition has been deleted.
-     */
-    CompletableFuture<Void> cancelOutstandingScale(String scope, String name, OperationContext context,
-                                                   Executor executor);
-
-    /**
      * Scales in or out the currently set of active segments of a stream.
      *
      * @param scope          stream scope
@@ -462,28 +449,7 @@ public interface StreamMetadataStore {
                                                 final OperationContext context,
                                                 final Executor executor);
 
-    /**
-     * Start rolling transaction for committing transations on old epoch. This method will create an epoch transition record
-     * entry in metadata. If it is able to successfully create the entry then rolling transaction can continue.
-     *
-     * @param scope          stream scope
-     * @param name           stream name.
-     * @param activeEpoch    active epoch.
-     * @param transactionEpoch transaction epoch.
-     * @param transactionsToCommit transaction to commit.
-     * @param timestamp      time.
-     * @param context        operation context
-     * @param executor       callers executor
-     * @return the list of newly created segments
-     */
-    CompletableFuture<EpochTransitionRecord> startRollingTxn(final String scope, final String name,
-                                                             final HistoryRecord activeEpoch,
-                                                             final HistoryRecord transactionEpoch,
-                                                             final List<UUID> transactionsToCommit,
-                                                             final long timestamp,
-                                                             final OperationContext context,
-                                                             final Executor executor);
-
+    // TODO: shivesh update javadocs
     /**
      * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
      * have been created successfully in segment store.
@@ -499,7 +465,7 @@ public interface StreamMetadataStore {
      * @return CompletableFuture which upon completion will indicate that we have successfully created new epoch entries.
      */
     CompletableFuture<Void> rollingTxnNewSegmentsCreated(final String scope, final String name, Map<Long, Long> sealedTxnEpochSegments,
-                                                         final OperationContext context, final Executor executor);
+                                                         final int txnEpoch, final long time, final OperationContext context, final Executor executor);
 
     /**
      * This is final step of rolling transaction and is called after old segments are sealed in segment store.
@@ -513,7 +479,7 @@ public interface StreamMetadataStore {
      * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.
      */
     CompletableFuture<Void> rollingTxnActiveEpochSealed(final String scope, final String name, final Map<Long, Long> sealedActiveEpochSegments,
-                                                        final OperationContext context, final Executor executor);
+                                                        final int activeEpoch, final long time, final OperationContext context, final Executor executor);
 
 
     /**

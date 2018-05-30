@@ -398,13 +398,6 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<Void> cancelOutstandingScale(final String scope, final String name, final OperationContext context,
-                                                          final Executor executor) {
-        return withCompletion(getStream(scope, name, context)
-                .cancelOutstandingScale(), executor);
-    }
-
-    @Override
     public CompletableFuture<EpochTransitionRecord> startScale(final String scope,
                                                                final String name,
                                                                final List<Long> sealedSegments,
@@ -453,23 +446,15 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<EpochTransitionRecord> startRollingTxn(String scope, String name, HistoryRecord activeEpoch,
-                                                                    HistoryRecord transactionEpoch, List<UUID> transactionsToCommit,
-                                                                    long timestamp, OperationContext context, Executor executor) {
-        return withCompletion(getStream(scope, name, context)
-                .startRollingTransaction(activeEpoch.getEpoch(), transactionEpoch.getEpoch(), transactionsToCommit, timestamp), executor);
-    }
-
-    @Override
     public CompletableFuture<Void> rollingTxnNewSegmentsCreated(String scope, String name, Map<Long, Long> sealedTxnEpochSegments,
-                                                                OperationContext context, Executor executor) {
-        return withCompletion(getStream(scope, name, context).rollingTxnNewSegmentsCreated(sealedTxnEpochSegments), executor);
+                                                                int txnEpoch, long time, OperationContext context, Executor executor) {
+        return withCompletion(getStream(scope, name, context).rollingTxnNewSegmentsCreated(sealedTxnEpochSegments, txnEpoch, time), executor);
     }
 
     @Override
     public CompletableFuture<Void> rollingTxnActiveEpochSealed(String scope, String name, Map<Long, Long> sealedActiveEpochSegments,
-                                                               OperationContext context, Executor executor) {
-        return withCompletion(getStream(scope, name, context).rollingTxnActiveEpochSealed(sealedActiveEpochSegments), executor);
+                                                               int activeEpoch, long time, OperationContext context, Executor executor) {
+        return withCompletion(getStream(scope, name, context).rollingTxnActiveEpochSealed(sealedActiveEpochSegments, activeEpoch, time), executor);
     }
 
     @Override

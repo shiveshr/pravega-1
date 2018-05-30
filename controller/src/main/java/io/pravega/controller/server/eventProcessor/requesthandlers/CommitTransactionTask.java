@@ -12,14 +12,11 @@ package io.pravega.controller.server.eventProcessor.requesthandlers;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import io.pravega.client.stream.ScalingPolicy;
-import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
-import io.pravega.controller.store.stream.EpochTransitionOperationExceptions;
 import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.TxnStatus;
-import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
@@ -78,36 +75,29 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
      *      else proceed to step 2
      *      1.2 no
      *      collect all txns in the same referenceepoch which are in committing state and create txn-commit-list with this set.
-     * 2. set state to committing
+     * 2. set state to COMMITTING_TXN
      *      once state is set to committing, no other workflow other than current one can run. So even after failover, we
-     *      will return to resume this work if state is successfully updated
+     *      will return to resume this work henceforth.
      * 3. getActiveEpoch.
      *      3.1 If txn.epoch == activeEpoch, // we can merge directly in the epoch.
      *          call commitTxnsOnActiveEpoch
      *          else commitTxnOnOldEpoch
+     * 4. reset state to ACTIVE
      *
      * commitTxnsOnActiveEpoch
-     * 1. loop over commit txn list and commit transactions into active epoch one txn at a time.
+     * 1. loop over transaction commit list and commit transactions into active epoch one transaction at a time.
      *
      * commitTxnOnOldEpoch
-     * 1. try create epoch transition node
-     *    If node creation fails because node exists, it may be because startScale was called concurrently (refer to scale workflow).
-     *    This can happen via manual scale OR upon failover recovery.
-     *    The work that gets to create epoch transition node first wins the race to perform transition first.
-     *      So we will reset state to active. throw OperationNotAllowed. so that we are retried later.
-     *      This will mean when we resume, a scale may have happened. This code will recompute the epoch transition it needs to perform
-     *      and try to create the node.
-     *      Note: commit-list still exists but we have not worked on it.
-     *      no other commit event can be processed because of that barrier and only this event can resume processing when it is picked up again.
-     * 2. We are here then epochtransition node is created successfully.
-     *      2.1 create duplicate txnepoch segments with secondary as activeepoch+1
-     *      2.2 create duplicate active segments with secondary as activeepoch+2
+     * 1. Check if rolling txn needs to be performed --> basically if all transactions are already committed,
+     * we are in a rerun, do nothing and get out
+     * 2. start rolling txn
+     *      2.1 create duplicate txnepoch segments with secondaryId as activeepoch+1
+     *      2.2 create duplicate active segments with secondaryId as activeepoch+2
      *      2.3 loop over segments and merge trasactions on segments on activeepoch+1
      *      2.4 seal activeepoch+1
      *      2.5 add to history table (activeepoch+1 in full and activeepoch+2 as partial entry)
      *      2.6 seal active epoch
-     *      2.7 delete epoch transition node
-     * 3. reset state to active
+     *      2.7 complete rolling txn by completing partial record in history table
      * @param event event to process
      * @return Completable future which indicates completion of processing of commit event.
      */
@@ -145,7 +135,6 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
         // This will result in event being posted back in the stream and retried later. Generally if a transaction commit starts, it will come to
         // an end.. but during failover, once we have created the node, we are guaranteed that it will be only that transaction that will be getting
         // committed at that time.
-
         return streamMetadataStore.getState(scope, stream, true, context, executor)
                 .thenCompose(state -> {
                     CompletableFuture<List<UUID>> txnListFuture = createRecordAndGetCommitTxnList(scope, stream, txnEpoch, context);
@@ -171,8 +160,9 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                                         future = Futures.toVoid(streamMetadataStore.setState(scope, stream, State.COMMITTING_TXN, context, executor));
                                     }
 
-                                    // Note: since we have set the state to COMMITTING_TXN, the active epoch that we fetch now
-                                    // cannot change until we either perform rolling txn or postpone it.
+                                    // Note: since we have set the state to COMMITTING_TXN (or it was already sealing), the active epoch that we fetch now
+                                    // cannot change until we perform rolling txn. TxnCommittingRecord ensures no other rollingTxn
+                                    // can run concurrently
                                     return future.thenCompose(v -> getEpochRecords(scope, stream, txnEpoch, context)
                                             .thenCompose(records -> {
                                                 HistoryRecord txnEpochRecord = records.get(0);
@@ -183,7 +173,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                                                     // we can commit transactions immediately
                                                     return commitTransactions(scope, stream, activeEpochRecord.getSegments(), txnList, context);
                                                 } else {
-                                                    return runRollingTxn(scope, stream, activeEpochRecord, txnEpochRecord, txnList, context);
+                                                    return rollTransactions(scope, stream, activeEpochRecord, txnEpochRecord, txnList, context);
                                                 }
                                             }));
                                 }
@@ -220,10 +210,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
     }
 
     /**
-     *  1. check idempotence --> check if we need to create epoch transition record anymore
-     *     try to create epoch transition node
-     *      if fails to create the node, reset state to active. Allow outstanding scale to complete before attempting
-     *      this again.
+     * 1. check idempotence --> check if all transactions are already committed, then rolling txn has already happened.
      * 2. create duplicate txn epoch segments in segment store and commit transactions into those segments.
      * 3. create duplicate active epoch segments
      * 4. update history table with one complete and one partial epoch
@@ -235,58 +222,40 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
      *      before creating epoch transiton node, we will check if transactions of interest (from commit-txn-list)
      *      are still in committing state or not. If they are all committed, we dont need to do anything here.
      */
-    private CompletableFuture<Void> runRollingTxn(String scope, String stream, HistoryRecord txnEpoch, HistoryRecord activeEpoch,
-                                                  List<UUID> transactionsToCommit, OperationContext context) {
-        CompletableFuture<EpochTransitionRecord> startRollingTxnFuture = new CompletableFuture<>();
-        String delegationToken = streamMetadataTasks.retrieveDelegationToken();
-        long timestamp = System.currentTimeMillis();
-        streamMetadataStore.startRollingTxn(scope, stream, txnEpoch, activeEpoch, transactionsToCommit, timestamp, context, executor)
-                .whenComplete((r, e) -> {
-                    if (e != null) {
-                        if (Exceptions.unwrap(e) instanceof EpochTransitionOperationExceptions.ConflictException) {
-                            log.debug("Rolling transaction on stream {}/{} couldnt start because of conflict. Attempted to commit txns {} with txn epoch {}, rolling on active epoch {}",
-                                    scope, stream, transactionsToCommit, txnEpoch.getEpoch(), activeEpoch.getEpoch());
-                            streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING_TXN, context, executor)
-                                    .thenAccept(x -> startRollingTxnFuture.completeExceptionally(e));
-                        } else {
-                            log.warn("Exception thrown trying to start rolling transaction", e);
-                            startRollingTxnFuture.completeExceptionally(e);
-                        }
-                    } else {
-                        assert !r.isScale();
-                        startRollingTxnFuture.complete(r);
-                    }
-                });
+    private CompletableFuture<Void> rollTransactions(String scope, String stream, HistoryRecord txnEpoch, HistoryRecord activeEpoch,
+                                                     List<UUID> transactionsToCommit, OperationContext context) {
 
-        return startRollingTxnFuture
-                .thenCompose(epochTransitionRecord -> {
-                    // if epochTransitionRecord is null, it means that rollingTxn has already completed work.
-                    if (epochTransitionRecord != null) {
-                        log.debug("rolling transaction on stream {}/{} started for transactions {} with txn epoch {}, rolling on active epoch {}",
-                                scope, stream, transactionsToCommit, txnEpoch.getEpoch(), activeEpoch.getEpoch());
-                        return processRollingTxn(scope, stream, epochTransitionRecord, txnEpoch, activeEpoch, transactionsToCommit,
-                                context, delegationToken);
+        // check if all transactions are already committed. if so return all good immediately
+        // just checking the last one suffices as we perform processing of transactions in order.
+        UUID lastTransactionId = transactionsToCommit.get(transactionsToCommit.size() - 1);
+        return streamMetadataStore.transactionStatus(scope,stream, lastTransactionId, context, executor)
+                .thenCompose(status -> {
+                    if (status.equals(TxnStatus.COMMITTING)) {
+                        return runRollingTxn(scope, stream, txnEpoch, activeEpoch, transactionsToCommit, context);
                     } else {
-                        // Idempotent case. Work was already completed, nothing to do.
                         return CompletableFuture.completedFuture(null);
                     }
                 });
-    }
+        }
 
-    private CompletionStage<Void> processRollingTxn(String scope, String stream, EpochTransitionRecord epochTransitionRecord,
-                                                    HistoryRecord txnEpoch, HistoryRecord activeEpoch, List<UUID> transactionsToCommit,
-                                                    OperationContext context, String delegationToken) {
+    private CompletionStage<Void> runRollingTxn(String scope, String stream, HistoryRecord txnEpoch, HistoryRecord activeEpoch,
+                                                List<UUID> transactionsToCommit, OperationContext context) {
+        String delegationToken = streamMetadataTasks.retrieveDelegationToken();
+        long timestamp = System.currentTimeMillis();
+        streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor);
+        int newTxnEpoch = activeEpoch.getEpoch() + 1;
+        int newActieEpoch = newTxnEpoch + 1;
         List<Long> txnEpochDuplicate = txnEpoch.getSegments().stream().map(segment ->
-                computeSegmentId(getPrimaryId(segment), epochTransitionRecord.getTransactionEpoch())).collect(Collectors.toList());
+                computeSegmentId(getPrimaryId(segment), newTxnEpoch)).collect(Collectors.toList());
         List<Long> activeEpochDuplicate = activeEpoch.getSegments().stream()
-                .map(segment -> computeSegmentId(getPrimaryId(segment), epochTransitionRecord.getNewEpoch())).collect(Collectors.toList());
+                .map(segment -> computeSegmentId(getPrimaryId(segment), newActieEpoch)).collect(Collectors.toList());
 
         return copyTxnEpochSegmentsAndCommitTxns(scope, stream, transactionsToCommit, txnEpochDuplicate, context)
                 .thenCompose(v -> streamMetadataTasks.notifyNewSegments(scope, stream, activeEpochDuplicate, context, delegationToken))
                 .thenCompose(v -> streamMetadataTasks.getSealedSegmentsSize(scope, stream, txnEpochDuplicate, delegationToken))
                 .thenCompose(sealedSegmentsMap -> {
                     log.debug("Rolling transaction, created duplicate of active epoch {} for stream {}/{}", activeEpoch, scope, stream);
-                    return streamMetadataStore.rollingTxnNewSegmentsCreated(scope, stream, sealedSegmentsMap, context, executor);
+                    return streamMetadataStore.rollingTxnNewSegmentsCreated(scope, stream, sealedSegmentsMap, txnEpoch.getEpoch(), timestamp, context, executor);
                 })
                 .thenCompose(v -> streamMetadataTasks.notifySealedSegments(scope, stream, activeEpoch.getSegments(),
                         delegationToken))
@@ -294,7 +263,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                         delegationToken))
                 .thenCompose(sealedSegmentsMap -> {
                     log.debug("Rolling transaction, sealed active epoch {} for stream {}/{}", activeEpoch, scope, stream);
-                    return streamMetadataStore.rollingTxnActiveEpochSealed(scope, stream, sealedSegmentsMap, context, executor);
+                    return streamMetadataStore.rollingTxnActiveEpochSealed(scope, stream, sealedSegmentsMap, activeEpoch.getEpoch(), timestamp, context, executor);
                 });
     }
 
@@ -318,6 +287,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
         return createSegmentsFuture
                 .thenCompose(v -> {
                     log.debug("Rolling transaction, successfully created duplicate txn epoch {} for stream {}/{}", segmentIds, scope, stream);
+                    // now commit transactions into these newly created segments
                     return commitTransactions(scope, stream, segmentIds, transactionsToCommit, context);
                 })
                 .thenCompose(v -> streamMetadataTasks.notifySealedSegments(scope, stream, segmentIds, delegationToken));
