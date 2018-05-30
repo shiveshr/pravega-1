@@ -522,7 +522,7 @@ public class StreamMetadataTasks extends TaskBase {
 
                                 if (epoch > activeEpoch.getEpoch()) {
                                     response.setStatus(ScaleStatusResponse.ScaleStatus.INVALID_INPUT);
-                                } else if (activeEpoch.getEpoch() == epoch) {
+                                } else if (activeEpoch.getEpoch() == epoch || activeEpoch.getReferenceEpoch() == epoch) {
                                     response.setStatus(ScaleStatusResponse.ScaleStatus.IN_PROGRESS);
                                 } else {
                                     response.setStatus(ScaleStatusResponse.ScaleStatus.SUCCESS);

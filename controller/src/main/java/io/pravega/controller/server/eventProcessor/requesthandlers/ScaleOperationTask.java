@@ -102,7 +102,7 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
         return streamMetadataStore.startScale(scope, stream, scaleInput.getSegmentsToSeal(), scaleInput.getNewRanges(),
                 scaleInput.getScaleTime(), runOnlyIfStarted, context, executor)
                 .thenCompose(response -> streamMetadataStore.setState(scope, stream, State.SCALING, context, executor)
-                        .thenCompose(v -> streamMetadataStore.scaleCreateNewSegments(scope, stream, context, executor))
+                        .thenCompose(v -> streamMetadataStore.scaleCreateNewSegments(scope, stream, runOnlyIfStarted, context, executor))
                         .thenCompose(v -> {
                             List<Long> segmentIds = response.getNewSegmentsWithRange().keySet().asList();
                             return streamMetadataTasks.notifyNewSegments(scope, stream, segmentIds, context, delegationToken)

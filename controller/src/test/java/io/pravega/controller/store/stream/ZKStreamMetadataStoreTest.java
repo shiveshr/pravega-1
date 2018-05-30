@@ -359,9 +359,10 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
                 scaleTimestamp, false, null, executor).join();
         ImmutableMap<Long, SimpleEntry<Double, Double>> segmentsCreated = response.getNewSegmentsWithRange();
         store.setState(scope, stream, State.SCALING, null, executor).join();
-        store.scaleCreateNewSegments(scope, stream, null, executor).join();
+        store.scaleCreateNewSegments(scope, stream, false, null, executor).join();
         store.scaleNewSegmentsCreated(scope, stream, null, executor).join();
         store.scaleSegmentsSealed(scope, stream, existingSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).join();
+        store.setState(scope, stream, State.ACTIVE, null, executor).join();
     }
 }

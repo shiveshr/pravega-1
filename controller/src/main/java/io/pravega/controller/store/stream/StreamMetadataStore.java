@@ -411,12 +411,14 @@ public interface StreamMetadataStore {
      *
      * @param scope          stream scope
      * @param name           stream name.
+     * @param isManualScale  flag to indicate that the processing is being performed for manual scale
      * @param context        operation context
      * @param executor       callers executor
      * @return future
      */
     CompletableFuture<Void> scaleCreateNewSegments(final String scope,
                                                    final String name,
+                                                   final boolean isManualScale,
                                                    final OperationContext context,
                                                    final Executor executor);
 
@@ -449,17 +451,17 @@ public interface StreamMetadataStore {
                                                 final OperationContext context,
                                                 final Executor executor);
 
-    // TODO: shivesh update javadocs
     /**
      * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
      * have been created successfully in segment store.
-     * This method should only be called after successful execution of startRollingTxn which will create an epochtransition record.
      * This method will update metadata records for epoch to add two new epochs, one for duplicate txn epoch where transactions
      * are merged and the other for duplicate active epoch.
      *
      * @param scope          stream scope
      * @param name           stream name.
      * @param sealedTxnEpochSegments sealed segments from intermediate txn epoch with size at the time of sealing
+     * @param txnEpoch       epoch for transactions that need to be rolled over
+     * @param time           timestamp
      * @param context        operation context
      * @param executor       callers executor
      * @return CompletableFuture which upon completion will indicate that we have successfully created new epoch entries.
@@ -474,6 +476,8 @@ public interface StreamMetadataStore {
      * @param scope          stream scope
      * @param name           stream name.
      * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing
+     * @param activeEpoch    active epoch against which rolling txn was started
+     * @param time           timestamp
      * @param context        operation context
      * @param executor       callers executor
      * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.

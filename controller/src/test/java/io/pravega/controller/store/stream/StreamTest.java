@@ -180,7 +180,7 @@ public class StreamTest {
         zkStream.updateState(State.SCALING).join();
 
         newSegments.entrySet().stream().map(x -> x.getKey()).collect(Collectors.toList());
-        zkStream.scaleCreateNewSegments().get();
+        zkStream.scaleCreateNewSegments(false).get();
         zkStream.scaleNewSegmentsCreated().get();
         // history table has a partial record at this point.
         // now we could have sealed the segments so get successors could be called.

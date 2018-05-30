@@ -174,10 +174,11 @@ public class StreamMetadataTasksTest {
         EpochTransitionRecord response = streamStorePartialMock.startScale(SCOPE, stream1, sealedSegments, Arrays.asList(segment1, segment2), start + 20, false, null, executor).get();
         ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> segmentsCreated = response.getNewSegmentsWithRange();
         streamStorePartialMock.setState(SCOPE, stream1, State.SCALING, null, executor).get();
-        streamStorePartialMock.scaleCreateNewSegments(SCOPE, stream1, null, executor).get();
+        streamStorePartialMock.scaleCreateNewSegments(SCOPE, stream1, false, null, executor).get();
         streamStorePartialMock.scaleNewSegmentsCreated(SCOPE, stream1, null, executor).get();
         streamStorePartialMock.scaleSegmentsSealed(SCOPE, stream1, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).get();
+        streamStorePartialMock.setState(SCOPE, stream1, State.ACTIVE, null, executor).get();
     }
 
     @After
@@ -762,7 +763,7 @@ public class StreamMetadataTasksTest {
                 newSegments, scaleTs, false, null, executor).join();
         ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> scale1SegmentsCreated = response.getNewSegmentsWithRange();
         streamStorePartialMock.setState(scope, stream, State.SCALING, null, executor).join();
-        streamStorePartialMock.scaleCreateNewSegments(scope, stream, null, executor).join();
+        streamStorePartialMock.scaleCreateNewSegments(scope, stream, false, null, executor).join();
         streamStorePartialMock.scaleNewSegmentsCreated(scope, stream, null, executor).join();
         streamStorePartialMock.scaleSegmentsSealed(scope, stream, sealedSegmentsWithSize, null, executor).join();
         streamStorePartialMock.setState(scope, stream, State.ACTIVE, null, executor).join();

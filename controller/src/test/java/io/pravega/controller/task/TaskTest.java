@@ -136,9 +136,10 @@ public class TaskTest {
         EpochTransitionRecord response = streamStore.startScale(SCOPE, stream1, sealedSegments, Arrays.asList(segment1, segment2), start + 20, false, null, executor).get();
         segmentsCreated = response.getNewSegmentsWithRange();
         streamStore.setState(SCOPE, stream1, State.SCALING, null, executor).get();
-        streamStore.scaleCreateNewSegments(SCOPE, stream1, null, executor).get();
+        streamStore.scaleCreateNewSegments(SCOPE, stream1, false, null, executor).get();
         streamStore.scaleNewSegmentsCreated(SCOPE, stream1, null, executor).get();
         streamStore.scaleSegmentsSealed(SCOPE, stream1, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)), null, executor).get();
+        streamStore.setState(SCOPE, stream1, State.ACTIVE, null, executor).get();
 
         AbstractMap.SimpleEntry<Double, Double> segment3 = new AbstractMap.SimpleEntry<>(0.0, 0.5);
         AbstractMap.SimpleEntry<Double, Double> segment4 = new AbstractMap.SimpleEntry<>(0.5, 0.75);
@@ -150,6 +151,7 @@ public class TaskTest {
         streamStore.scaleNewSegmentsCreated(SCOPE, stream2, null, executor).get();
         streamStore.scaleSegmentsSealed(SCOPE, stream2, sealedSegments1.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).get();
+        streamStore.setState(SCOPE, stream1, State.ACTIVE, null, executor).get();
         // endregion
     }
 

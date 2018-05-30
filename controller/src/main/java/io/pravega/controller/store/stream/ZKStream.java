@@ -231,6 +231,12 @@ class ZKStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
+    CompletableFuture<Void> updateEpochTransitionNode(byte[] epochTransition) {
+        return store.setData(epochTransitionPath, new Data<>(epochTransition, null))
+                .thenApply(x -> cache.invalidateCache(epochTransitionPath));
+    }
+
+    @Override
     CompletableFuture<Data<Integer>> getEpochTransitionNode() {
         cache.invalidateCache(epochTransitionPath);
         return cache.getCachedData(epochTransitionPath);

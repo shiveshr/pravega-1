@@ -54,12 +54,14 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
+import static io.pravega.shared.segment.StreamSegmentNameUtils.getPrimaryId;
 import static java.util.stream.Collectors.toMap;
 
 @Slf4j
@@ -443,7 +445,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
      * @param segmentsToSeal segments that will be sealed at the end of this scale operation.
      * @param newRanges      key ranges of new segments to be created
      * @param scaleTimestamp scaling timestamp
-     * @param runOnlyIfStarted run only if the scale operation was started.
+     * @param runOnlyIfStarted run only if the scale operation was started. This is set to true only for manual scale.
      * @return : list of newly created segments with current epoch
      */
     @Override
@@ -481,13 +483,9 @@ public abstract class PersistentStreamBase<T> implements Stream {
         return getEpochTransition()
                 .thenCompose(record -> {
                     if (record != null) {
-                        // verify that epoch transition record is same as the supplied input (--> segments to be sealed
-                        // and new ranges are identical in record and input). else throw scale conflict exception
-                        if (!(newRanges.stream().allMatch(x ->
-                                record.getNewSegmentsWithRange().values().stream()
-                                        .anyMatch(y -> y.getKey().equals(x.getKey())
-                                                && y.getValue().equals(x.getValue()))) &&
-                                record.getSegmentsToSeal().stream().allMatch(segmentsToSeal::contains))) {
+                        // verify that its the same as the supplied input (--> segments to be sealed
+                        // and new ranges are identical). else throw scale conflict exception
+                        if (!verifyRecordMatchesInput(segmentsToSeal, newRanges, runOnlyIfStarted, record)) {
                             log.debug("scale conflict, another scale operation is ongoing");
                             throw new EpochTransitionOperationExceptions.ConflictException();
                         }
@@ -508,64 +506,37 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                         throw new EpochTransitionOperationExceptions.PreConditionFailureException();
                                     }
 
-                                    EpochTransitionRecord epochTransition = TableHelper.computeEpochTransitionForScale(
+                                    EpochTransitionRecord epochTransition = TableHelper.computeEpochTransition(
                                             historyIndex.getData(), historyTable.getData(), segmentIndex.getData(),
                                             segmentTable.getData(), segmentsToSeal, newRanges, scaleTimestamp);
 
                                     return createEpochTransitionNode(epochTransition.toByteArray())
-                                            .exceptionally(e -> {
+                                            .handle((r, e) -> {
                                                 if (Exceptions.unwrap(e) instanceof StoreException.DataExistsException) {
                                                     log.debug("scale conflict, another scale operation is ongoing");
                                                     throw new EpochTransitionOperationExceptions.ConflictException();
-                                                } else {
-                                                    throw new CompletionException(e);
                                                 }
-                                            }).thenApply(r -> epochTransition);
+
+                                                log.info("scale for stream {}/{} accepted. Segments to seal = {}", scope, name,
+                                                        epochTransition.getSegmentsToSeal());
+                                                return epochTransition;
+                                            });
                                 });
                     }
-                })
-                .thenCompose(epochTransition -> {
-                    // This check is useful in three cases:
-                    // 1. scale completed but process crashed before removing epoch transition node. In rerun, we will find
-                    // epoch transition consistent with input, but not with the state in the table. We should reject it here
-                    // instead of wasting cycles in running subsequent steps.
-                    // 2. There is a small probability that between epoch transition computation and persistence in the store,
-                    // another scale or commit may have created the node, performed processing and deleted the node. Such happenstance
-                    // would render the computed epoch transition record inconsistent with the state in the tables.
-                    // 3. start scale was called and because we could not run scale workflow (set state to scaling),
-                    // a background rollingtxn may have been processed and epoch may have moved ahead.
-                    // TODO: shivesh If the startScale was called by manual scale, we acknowdged to the caller that we have accepted
-                    // the request.So should we migrate the request to latest set of segments.
-                    // Note: only rolling txn may have happened, no scale. So input is still valid in some ways if we migrate the
-                    // input.
-                    //
-                    // So before proceeding with subsequent processing, we should revalidate the epoch transition for consistency.
-                    // Note: This block is the last step before proceeding to process workflow corresponding to this epochTransition.
-                    // so we will validate here, and it will be relevant for first and every possible retry.
-                    // If a retry of scale workflow happens after completing the scale but before deleting epochTransition node,
-                    // this step will find it to be inconsistent with metadata and duly clean it up.
-                    return validateEpochTransition(epochTransition).thenApply(x -> epochTransition);
                 });
     }
 
-    private CompletableFuture<Void> validateEpochTransition(EpochTransitionRecord epochTransition) {
-        return getHistoryIndexFromStore()
-                .thenCompose(historyIndex -> getHistoryTableFromStore()
-                        .thenCompose(historyTable -> {
-                            boolean isConsistent = TableHelper.getActiveEpoch(historyIndex.getData(), historyTable.getData()).getEpoch()
-                                    == epochTransition.getActiveEpoch();
-                            if (isConsistent) {
-                                return CompletableFuture.completedFuture(null);
-                            } else {
-                                return deleteEpochTransitionNode()
-                                        .thenCompose(x -> resetStateConditionally(State.SCALING))
-                                        .thenApply(x -> {
-                                            log.debug("Epoch transition record is inconsistent with state in the table. epochTransition = {}",
-                                                    epochTransition);
-                                            throw new EpochTransitionOperationExceptions.ConflictException();
-                                        });
-                            }
-                        }));
+    private boolean verifyRecordMatchesInput(List<Long> segmentsToSeal, List<SimpleEntry<Double, Double>> newRanges,
+                                                                            boolean isManualScale, EpochTransitionRecord record) {
+        boolean newRangeMatch = newRanges.stream().allMatch(x ->
+                record.getNewSegmentsWithRange().values().stream()
+                        .anyMatch(y -> y.getKey().equals(x.getKey())
+                                && y.getValue().equals(x.getValue())));
+        boolean segmentsToSealMatch = record.getSegmentsToSeal().stream().allMatch(segmentsToSeal::contains) ||
+                (isManualScale && record.getSegmentsToSeal().stream().map(StreamSegmentNameUtils::getPrimaryId).collect(Collectors.toSet())
+                    .equals(segmentsToSeal.stream().map(StreamSegmentNameUtils::getPrimaryId).collect(Collectors.toSet())));
+
+        return newRangeMatch && segmentsToSealMatch;
     }
 
     private CompletableFuture<Void> verifyNotSealed() {
@@ -579,9 +550,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> scaleCreateNewSegments() {
-        // If we are here, it means epoch transition has been whetted and is consistent with the state in the table.
-        // We can proceed with processing as described in the epoch transition node.
+    public CompletableFuture<Void> scaleCreateNewSegments(boolean isManualScale) {
         // Called after start scale to indicate store to create new segments in the segment table. This method takes care of
         // checking for idempotent addition of segments to the table.
         return getState(true)
@@ -590,12 +559,26 @@ public abstract class PersistentStreamBase<T> implements Stream {
                     return getHistoryIndexFromStore().thenCompose(historyIndex -> getHistoryTableFromStore()
                             .thenCompose(historyTable -> getSegmentIndexFromStore().thenCompose(segmentIndex -> getSegmentTableFromStore()
                                     .thenCompose(segmentTable -> getEpochTransition().thenCompose(epochTransition -> {
-                                        // Perform idempotent update to segment index and segment table.
-                                        // Note: in scale we always create fresh new segments so there will be entry added to
-                                        // segment table. So for idempotent update we can simply check for last record in segment table.
+                                        if (isManualScale) {
+                                            // The epochTransitionNode is the barrier that prevents concurrent scaling
+                                            // State is the barrier to ensure only one work happens at a time.
+                                            // However, if epochTransition node is created but before scaling happens,
+                                            // we can have rolling transaction kick in which would create newer epochs.
+                                            // For auto-scaling, the new duplicate epoch means the segment is sealed and no
+                                            // longer hot or cold.
+                                            // However for manual scaling, by virtue of accepting the request and creating
+                                            // new epoch transition record, we have promised the caller that we would scale
+                                            // to create sets of segments as requested by them.
+                                            return migrateManualScaleToNewEpoch(epochTransition, historyIndex, historyTable, segmentIndex, segmentTable);
+                                        } else {
+                                            return CompletableFuture.completedFuture(epochTransition);
+                                        }
+                                    }).thenCompose(epochTransition -> {
+                                        // Idempotent update to index and table.
                                         int newEpoch = epochTransition.getNewEpoch();
 
-                                        final SegmentRecord latestSegment = TableHelper.getLatestSegmentRecord(segmentIndex.getData(), segmentTable.getData());
+                                        final SegmentRecord latestSegment = TableHelper.getLatestSegmentRecord(segmentIndex.getData(),
+                                                segmentTable.getData());
                                         if (latestSegment.getCreationEpoch() < newEpoch) {
                                             log.info("Scale {}/{} for segments started. Creating new segments. SegmentsToSeal {}",
                                                     scope, name, epochTransition.getSegmentsToSeal());
@@ -604,23 +587,31 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                                     historyIndex.getData(), historyTable.getData(), segmentIndex, segmentTable,
                                                     epochTransition);
                                         } else {
-                                            if (TableHelper.checkScaleSegmentTableIdempotantConsistency(epochTransition,
-                                                    segmentIndex.getData(), segmentTable.getData())) {
-                                                log.debug("CreateNewSegments step for stream {}/{} is idempotent, " +
-                                                        "segments are already present in segment table.", scope, name);
-                                            } else {
-                                                // we should never reach here! As the inconsistent epoch transition should
-                                                // have been rejected in startScale itself. As a failsafe we will still call validate.
-                                                return validateEpochTransition(epochTransition)
-                                                        .thenApply(x -> {
-                                                            log.error("Epoch transition does not match the state in the table");
-                                                            throw new EpochTransitionOperationExceptions.ConditionInvalidException();
-                                                        });
-                                            }
-                                            return CompletableFuture.completedFuture(null);
+                                            return isEpochTransitionConsistent(historyIndex, historyTable, segmentIndex,
+                                                    segmentTable, epochTransition);
                                         }
                                     })))));
                 });
+    }
+
+    private CompletableFuture<Void> isEpochTransitionConsistent(Data<T> historyIndex, Data<T> historyTable,
+                                                              Data<T> segmentIndex, Data<T> segmentTable,
+                                                              EpochTransitionRecord epochTransition) {
+        // verify that epoch transition is consistent with segments in the table.
+        if (TableHelper.isEpochTransitionConsistent(epochTransition, historyIndex.getData(), historyTable.getData(),
+                segmentIndex.getData(), segmentTable.getData())) {
+            log.debug("CreateNewSegments step for stream {}/{} is idempotent, " +
+                    "segments are already present in segment table.", scope, name);
+            return CompletableFuture.completedFuture(null);
+        } else {
+            return deleteEpochTransitionNode()
+                    .thenCompose(v -> resetStateConditionally(State.SCALING))
+                    .thenAccept(v -> {
+                        log.warn("Scale epoch transition record is inconsistent with data in the table. {}",
+                                epochTransition.getNewEpoch());
+                        throw new IllegalArgumentException("Epoch transition record is inconsistent.");
+                    });
+        }
     }
 
     private CompletableFuture<Void> createNewSegments(final byte[] historyIndex,
@@ -654,6 +645,35 @@ public abstract class PersistentStreamBase<T> implements Stream {
         return updateSegmentIndex(updatedSegmentIndex)
                 .thenCompose(v -> updateSegmentTable(updatedSegmentTable))
                 .thenAccept(v -> log.info("scale {}/{} new segments created successfully", scope, name));
+    }
+
+    private CompletionStage<EpochTransitionRecord> migrateManualScaleToNewEpoch(EpochTransitionRecord epochTransition, Data<T> historyIndex,
+                                                               Data<T> historyTable, Data<T> segmentIndex, Data<T> segmentTable) {
+        HistoryRecord activeEpoch = TableHelper.getActiveEpoch(historyIndex.getData(), historyTable.getData());
+        HistoryRecord recordActiveEpoch = TableHelper.getEpoch(historyIndex.getData(), historyTable.getData(), epochTransition.getActiveEpoch());
+        if (epochTransition.getActiveEpoch() == activeEpoch.getEpoch()) {
+            // no migration needed
+            return CompletableFuture.completedFuture(epochTransition);
+        } else if (activeEpoch.getEpoch() > epochTransition.getActiveEpoch() && activeEpoch.getReferenceEpoch() == recordActiveEpoch.getReferenceEpoch()) {
+            List<Long> duplicateSegmentsToSeal = epochTransition.getSegmentsToSeal().stream()
+                    .map(x -> computeSegmentId(getPrimaryId(x), activeEpoch.getEpoch()))
+                    .collect(Collectors.toList());
+
+            EpochTransitionRecord updatedRecord = TableHelper.computeEpochTransition(
+                    historyIndex.getData(), historyTable.getData(), segmentIndex.getData(),
+                    segmentTable.getData(), duplicateSegmentsToSeal, epochTransition.getNewSegmentsWithRange().values().asList(),
+                    epochTransition.getTime());
+            return updateEpochTransitionNode(updatedRecord.toByteArray())
+                    .thenApply(x -> updatedRecord);
+        } else {
+            return deleteEpochTransitionNode()
+                    .thenCompose(v -> resetStateConditionally(State.SCALING))
+                    .thenApply(v -> {
+                        log.warn("Scale epoch transition record is inconsistent with data in the table. {}",
+                                epochTransition.getNewEpoch());
+                        throw new IllegalArgumentException("Epoch transition record is inconsistent.");
+                    });
+        }
     }
 
     private CompletableFuture<EpochTransitionRecord> getEpochTransition() {
@@ -724,11 +744,8 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                     // we should never reach here! As the inconsistent epoch transition should
                                     // have been rejected in startScale itself.
                                     // As a failsafe we will still call validate nevertheless.
-                                    return validateEpochTransition(epochTransition)
-                                            .thenApply(x -> {
-                                                log.warn("{}/{} scale op for epoch {}. Scale already completed.", scope, name, activeEpoch);
-                                                throw new EpochTransitionOperationExceptions.InputInvalidException();
-                                            });
+                                    log.warn("{}/{} scale op for epoch {}. Scale already completed.", scope, name, activeEpoch);
+                                    throw new EpochTransitionOperationExceptions.InputInvalidException();
                                 }
                             }
 
@@ -864,8 +881,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                     return CompletableFuture.completedFuture(null);
                                 } else {
                                     // we should never reach here!!
-                                    log.warn("{}/{} rolling txn for epoch {}. Scale already completed.", scope, name,
-                                            transactionEpoch);
+                                    log.warn("{}/{} rolling txn for epoch {} is inconsistent.", scope, name, transactionEpoch);
                                     throw new EpochTransitionOperationExceptions.InputInvalidException();
                                 }
                             }
@@ -1458,6 +1474,8 @@ public abstract class PersistentStreamBase<T> implements Stream {
     abstract CompletableFuture<Void> updateRetentionSet(Data<T> retention);
 
     abstract CompletableFuture<Void> createEpochTransitionNode(byte[] epochTransition);
+
+    abstract CompletableFuture<Void> updateEpochTransitionNode(byte[] epochTransition);
 
     abstract CompletableFuture<Data<T>> getEpochTransitionNode();
 

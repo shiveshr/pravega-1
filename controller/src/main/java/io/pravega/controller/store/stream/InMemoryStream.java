@@ -756,6 +756,23 @@ public class InMemoryStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
+    CompletableFuture<Void> updateEpochTransitionNode(byte[] epochTransitionData) {
+        Preconditions.checkNotNull(epochTransitionData);
+
+        CompletableFuture<Void> result = new CompletableFuture<>();
+        byte[] copy = Arrays.copyOf(epochTransitionData, epochTransitionData.length);
+        synchronized (lock) {
+            if (this.epochTransition == null) {
+                result.completeExceptionally(StoreException.create(StoreException.Type.DATA_NOT_FOUND, "epoch transition not found"));
+            } else {
+                this.epochTransition = new Data<>(copy, this.epochTransition.getVersion() + 1);
+                result.complete(null);
+            }
+        }
+        return result;
+    }
+
+    @Override
     CompletableFuture<Data<Integer>> getEpochTransitionNode() {
         CompletableFuture<Data<Integer>> result = new CompletableFuture<>();
 

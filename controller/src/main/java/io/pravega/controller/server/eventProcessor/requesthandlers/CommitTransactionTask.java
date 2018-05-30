@@ -128,9 +128,9 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
     }
 
     private CompletableFuture<Void> tryCommitTransactions(final String scope,
-                                                  final String stream,
-                                                  final int txnEpoch,
-                                                  final OperationContext context) {
+                                                          final String stream,
+                                                          final int txnEpoch,
+                                                          final OperationContext context) {
         // try creating txn commit list first. if node already exists and doesnt match the processing in the event, throw operation not allowed.
         // This will result in event being posted back in the stream and retried later. Generally if a transaction commit starts, it will come to
         // an end.. but during failover, once we have created the node, we are guaranteed that it will be only that transaction that will be getting
@@ -173,7 +173,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                                                     // we can commit transactions immediately
                                                     return commitTransactions(scope, stream, activeEpochRecord.getSegments(), txnList, context);
                                                 } else {
-                                                    return rollTransactions(scope, stream, activeEpochRecord, txnEpochRecord, txnList, context);
+                                                    return rollTransactions(scope, stream, txnEpochRecord, activeEpochRecord, txnList, context);
                                                 }
                                             }));
                                 }
@@ -216,19 +216,13 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
      * 4. update history table with one complete and one partial epoch
      * 5. seal active segments
      * 6. complete partial record in history table
-     * 7. delete epoch transition node
-     *      if we failover after deleting the epoch transition node, then in the rerun we will need to ensure we dont
-     *      attempt to redo this work.
-     *      before creating epoch transiton node, we will check if transactions of interest (from commit-txn-list)
-     *      are still in committing state or not. If they are all committed, we dont need to do anything here.
      */
     private CompletableFuture<Void> rollTransactions(String scope, String stream, HistoryRecord txnEpoch, HistoryRecord activeEpoch,
                                                      List<UUID> transactionsToCommit, OperationContext context) {
-
         // check if all transactions are already committed. if so return all good immediately
         // just checking the last one suffices as we perform processing of transactions in order.
         UUID lastTransactionId = transactionsToCommit.get(transactionsToCommit.size() - 1);
-        return streamMetadataStore.transactionStatus(scope,stream, lastTransactionId, context, executor)
+        return streamMetadataStore.transactionStatus(scope, stream, lastTransactionId, context, executor)
                 .thenCompose(status -> {
                     if (status.equals(TxnStatus.COMMITTING)) {
                         return runRollingTxn(scope, stream, txnEpoch, activeEpoch, transactionsToCommit, context);
@@ -236,15 +230,17 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
                         return CompletableFuture.completedFuture(null);
                     }
                 });
-        }
+    }
 
     private CompletionStage<Void> runRollingTxn(String scope, String stream, HistoryRecord txnEpoch, HistoryRecord activeEpoch,
                                                 List<UUID> transactionsToCommit, OperationContext context) {
         String delegationToken = streamMetadataTasks.retrieveDelegationToken();
         long timestamp = System.currentTimeMillis();
         streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor);
+
         int newTxnEpoch = activeEpoch.getEpoch() + 1;
         int newActieEpoch = newTxnEpoch + 1;
+
         List<Long> txnEpochDuplicate = txnEpoch.getSegments().stream().map(segment ->
                 computeSegmentId(getPrimaryId(segment), newTxnEpoch)).collect(Collectors.toList());
         List<Long> activeEpochDuplicate = activeEpoch.getSegments().stream()
@@ -300,7 +296,7 @@ public class CommitTransactionTask implements StreamTask<CommitEvent> {
      * would become empty.
      */
     private CompletableFuture<Void> commitTransactions(String scope, String stream, List<Long> segments,
-                                                                    List<UUID> transactionsToCommit, OperationContext context) {
+                                                       List<UUID> transactionsToCommit, OperationContext context) {
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);

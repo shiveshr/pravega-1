@@ -413,9 +413,10 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     @Override
     public CompletableFuture<Void> scaleCreateNewSegments(final String scope,
                                                           final String name,
+                                                          final boolean isManualScale,
                                                           final OperationContext context,
                                                           final Executor executor) {
-        return withCompletion(getStream(scope, name, context).scaleCreateNewSegments(), executor);
+        return withCompletion(getStream(scope, name, context).scaleCreateNewSegments(isManualScale), executor);
     }
 
     @Override

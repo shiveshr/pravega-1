@@ -205,10 +205,11 @@ interface Stream {
      * Called after epochTransition entry is created. Implementation of this method should create new segments that are
      * specified in epochTransition in stream metadata tables.
      *
+     * @param isManualScale flag to indicate if epoch transition should be migrated to latest epoch
      * @return Future, which when completed will indicate that new segments are created in the metadata store or wouldl
      * have failed with appropriate exception.
      */
-    CompletableFuture<Void> scaleCreateNewSegments();
+    CompletableFuture<Void> scaleCreateNewSegments(boolean isManualScale);
 
     /**
      * Called after new segment creation is complete.
@@ -222,15 +223,16 @@ interface Stream {
      */
     CompletableFuture<Void> scaleOldSegmentsSealed(Map<Long, Long> sealedSegmentSizes);
 
-    // TODO: shivesh update javadocs
     /**
      * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
      * have been created successfully in segment store.
-     * This method should only be called after successful execution of startRollingTxn which will create an epochtransition record.
      * This method will update metadata records for epoch to add two new epochs, one for duplicate txn epoch where transactions
      * are merged and the other for duplicate active epoch.
      *
-     * @param sealedTxnEpochSegments sealed segments from intermediate txn epoch with size at the time of sealing
+     * @param sealedTxnEpochSegments sealed segments from intermediate txn epoch with size at the time of sealing.
+     * @param transactionEpoch epoch for transactions that need to be rolled over.
+     * @param time timestamp
+     *
      * @return CompletableFuture which upon completion will indicate that we have successfully created new epoch entries.
      */
     CompletableFuture<Void> rollingTxnNewSegmentsCreated(Map<Long, Long> sealedTxnEpochSegments, int transactionEpoch, long time);
@@ -239,7 +241,9 @@ interface Stream {
      * This is final step of rolling transaction and is called after old segments are sealed in segment store.
      * This should complete the epoch transition in the metadata store.
      *
-     * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing
+     * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing.
+     * @param activeEpoch active epoch at the time when rolling transaction was started.
+     * @param time sealed segments from active epoch with size at the time of sealing.
      * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.
      */
     CompletableFuture<Void> rollingTxnActiveEpochSealed(Map<Long, Long> sealedActiveEpochSegments, int activeEpoch, long time);

@@ -9,7 +9,6 @@
  */
 package io.pravega.controller.store.stream.tables;
 
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.pravega.common.ObjectBuilder;
@@ -51,23 +50,6 @@ public class EpochTransitionRecord {
 
     public int getNewEpoch() {
         return activeEpoch + 1;
-    }
-
-    public static EpochTransitionRecord createForScale(int activeEpoch, long time, ImmutableSet<Long> segmentsToSeal,
-                                                       ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> newSegmentsWithRange) {
-        Preconditions.checkArgument(segmentsToSeal != null && !segmentsToSeal.isEmpty());
-        Preconditions.checkArgument(newSegmentsWithRange != null && !newSegmentsWithRange.isEmpty());
-        return EpochTransitionRecord.builder().activeEpoch(activeEpoch).segmentsToSeal(segmentsToSeal).time(time)
-                .newSegmentsWithRange(newSegmentsWithRange).build();
-    }
-
-    public static EpochTransitionRecord createForRollingTxn(int activeEpoch, int transactionEpoch, long time) {
-        // For rolling transaction, segments to seal and segments to create are determined by epoch and setting segments to
-        // seal and segments to create are redundant and hence we set empty sets and maps respectively.
-        Preconditions.checkArgument(activeEpoch > transactionEpoch);
-        return EpochTransitionRecord.builder().activeEpoch(activeEpoch)
-                .segmentsToSeal(ImmutableSet.<Long>builder().build()).time(time)
-                .newSegmentsWithRange(ImmutableMap.<Long, AbstractMap.SimpleEntry<Double, Double>>builder().build()).build();
     }
 
     public static class EpochTransitionRecordBuilder implements ObjectBuilder<EpochTransitionRecord> {
