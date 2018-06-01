@@ -20,6 +20,7 @@ import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.server.eventProcessor.requesthandlers.TaskExceptions;
 import io.pravega.controller.server.retention.BucketChangeListener;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
+import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
@@ -588,6 +589,7 @@ public abstract class StreamMetadataStoreTest {
         assertFalse(configProperty.isUpdating());
         // run update configuration multiple times
         assertTrue(Futures.await(store.startUpdateConfiguration(scope, stream, configuration2, null, executor)));
+        store.setState(scope, stream, State.UPDATING, null, executor).join();
         configProperty = store.getConfigurationRecord(scope, stream, true, null, executor).join();
 
         assertTrue(configProperty.isUpdating());
@@ -603,6 +605,7 @@ public abstract class StreamMetadataStoreTest {
 
         assertTrue(Futures.await(store.startUpdateConfiguration(scope, stream, configuration3, null, executor)));
         assertTrue(Futures.await(store.completeUpdateConfiguration(scope, stream, null, executor)));
+        store.setState(scope, stream, State.ACTIVE, null, executor).join();
     }
 
     @Test
@@ -625,7 +628,6 @@ public abstract class StreamMetadataStoreTest {
         assertEquals(status.getStatus(), DeleteScopeStatus.Status.SUCCESS);
     }
 
-    // TODO: shivesh this test will change completely
     @Test
     public void scaleWithTxTest() throws Exception {
         final String scope = "ScopeScaleWithTx";
@@ -671,27 +673,28 @@ public abstract class StreamMetadataStoreTest {
         // third transaction created after new epoch created in history table
         store.scaleNewSegmentsCreated(scope, stream, null, executor).join();
         txnId = store.generateTransactionId(scope, stream, null, executor).join();
-        VersionedTransactionData tx3 = store.createTransaction(scope, stream, txnId,
-                100, 100, 100, null, executor).get();
-        assertEquals(1, tx3.getEpoch());
-        assertEquals(1, (int) (tx3.getId().getMostSignificantBits() >> 32));
 
         store.sealTransaction(scope, stream, tx2.getId(), true, Optional.of(tx2.getVersion()), null, executor).get();
-        store.commitTransaction(scope, stream, tx2.getId(), null, executor).get(); // should not happen
-
         store.sealTransaction(scope, stream, tx1.getId(), true, Optional.of(tx1.getVersion()), null, executor).get();
-        store.commitTransaction(scope, stream, tx1.getId(), null, executor).get(); // should not happen
-
-        store.sealTransaction(scope, stream, tx3.getId(), true, Optional.of(tx3.getVersion()), null, executor).get();
-        store.commitTransaction(scope, stream, tx3.getId(), null, executor).get(); // should not happen
+        AssertExtensions.assertThrows("Commit should not be allowed as scale is happening",
+                store.commitTransaction(scope, stream, tx2.getId(), null, executor),
+            e -> e instanceof StoreException.IllegalStateException);
 
         store.scaleSegmentsSealed(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).join();
 
-        store.setState(scope, stream, State.ACTIVE, null, executor).join();
-        // endregion
+        VersionedTransactionData tx3 = store.createTransaction(scope, stream, txnId,
+                100, 100, 100, null, executor).get();
+        assertEquals(0, tx3.getEpoch());
+        assertEquals(0, (int) (tx3.getId().getMostSignificantBits() >> 32));
+        store.sealTransaction(scope, stream, tx3.getId(), true, Optional.of(tx3.getVersion()), null, executor).get();
 
-        // region Txn created and deleted after scale starts
+        store.setState(scope, stream, State.ACTIVE, null, executor).join();
+
+        // ensure that we can commit transactions on old epoch and roll over.
+        HistoryRecord activeEpoch = store.getActiveEpoch(scope, stream, null, true, executor).join();
+
+        // submit another scale request without starting the scale
         List<Long> scale2SealedSegments = Collections.singletonList(0L);
         long scaleTs2 = System.currentTimeMillis();
         SimpleEntry<Double, Double> segment4 = new SimpleEntry<>(0.0, 0.25);
@@ -699,10 +702,30 @@ public abstract class StreamMetadataStoreTest {
 
         EpochTransitionRecord response2 = store.startScale(scope, stream, scale2SealedSegments,
                 Arrays.asList(segment4, segment5), scaleTs2, false, null, executor).join();
-        ImmutableMap<Long, SimpleEntry<Double, Double>> scale2SegmentsCreated = response2.getNewSegmentsWithRange();
-        final int epoch2 = response2.getActiveEpoch();
-        assertEquals(1, epoch2);
-        assertNotNull(scale2SegmentsCreated);
+        assertEquals(activeEpoch.getEpoch(), response2.getActiveEpoch());
+
+        store.createCommittingTransactionsRecord(scope, stream, tx1.getEpoch(), Lists.newArrayList(tx1.getId(), tx2.getId()), null, executor).join();
+        store.setState(scope, stream, State.COMMITTING_TXN, null, executor).join();
+        store.rollingTxnNewSegmentsCreated(scope, stream, Collections.emptyMap(), tx1.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.commitTransaction(scope, stream, tx1.getId(), null, executor).get();
+        store.commitTransaction(scope, stream, tx2.getId(), null, executor).get();
+        store.rollingTxnActiveEpochSealed(scope, stream, Collections.emptyMap(), activeEpoch.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.setState(scope, stream, State.ACTIVE, null, executor).join();
+        activeEpoch = store.getActiveEpoch(scope, stream, null, true, executor).join();
+        assertEquals(3, activeEpoch.getEpoch());
+        assertEquals(1, activeEpoch.getReferenceEpoch());
+        HistoryRecord txnCommittedEpoch = store.getEpoch(scope, stream, 2, null, executor).join();
+        assertEquals(0, txnCommittedEpoch.getReferenceEpoch());
+        // endregion
+
+        // region verify migrate request for manual scale
+
+        // now start manual scale against previously submitted scale request that was on old epoch from before rolling txn..
+        // verify that it gets migrated to latest duplicate epoch
+        store.setState(scope, stream, State.SCALING, null, executor).join();
+        response2 = store.startScale(scope, stream, scale2SealedSegments,
+                Arrays.asList(segment4, segment5), scaleTs2, false, null, executor).join();
+        store.scaleCreateNewSegments(scope, stream, true, null, executor).join();
 
         txnId = store.generateTransactionId(scope, stream, null, executor).join();
         VersionedTransactionData txn = store.createTransaction(scope, stream, txnId,
@@ -710,21 +733,35 @@ public abstract class StreamMetadataStoreTest {
         assertEquals(1, txn.getEpoch());
 
         store.sealTransaction(scope, stream, txn.getId(), true, Optional.of(txn.getVersion()), null, executor).get();
-        store.commitTransaction(scope, stream, txn.getId(), null, executor).get(); // should not happen
+        AssertExtensions.assertThrows("ongoing scale, no commit should be allowed", store.commitTransaction(scope, stream, txn.getId(), null, executor),
+            e -> Exceptions.unwrap(e) instanceof StoreException.IllegalStateException);
 
-        // verify that new txns can be created and are created on old epoch
+        // verify that new txns can be created and are created on original epoch
         txnId = store.generateTransactionId(scope, stream, null, executor).join();
         VersionedTransactionData txn2 = store.createTransaction(scope, stream, txnId,
                 100, 100, 100, null, executor).get();
         assertEquals(1, txn2.getEpoch());
 
-        store.setState(scope, stream, State.SCALING, null, executor).get();
-
         store.scaleCreateNewSegments(scope, stream, false, null, executor).join();
         store.scaleNewSegmentsCreated(scope, stream, null, executor).join();
 
+        store.scaleSegmentsSealed(scope, stream, Collections.emptyMap(), null, executor).join();
+        store.setState(scope, stream, State.ACTIVE, null, executor).get();
+        activeEpoch = store.getActiveEpoch(scope, stream, null, true, executor).join();
+        assertEquals(4, activeEpoch.getEpoch());
+        assertEquals(4, activeEpoch.getReferenceEpoch());
+
         store.sealTransaction(scope, stream, txn2.getId(), true, Optional.of(txn2.getVersion()), null, executor).get();
-        store.commitTransaction(scope, stream, txn2.getId(), null, executor).get(); // should not happen
+        store.setState(scope, stream, State.COMMITTING_TXN, null, executor).get();
+        store.rollingTxnNewSegmentsCreated(scope, stream, Collections.emptyMap(), tx1.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.commitTransaction(scope, stream, txn2.getId(), null, executor).get();
+        store.rollingTxnActiveEpochSealed(scope, stream, Collections.emptyMap(), activeEpoch.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.setState(scope, stream, State.ACTIVE, null, executor).join();
+
+        activeEpoch = store.getActiveEpoch(scope, stream, null, true, executor).join();
+        assertEquals(6, activeEpoch.getEpoch());
+        assertEquals(4, activeEpoch.getReferenceEpoch());
+        // endregion
     }
 
     @Test
@@ -744,7 +781,7 @@ public abstract class StreamMetadataStoreTest {
         truncation.put(0L, 0L);
         truncation.put(1L, 0L);
         assertTrue(Futures.await(store.startTruncation(scope, stream, truncation, null, executor)));
-
+        store.setState(scope, stream, State.TRUNCATING, null, executor).join();
         StreamTruncationRecord truncationProperty = store.getTruncationRecord(scope, stream, true, null, executor).join();
         assertTrue(truncationProperty.isUpdating());
 
@@ -766,6 +803,7 @@ public abstract class StreamMetadataStoreTest {
 
         assertTrue(Futures.await(store.startTruncation(scope, stream, truncation3, null, executor)));
         assertTrue(Futures.await(store.completeTruncation(scope, stream, null, executor)));
+        store.setState(scope, stream, State.ACTIVE, null, executor).join();
     }
 
     @Test

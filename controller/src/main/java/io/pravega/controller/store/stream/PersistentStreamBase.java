@@ -180,7 +180,8 @@ public abstract class PersistentStreamBase<T> implements Stream {
 
     @Override
     public CompletableFuture<Void> completeTruncation() {
-        return getTruncationData(true)
+        return checkState(state -> state.equals(State.TRUNCATING))
+            .thenCompose(v -> getTruncationData(true)
                 .thenCompose(truncationData -> {
                     Preconditions.checkNotNull(truncationData);
                     StreamTruncationRecord current = StreamTruncationRecord.parse(truncationData.getData());
@@ -192,7 +193,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                         // idempotent
                         return CompletableFuture.completedFuture(null);
                     }
-                });
+                }));
     }
 
     @Override
@@ -226,7 +227,8 @@ public abstract class PersistentStreamBase<T> implements Stream {
      */
     @Override
     public CompletableFuture<Void> completeUpdateConfiguration() {
-        return getConfigurationData(true)
+        return checkState(state -> state.equals(State.UPDATING))
+                .thenCompose(v -> getConfigurationData(true)
                 .thenCompose(configData -> {
                     StreamConfigurationRecord current = StreamConfigurationRecord.parse(configData.getData());
                     Preconditions.checkNotNull(current);
@@ -238,7 +240,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                         // idempotent
                         return CompletableFuture.completedFuture(null);
                     }
-                });
+                }));
     }
 
     /**
@@ -553,9 +555,8 @@ public abstract class PersistentStreamBase<T> implements Stream {
     public CompletableFuture<Void> scaleCreateNewSegments(boolean isManualScale) {
         // Called after start scale to indicate store to create new segments in the segment table. This method takes care of
         // checking for idempotent addition of segments to the table.
-        return getState(true)
-                .thenCompose(state -> {
-                    checkState(state, State.SCALING);
+        return checkState(state -> state.equals(State.SCALING))
+                .thenCompose(x -> {
                     return getHistoryIndexFromStore().thenCompose(historyIndex -> getHistoryTableFromStore()
                             .thenCompose(historyTable -> getSegmentIndexFromStore().thenCompose(segmentIndex -> getSegmentTableFromStore()
                                     .thenCompose(segmentTable -> getEpochTransition().thenCompose(epochTransition -> {
@@ -700,12 +701,8 @@ public abstract class PersistentStreamBase<T> implements Stream {
      */
     @Override
     public CompletableFuture<Void> scaleNewSegmentsCreated() {
-        return getState(true)
-                .thenCompose(state -> {
-                    checkState(state, State.SCALING);
-                    return getEpochTransition()
-                            .thenCompose(this::addPartialHistoryRecordAndIndex);
-                });
+        return checkState(state -> state.equals(State.SCALING))
+                .thenCompose(x -> getEpochTransition().thenCompose(this::addPartialHistoryRecordAndIndex));
     }
 
     /**
@@ -786,10 +783,8 @@ public abstract class PersistentStreamBase<T> implements Stream {
      */
     @Override
     public CompletableFuture<Void> scaleOldSegmentsSealed(Map<Long, Long> sealedSegmentSizes) {
-        return getState(true)
-                .thenCompose(state -> {
-                    checkState(state, State.SCALING);
-                    return getEpochTransition()
+        return checkState(state -> state.equals(State.SCALING))
+                .thenCompose(v -> getEpochTransition()
                             .thenCompose(epochTransition -> Futures.toVoid(clearMarkers(epochTransition.getSegmentsToSeal())
                                     .thenCompose(x -> {
                                         ImmutableSet<Long> newSegments = epochTransition.getNewSegmentsWithRange().keySet();
@@ -797,8 +792,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                                 lastRecord -> lastRecord.getSegments().stream().noneMatch(sealedSegmentSizes::containsKey) &&
                                                         newSegments.stream().allMatch(r -> lastRecord.getSegments().contains(r)))
                                                 .thenCompose(r -> deleteEpochTransitionNode());
-                                    })));
-                });
+                                    }))));
     }
 
     private CompletableFuture<Void> completePartialRecordInHistory(final Map<Long, Long> sealedSegments, final int activeEpoch,
@@ -850,9 +844,10 @@ public abstract class PersistentStreamBase<T> implements Stream {
 
     @Override
     public CompletableFuture<Void> rollingTxnNewSegmentsCreated(Map<Long, Long> sealedTxnEpochSegments, int transactionEpoch, long time) {
-        return addSealedSegmentsToRecord(sealedTxnEpochSegments)
+        return checkState(state -> state.equals(State.COMMITTING_TXN) || state.equals(State.SEALING))
+        .thenCompose(v -> addSealedSegmentsToRecord(sealedTxnEpochSegments)
                 .thenCompose(x -> getActiveEpoch(true))
-                .thenCompose(activeEpoch -> rollingTxnAddNewDuplicateEpochs(transactionEpoch, time));
+                .thenCompose(activeEpoch -> rollingTxnAddNewDuplicateEpochs(transactionEpoch, time)));
     }
 
     private CompletableFuture<Void> rollingTxnAddNewDuplicateEpochs(final int transactionEpoch, final long time) {
@@ -914,9 +909,10 @@ public abstract class PersistentStreamBase<T> implements Stream {
         };
 
         // get active epoch from somewhere.. possibly from the code itself.
-        return addSealedSegmentsToRecord(sealedActiveEpochSegments)
+        return checkState(state -> state.equals(State.COMMITTING_TXN) || state.equals(State.SEALING))
+                .thenCompose(v -> addSealedSegmentsToRecord(sealedActiveEpochSegments)
                 .thenCompose(x -> clearMarkers(sealedActiveEpochSegments.keySet()))
-                .thenCompose(x -> completePartialRecordInHistory(sealedActiveEpochSegments, activeEpoch, time, idempotent));
+                .thenCompose(x -> completePartialRecordInHistory(sealedActiveEpochSegments, activeEpoch, time, idempotent)));
     }
 
     /**
@@ -1090,23 +1086,25 @@ public abstract class PersistentStreamBase<T> implements Stream {
     @Override
     public CompletableFuture<TxnStatus> commitTransaction(final UUID txId) {
         int epoch = getTransactionEpoch(txId);
-        return verifyLegalState().thenCompose(v -> checkTransactionStatus(txId)).thenApply(x -> {
-            switch (x) {
-                // Only sealed transactions can be committed
-                case COMMITTED:
-                case COMMITTING:
-                    return x;
-                case OPEN:
-                case ABORTING:
-                case ABORTED:
-                    throw StoreException.create(StoreException.Type.ILLEGAL_STATE,
-                            "Stream: " + getName() + " Transaction: " + txId.toString() + " State: " + x.toString());
-                case UNKNOWN:
-                default:
-                    throw StoreException.create(StoreException.Type.DATA_NOT_FOUND,
-                            "Stream: " + getName() + " Transaction: " + txId.toString());
-            }
-        }).thenCompose(x -> {
+        return checkState(state -> state.equals(State.COMMITTING_TXN) || state.equals(State.SEALING))
+                .thenCompose(v -> checkTransactionStatus(txId))
+                .thenApply(x -> {
+                    switch (x) {
+                        // Only sealed transactions can be committed
+                        case COMMITTED:
+                        case COMMITTING:
+                            return x;
+                        case OPEN:
+                        case ABORTING:
+                        case ABORTED:
+                            throw StoreException.create(StoreException.Type.ILLEGAL_STATE,
+                                    "Stream: " + getName() + " Transaction: " + txId.toString() + " State: " + x.toString());
+                        case UNKNOWN:
+                        default:
+                            throw StoreException.create(StoreException.Type.DATA_NOT_FOUND,
+                                    "Stream: " + getName() + " Transaction: " + txId.toString());
+                    }
+                }).thenCompose(x -> {
             if (x.equals(TxnStatus.COMMITTING)) {
                 return createCompletedTxEntry(txId, TxnStatus.COMMITTED, System.currentTimeMillis());
             } else {
@@ -1301,12 +1299,14 @@ public abstract class PersistentStreamBase<T> implements Stream {
                                 v -> ActiveTxnRecord.parse(v.getValue().getData()))));
     }
 
-    private void checkState(State currState, State expectedState) {
-        if (currState != expectedState) {
-            throw StoreException.create(StoreException.Type.ILLEGAL_STATE,
-                    "Stream: " + getName() + " Current State: " + currState.name() + " Expected State:"
-                            + expectedState.name());
-        }
+    private CompletableFuture<Void> checkState(Predicate<State> predicate) {
+        return getState(true)
+                .thenAccept(currState -> {
+                    if (!predicate.test(currState)) {
+                        throw StoreException.create(StoreException.Type.ILLEGAL_STATE,
+                                "Stream: " + getName() + " Current State: " + currState.name());
+                    }
+                });
     }
 
     private CompletableFuture<Void> verifyLegalState() {

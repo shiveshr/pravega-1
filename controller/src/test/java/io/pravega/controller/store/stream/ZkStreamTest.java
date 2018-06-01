@@ -468,7 +468,9 @@ public class ZkStreamTest {
         // Test to ensure that COMMITTING_TXN transaction cannot be aborted.
         testAbortFailure(store, SCOPE, streamName, tx.getEpoch(), tx.getId(), context, operationNotAllowedPredicate);
 
+        store.setState(SCOPE, streamName, State.COMMITTING_TXN, context, executor).join();
         CompletableFuture<TxnStatus> f1 = store.commitTransaction(SCOPE, streamName, tx.getId(), context, executor);
+        store.setState(SCOPE, streamName, State.ACTIVE, context, executor).join();
 
         store.sealTransaction(SCOPE, streamName, tx2.getId(), false, Optional.<Integer>empty(),
                 context, executor).get();
@@ -496,8 +498,10 @@ public class ZkStreamTest {
                 Optional.empty(), context, executor).join().getKey());
 
         // Test to ensure that commitTransaction is idempotent.
+        store.setState(SCOPE, streamName, State.COMMITTING_TXN, context, executor).join();
         Assert.assertEquals(TxnStatus.COMMITTED,
                 store.commitTransaction(SCOPE, streamName, tx.getId(), context, executor).join());
+        store.setState(SCOPE, streamName, State.ACTIVE, context, executor).join();
 
         // Test to ensure that sealTransaction, to abort it, and abortTransaction on committed transaction throws error.
         testAbortFailure(store, SCOPE, streamName, tx.getEpoch(), tx.getId(), context, operationNotAllowedPredicate);
@@ -513,6 +517,7 @@ public class ZkStreamTest {
         // Test to ensure that sealTransaction, to abort it, and abortTransaction on committed transaction throws error.
         testCommitFailure(store, SCOPE, streamName, tx2.getEpoch(), tx2.getId(), context, operationNotAllowedPredicate);
 
+        store.setState(SCOPE, streamName, State.COMMITTING_TXN, context, executor).join();
         assert store.commitTransaction(ZkStreamTest.SCOPE, streamName, UUID.randomUUID(), null, executor)
                 .handle((ok, ex) -> {
                     if (ex.getCause() instanceof StoreException.DataNotFoundException) {
@@ -521,6 +526,7 @@ public class ZkStreamTest {
                         throw new RuntimeException("assert failed");
                     }
                 }).get();
+        store.setState(SCOPE, streamName, State.ACTIVE, context, executor).join();
 
         assert store.abortTransaction(ZkStreamTest.SCOPE, streamName, UUID.randomUUID(), null, executor)
                 .handle((ok, ex) -> {
