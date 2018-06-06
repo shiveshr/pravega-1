@@ -104,15 +104,14 @@ public class ControllerServiceConfigTest {
 
         // Positive values required
         AssertExtensions.assertThrows(IllegalArgumentException.class,
-                () -> TimeoutServiceConfig.builder().maxLeaseValue(-10).maxScaleGracePeriod(10).build());
+                () -> TimeoutServiceConfig.builder().maxLeaseValue(-10).build());
 
         // Positive values required
         AssertExtensions.assertThrows(IllegalArgumentException.class,
-                () -> TimeoutServiceConfig.builder().maxLeaseValue(10).maxScaleGracePeriod(-10).build());
+                () -> TimeoutServiceConfig.builder().maxLeaseValue(10).build());
 
         TimeoutServiceConfig timeoutServiceConfig = TimeoutServiceConfig.builder()
                 .maxLeaseValue(10)
-                .maxScaleGracePeriod(20)
                 .build();
 
         AssertExtensions.assertThrows(NullPointerException.class,

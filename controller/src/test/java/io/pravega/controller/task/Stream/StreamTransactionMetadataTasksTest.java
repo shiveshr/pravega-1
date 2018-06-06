@@ -226,10 +226,9 @@ public class StreamTransactionMetadataTasksTest {
 
         // Create 2 transactions
         final long lease = 5000;
-        final long scaleGracePeriod = 10000;
 
-        VersionedTransactionData txData1 = txnTasks.createTxn(SCOPE, STREAM, lease, scaleGracePeriod, null).join().getKey();
-        VersionedTransactionData txData2 = txnTasks.createTxn(SCOPE, STREAM, lease, scaleGracePeriod, null).join().getKey();
+        VersionedTransactionData txData1 = txnTasks.createTxn(SCOPE, STREAM, lease, null).join().getKey();
+        VersionedTransactionData txData2 = txnTasks.createTxn(SCOPE, STREAM, lease, null).join().getKey();
 
         // Commit the first one
         TxnStatus status = txnTasks.commitTxn(SCOPE, STREAM, txData1.getId(), null).join();
@@ -479,12 +478,9 @@ public class StreamTransactionMetadataTasksTest {
 
         // Create 2 transactions
         final long lease = 5000;
-        final long scaleGracePeriod = 10000;
 
-        VersionedTransactionData txData1 = txnTasks.createTxn(SCOPE, STREAM, lease, scaleGracePeriod,
-                null).join().getKey();
-        VersionedTransactionData txData2 = txnTasks.createTxn(SCOPE, STREAM, lease, scaleGracePeriod,
-                null).join().getKey();
+        VersionedTransactionData txData1 = txnTasks.createTxn(SCOPE, STREAM, lease, null).join().getKey();
+        VersionedTransactionData txData2 = txnTasks.createTxn(SCOPE, STREAM, lease, null).join().getKey();
 
         UUID tx1 = txData1.getId();
         UUID tx2 = txData2.getId();
@@ -561,10 +557,9 @@ public class StreamTransactionMetadataTasksTest {
 
         // Create partial transaction
         final long lease = 10000;
-        final long scaleGracePeriod = 10000;
 
         AssertExtensions.assertThrows("Transaction creation fails, although a new txn id gets added to the store",
-                txnTasks.createTxn(SCOPE, STREAM, lease, scaleGracePeriod, null),
+                txnTasks.createTxn(SCOPE, STREAM, lease, null),
                 e -> e instanceof RuntimeException);
 
         // Ensure that exactly one transaction is active on the stream.

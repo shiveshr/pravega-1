@@ -183,13 +183,12 @@ public class ZKControllerServiceImplTest extends ControllerServiceImplTest {
         return resultObserver.get();
     }
 
-    private Controller.CreateTxnResponse createTransaction(final String scope, final String stream, final long lease,
-                                                           final long scaleGracePeriod) {
+    private Controller.CreateTxnResponse createTransaction(final String scope, final String stream, final long lease) {
         Controller.StreamInfo streamInfo = ModelHelper.createStreamInfo(scope, stream);
         Controller.CreateTxnRequest request = Controller.CreateTxnRequest.newBuilder()
                 .setStreamInfo(streamInfo)
                 .setLease(lease)
-                .setScaleGracePeriod(scaleGracePeriod).build();
+                .build();
         ResultObserver<Controller.CreateTxnResponse> resultObserver = new ResultObserver<>();
         this.controllerService.createTransaction(request, resultObserver);
         Controller.CreateTxnResponse response = resultObserver.get();

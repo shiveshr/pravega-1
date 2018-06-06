@@ -88,7 +88,7 @@ public class EndToEndTransactionTest {
         EventStreamWriter<String> producer = clientFactory.createEventWriter(
                 testStream,
                 new JavaSerializer<>(),
-                EventWriterConfig.builder().transactionTimeoutTime(txnTimeout).transactionTimeoutScaleGracePeriod(txnTimeout).build());
+                EventWriterConfig.builder().transactionTimeoutTime(txnTimeout).build());
 
         // region Successful commit tests
         Transaction<String> transaction = producer.beginTxn();

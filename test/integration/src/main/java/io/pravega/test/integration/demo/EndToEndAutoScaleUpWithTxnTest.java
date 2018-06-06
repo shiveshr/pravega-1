@@ -99,7 +99,6 @@ public class EndToEndAutoScaleUpWithTxnTest {
             // Mocking pravega service by putting scale up and scale down requests for the stream
             EventWriterConfig writerConfig = EventWriterConfig.builder()
                                                               .transactionTimeoutTime(30000)
-                                                              .transactionTimeoutScaleGracePeriod(30000)
                                                               .build();
             EventStreamWriter<String> test = clientFactory.createEventWriter("test", new JavaSerializer<>(), writerConfig);
 

@@ -876,7 +876,7 @@ public class StreamMetadataTasksTest {
                         ActiveTxnRecord txRecord = tx.getValue();
                         return new AbstractMap.SimpleEntry<>(tx.getKey(),
                                 new ActiveTxnRecord(txRecord.getTxCreationTimestamp(), txRecord.getLeaseExpiryTime(),
-                                        txRecord.getMaxExecutionExpiryTime(), txRecord.getScaleGracePeriod(), TxnStatus.OPEN));
+                                        txRecord.getMaxExecutionExpiryTime(), TxnStatus.OPEN));
                     } else {
                         return tx;
                     }
