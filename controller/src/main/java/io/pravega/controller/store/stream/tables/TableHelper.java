@@ -17,6 +17,7 @@ import io.pravega.common.Exceptions;
 import io.pravega.common.util.ArrayView;
 import io.pravega.controller.store.stream.Segment;
 import io.pravega.controller.store.stream.StoreException;
+import io.pravega.shared.segment.StreamSegmentNameUtils;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import org.apache.commons.lang3.tuple.ImmutablePair;
@@ -40,8 +41,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
-import static io.pravega.shared.segment.StreamSegmentNameUtils.getPrimaryId;
-import static io.pravega.shared.segment.StreamSegmentNameUtils.getSecondaryId;
+import static io.pravega.shared.segment.StreamSegmentNameUtils.getSegmentNumber;
 
 /**
  * Helper class for operations pertaining to segment store tables (segment, history, index).
@@ -61,12 +61,12 @@ public class TableHelper {
      */
     public static Segment getSegment(final long segmentId, final byte[] segmentIndex, final byte[] segmentTable,
                                      final byte[] historyIndex, final byte[] historyTable) {
-        int primaryId = getPrimaryId(segmentId);
+        int primaryId = getSegmentNumber(segmentId);
         Optional<SegmentRecord> recordOpt = SegmentRecord.readRecord(segmentIndex, segmentTable, primaryId);
         if (recordOpt.isPresent()) {
             SegmentRecord record = recordOpt.get();
             long creationTime;
-            int epoch = getSecondaryId(segmentId);
+            int epoch = StreamSegmentNameUtils.getEpoch(segmentId);
 
             if (epoch == record.getCreationEpoch()) {
                 creationTime = record.getStartTime();
@@ -547,7 +547,7 @@ public class TableHelper {
 
         // duplicate the reference epoch
         HistoryRecord referenceRecord = HistoryRecord.readRecord(referenceEpoch, historyIndex, historyTable, true).get();
-        List<Long> newSegments = referenceRecord.getSegments().stream().map(segmentId -> computeSegmentId(getPrimaryId(segmentId),
+        List<Long> newSegments = referenceRecord.getSegments().stream().map(segmentId -> computeSegmentId(getSegmentNumber(segmentId),
                 nextEpoch)).collect(Collectors.toList());
         HistoryRecord record = new HistoryRecord(nextEpoch, referenceRecord.getReferenceEpoch(), newSegments, timestamp);
         ArrayView arrayView = record.toArrayView();
@@ -559,7 +559,7 @@ public class TableHelper {
 
         // duplicate active epoch as a partial record. no time added here
         int newEpoch = nextEpoch + 1;
-        newSegments = activeRecord.getSegments().stream().map(segmentId -> computeSegmentId(getPrimaryId(segmentId), newEpoch)).collect(Collectors.toList());
+        newSegments = activeRecord.getSegments().stream().map(segmentId -> computeSegmentId(getSegmentNumber(segmentId), newEpoch)).collect(Collectors.toList());
         record = new HistoryRecord(newEpoch, activeRecord.getReferenceEpoch(), newSegments);
         arrayView = record.toArrayView();
         historyStream.write(arrayView.array(), arrayView.arrayOffset(), arrayView.getLength());
@@ -699,7 +699,7 @@ public class TableHelper {
         // verify that epoch transition record is consistent with segment table
         if (latest.getCreationEpoch() == epochTransitionRecord.getNewEpoch()) { // if segment table is updated
             epochTransitionRecord.newSegmentsWithRange.entrySet().forEach(segmentWithRange -> {
-                Optional<SegmentRecord> segmentOpt = SegmentRecord.readRecord(segmentIndex, segmentTable, getPrimaryId(segmentWithRange.getKey()));
+                Optional<SegmentRecord> segmentOpt = SegmentRecord.readRecord(segmentIndex, segmentTable, getSegmentNumber(segmentWithRange.getKey()));
                 isConsistent.compareAndSet(true, segmentOpt.isPresent() &&
                         segmentOpt.get().getCreationEpoch() == epochTransitionRecord.getNewEpoch() &&
                         segmentOpt.get().getRoutingKeyStart() == segmentWithRange.getValue().getKey() &&
@@ -915,7 +915,7 @@ public class TableHelper {
                 x.getKey() >= 0 && x.getValue() > 0);
 
         List<AbstractMap.SimpleEntry<Double, Double>> oldRanges = segmentsToSeal.stream()
-                .map(segmentId -> SegmentRecord.readRecord(segmentIndex, segmentTable, getPrimaryId(segmentId)).map(x ->
+                .map(segmentId -> SegmentRecord.readRecord(segmentIndex, segmentTable, getSegmentNumber(segmentId)).map(x ->
                         new AbstractMap.SimpleEntry<>(x.getRoutingKeyStart(), x.getRoutingKeyEnd())))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
