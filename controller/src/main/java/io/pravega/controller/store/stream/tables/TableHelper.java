@@ -782,7 +782,7 @@ public class TableHelper {
      *
      * @return History record corresponding to the epoch
      */
-    public static HistoryRecord getEpoch(final byte[] historyIndex, final byte[] historyTable, final int epoch) {
+    public static HistoryRecord getEpochRecord(final byte[] historyIndex, final byte[] historyTable, final int epoch) {
         Optional<HistoryRecord> record = HistoryRecord.readRecord(epoch, historyIndex, historyTable, false);
 
         return record.orElseThrow(() -> StoreException.create(StoreException.Type.DATA_NOT_FOUND,

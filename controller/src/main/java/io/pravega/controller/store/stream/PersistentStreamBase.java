@@ -651,7 +651,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     private CompletionStage<EpochTransitionRecord> migrateManualScaleToNewEpoch(EpochTransitionRecord epochTransition, Data<T> historyIndex,
                                                                Data<T> historyTable, Data<T> segmentIndex, Data<T> segmentTable) {
         HistoryRecord activeEpoch = TableHelper.getActiveEpoch(historyIndex.getData(), historyTable.getData());
-        HistoryRecord recordActiveEpoch = TableHelper.getEpoch(historyIndex.getData(), historyTable.getData(), epochTransition.getActiveEpoch());
+        HistoryRecord recordActiveEpoch = TableHelper.getEpochRecord(historyIndex.getData(), historyTable.getData(), epochTransition.getActiveEpoch());
         if (epochTransition.getActiveEpoch() == activeEpoch.getEpoch()) {
             // no migration needed
             return CompletableFuture.completedFuture(epochTransition);
@@ -1185,7 +1185,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
     public CompletableFuture<HistoryRecord> getEpochRecord(int epoch) {
         return getHistoryIndex()
                 .thenCompose(historyIndex -> getHistoryTable()
-                        .thenApply(historyTable -> TableHelper.getEpoch(historyIndex.getData(), historyTable.getData(), epoch)));
+                        .thenApply(historyTable -> TableHelper.getEpochRecord(historyIndex.getData(), historyTable.getData(), epoch)));
     }
 
     @Override
