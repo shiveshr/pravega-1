@@ -14,6 +14,8 @@ import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
+import io.pravega.controller.store.stream.tables.RetentionSet;
+import io.pravega.controller.store.stream.tables.RetentionSetRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
@@ -150,13 +152,13 @@ interface Stream {
      */
     CompletableFuture<Segment> getSegment(final long segmentId);
 
-    CompletableFuture<List<ScaleMetadata>> getScaleMetadata();
+    CompletableFuture<List<ScaleMetadata>> getScaleMetadata(final long from, final long to);
 
     /**
      * @param segmentId segment number.
      * @return successors of specified segment mapped to the list of their predecessors
      */
-    CompletableFuture<Map<Long, List<Long>>> getSuccessorsWithPredecessors(final long segmentId);
+    CompletableFuture<Map<Segment, List<Long>>> getSuccessorsWithPredecessors(final long segmentId);
 
     /**
      * Method to get all segments between given stream cuts.
@@ -172,13 +174,13 @@ interface Stream {
     /**
      * @return currently active segments
      */
-    CompletableFuture<List<Long>> getActiveSegments();
+    CompletableFuture<List<Segment>> getActiveSegments();
 
     /**
      * @param timestamp point in time.
      * @return the list of segments active at timestamp.
      */
-    CompletableFuture<Map<Long, Long>> getActiveSegments(final long timestamp);
+    CompletableFuture<Map<Segment, Long>> getActiveSegments(final long timestamp);
 
     /**
      * Returns the active segments in the specified epoch.
@@ -186,7 +188,7 @@ interface Stream {
      * @param epoch epoch number.
      * @return list of numbers of segments active in the specified epoch.
      */
-    CompletableFuture<List<Long>> getActiveSegments(int epoch);
+    CompletableFuture<List<Segment>> getSegmentsInEpoch(int epoch);
 
     /**
      * Called to start metadata updates to stream store wrt new scale event.
@@ -243,10 +245,9 @@ interface Stream {
      *
      * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing.
      * @param activeEpoch active epoch at the time when rolling transaction was started.
-     * @param time sealed segments from active epoch with size at the time of sealing.
      * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.
      */
-    CompletableFuture<Void> rollingTxnActiveEpochSealed(Map<Long, Long> sealedActiveEpochSegments, int activeEpoch, long time);
+    CompletableFuture<Void> rollingTxnActiveEpochSealed(Map<Long, Long> sealedActiveEpochSegments, int activeEpoch);
 
     /**
      * Sets cold marker which is valid till the specified time stamp.
@@ -364,7 +365,7 @@ interface Stream {
     /**
      * Returns the currently active stream epoch.
      *
-     * @param ignoreCached if ignore cache is set to true then fetch the value from the store. 
+     * @param ignoreCached if ignore cache is set to true then fetch the value from the store.
      * @return currently active stream epoch.
      */
     CompletableFuture<HistoryRecord> getActiveEpoch(boolean ignoreCached);
@@ -383,7 +384,7 @@ interface Stream {
      * @param streamCut stream cut
      * @return A CompletableFuture, that when completed, will contain size of stream till given cut.
      */
-    CompletableFuture<Long> getSizeTillStreamCut(Map<Long, Long> streamCut);
+    CompletableFuture<Long> getSizeTillStreamCut(Map<Long, Long> streamCut, Optional<StreamCutRecord> reference);
 
     /**
      *Add a new Stream cut to retention set.
@@ -393,12 +394,7 @@ interface Stream {
      */
     CompletableFuture<Void> addStreamCutToRetentionSet(final StreamCutRecord streamCut);
 
-    /**
-     * Get all stream cuts stored in the retention set.
-     *
-     * @return list of stream cut records
-     */
-    CompletableFuture<List<StreamCutRecord>> getRetentionStreamCuts();
+    CompletableFuture<RetentionSet> getRetentionSet();
 
     /**
      * Delete all stream cuts in the retention set that preceed the supplied stream cut.
@@ -407,7 +403,7 @@ interface Stream {
      * @param streamCut stream cut
      * @return future of operation
      */
-    CompletableFuture<Void> deleteStreamCutBefore(final StreamCutRecord streamCut);
+    CompletableFuture<Void> deleteStreamCutBefore(final RetentionSetRecord streamCut);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.
@@ -475,10 +471,4 @@ interface Stream {
      * @return Starting segment number.
      */
     CompletableFuture<Integer> getStartingSegmentNumber();
-
-    /**
-     * Refresh the stream object. Typically to be used to invalidate any caches.
-     * This allows us reuse of stream object without having to recreate a new stream object for each new operation
-     */
-    void refresh();
 }

@@ -336,7 +336,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
 
                     // Step 4. Notify segment stores about new txn.
                     CompletableFuture<List<Segment>> segmentsFuture = txnFuture.thenComposeAsync(txnData ->
-                            streamMetadataStore.getActiveSegments(scope, stream, txnData.getEpoch(), ctx, executor), executor);
+                            streamMetadataStore.getSegmentsInEpoch(scope, stream, txnData.getEpoch(), ctx, executor), executor);
 
                     CompletableFuture<Void> notify = segmentsFuture.thenComposeAsync(activeSegments ->
                             notifyTxnCreation(scope, stream, activeSegments, txnId), executor).whenComplete((v, e) ->
@@ -350,7 +350,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                     }, executor).thenApplyAsync(v -> {
                         List<Segment> segments = segmentsFuture.join().stream().map(x -> {
                             long generalizedSegmentId = TableHelper.generalizedSegmentId(x.segmentId(), txnId);
-                            return new Segment(generalizedSegmentId, x.getStart(), x.getKeyStart(), x.getKeyEnd());
+                            return new Segment(generalizedSegmentId, x.getKeyStart(), x.getKeyEnd());
                         }).collect(Collectors.toList());
 
                         return new ImmutablePair<>(txnFuture.join(), segments);

@@ -17,24 +17,15 @@ import java.util.Optional;
 @Data
 /**
  * Class corresponding to a record/row in Index table.
- * Each row is fixed size
- * Row: [pointer-into-history-table]
+ * contains time to epoch indx
  */
 public class HistoryIndexRecord {
-    private static final int INDEX_RECORD_SIZE = Integer.BYTES;
+    // TODO: shivesh make this serializable
+    private static final int INDEX_RECORD_SIZE = Long.BYTES + Integer.BYTES;
+    private final long time;
     private final int epoch;
-    private final int historyOffset;
 
-    public static Optional<HistoryIndexRecord> readRecord(final byte[] indexTable, final int epoch) {
-        if ((epoch + 1) * INDEX_RECORD_SIZE > indexTable.length || epoch < 0) {
-            return Optional.empty();
-        } else {
-            return Optional.of(parse(indexTable, epoch));
-        }
-    }
-
-    public static Optional<HistoryIndexRecord> readLatestRecord(final byte[] historyIndex) {
-        return readRecord(historyIndex, historyIndex.length / HistoryIndexRecord.INDEX_RECORD_SIZE - 1);
+    public static Optional<HistoryIndexRecord> readRecord() {
     }
 
     private static HistoryIndexRecord parse(final byte[] bytes, int epoch) {
@@ -46,11 +37,8 @@ public class HistoryIndexRecord {
     public byte[] toByteArray() {
         byte[] b = new byte[INDEX_RECORD_SIZE];
         BitConverter.writeInt(b, 0, historyOffset);
+        BitConverter.writeLong(b, 0, historyOffset);
 
         return b;
-    }
-
-    int getIndexOffset() {
-        return epoch * INDEX_RECORD_SIZE;
     }
 }

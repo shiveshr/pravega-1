@@ -79,9 +79,8 @@ public class TruncateStreamTask implements StreamTask<TruncateStreamEvent> {
         return Futures.toVoid(streamMetadataStore.setState(scope, stream, State.TRUNCATING, context, executor)
                 .thenCompose(x -> notifyTruncateSegments(scope, stream, truncationRecord.getStreamCut(), delegationToken))
                 .thenCompose(x -> notifyDeleteSegments(scope, stream, truncationRecord.getToDelete(), delegationToken))
-                 .thenCompose(x -> streamMetadataStore.getSizeTillStreamCut(scope, stream, truncationRecord.getStreamCut(), context, executor))
-                 .thenAccept(truncatedSize -> DYNAMIC_LOGGER.reportGaugeValue(nameFromStream(TRUNCATED_SIZE, scope, stream), truncatedSize))
-                 .thenCompose(deleted -> streamMetadataStore.completeTruncation(scope, stream, context, executor))
+                 .thenAccept(x -> DYNAMIC_LOGGER.reportGaugeValue(nameFromStream(TRUNCATED_SIZE, scope, stream), truncationRecord.getSizeTill()))
+                 .thenCompose(x -> streamMetadataStore.completeTruncation(scope, stream, context, executor))
                  .thenCompose(x -> streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor)));
     }
 

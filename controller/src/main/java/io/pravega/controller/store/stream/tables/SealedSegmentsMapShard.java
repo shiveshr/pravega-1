@@ -14,6 +14,7 @@ import io.pravega.controller.store.stream.tables.serializers.SealedSegmentsRecor
 import lombok.Builder;
 import lombok.Data;
 import lombok.SneakyThrows;
+import lombok.Synchronized;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -24,36 +25,49 @@ import java.util.Map;
 /**
  * Data class for storing information about stream's truncation point.
  */
-@Data
 @Builder
 @Slf4j
-public class SealedSegmentsRecord {
+public class SealedSegmentsMapShard {
     public static final SealedSegmentsRecordSerializer SERIALIZER = new SealedSegmentsRecordSerializer();
 
+    private final int shardNumber;
     /**
      * Sealed segments with size at the time of sealing.
+     * segmentId -> sealed segment record.
+     * Each shard contains segments from a range of `segment number`.
+     * So each shard size would be say 10k segment numbers. Then the number of records in the map would be 10k * average number of duplicate epochs.
+     *
+     * So to get sealed segment record -> extract segment number from segment id. compute the shard by dividing segment number by 10k.
+     * Fetch the record from the shard.
      */
     private final Map<Long, Long> sealedSegmentsSizeMap;
 
-    public SealedSegmentsRecord(Map<Long, Long> sealedSegmentsSizeMap) {
+    public SealedSegmentsMapShard(int shardNumber, Map<Long, Long> sealedSegmentsSizeMap) {
+        this.shardNumber = shardNumber;
         this.sealedSegmentsSizeMap = Collections.unmodifiableMap(new HashMap<>(sealedSegmentsSizeMap));
     }
 
-    public Map<Long, Long> getSealedSegmentsSizeMap() {
-        return sealedSegmentsSizeMap;
-    }
-
-    public static class SealedSegmentsRecordBuilder implements ObjectBuilder<SealedSegmentsRecord> {
+    public static class SealedSegmentsMapShardBuilder implements ObjectBuilder<SealedSegmentsMapShard> {
 
     }
 
     @SneakyThrows(IOException.class)
-    public static SealedSegmentsRecord parse(final byte[] data) {
+    public static SealedSegmentsMapShard parse(final byte[] data) {
         return SERIALIZER.deserialize(data);
     }
 
     @SneakyThrows(IOException.class)
     public byte[] toByteArray() {
         return SERIALIZER.serialize(this).getCopy();
+    }
+
+    @Synchronized
+    public long getSize(long segmentId) {
+        return sealedSegmentsSizeMap.get(segmentId);
+    }
+
+    @Synchronized
+    public void addSealedSegmentSize(long segmentId, long sealedSize) {
+        sealedSegmentsSizeMap.put(segmentId, sealedSize);
     }
 }

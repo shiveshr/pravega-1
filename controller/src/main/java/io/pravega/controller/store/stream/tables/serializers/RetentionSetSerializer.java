@@ -12,14 +12,15 @@ package io.pravega.controller.store.stream.tables.serializers;
 import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
+import io.pravega.controller.store.stream.tables.RetentionSet;
+import io.pravega.controller.store.stream.tables.RetentionSetRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
-import io.pravega.controller.store.stream.tables.RetentionRecord;
 
 import java.io.IOException;
 import java.util.ArrayList;
 
-public class RetentionRecordSerializer
-        extends VersionedSerializer.WithBuilder<RetentionRecord, RetentionRecord.RetentionRecordBuilder> {
+public class RetentionSetSerializer
+        extends VersionedSerializer.WithBuilder<RetentionSet, RetentionSet.RetentionSetBuilder> {
     @Override
     protected byte getWriteVersion() {
         return 0;
@@ -30,14 +31,14 @@ public class RetentionRecordSerializer
         version(0).revision(0, this::write00, this::read00);
     }
 
-    private void read00(RevisionDataInput revisionDataInput, RetentionRecord.RetentionRecordBuilder retentionRecordBuilder)
+    private void read00(RevisionDataInput revisionDataInput, RetentionSet.RetentionSetBuilder retentionRecordBuilder)
             throws IOException {
         retentionRecordBuilder.streamCuts(revisionDataInput.readCollection(StreamCutRecord.SERIALIZER::deserialize,
                 ArrayList::new));
     }
 
-    private void write00(RetentionRecord retentionRecord, RevisionDataOutput revisionDataOutput) throws IOException {
-        revisionDataOutput.writeCollection(retentionRecord.getStreamCuts(), StreamCutRecord.SERIALIZER::serialize);
+    private void write00(RetentionSet retentionRecord, RevisionDataOutput revisionDataOutput) throws IOException {
+        revisionDataOutput.writeCollection(retentionRecord.getStreamCuts(), RetentionSetRecord.SERIALIZER::serialize);
     }
 
     @Override

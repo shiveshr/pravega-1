@@ -12,14 +12,14 @@ package io.pravega.controller.store.stream.tables.serializers;
 import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
-import io.pravega.controller.store.stream.tables.SealedSegmentsRecord;
+import io.pravega.controller.store.stream.tables.SealedSegmentsMapShard;
 
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
 public class SealedSegmentsRecordSerializer
-        extends VersionedSerializer.WithBuilder<SealedSegmentsRecord, SealedSegmentsRecord.SealedSegmentsRecordBuilder> {
+        extends VersionedSerializer.WithBuilder<SealedSegmentsMapShard, SealedSegmentsMapShard.SealedSegmentsRecordBuilder> {
     @Override
     protected byte getWriteVersion() {
         return 0;
@@ -31,16 +31,16 @@ public class SealedSegmentsRecordSerializer
     }
 
     private void read00(RevisionDataInput revisionDataInput,
-                        SealedSegmentsRecord.SealedSegmentsRecordBuilder sealedSegmentsRecordBuilder) throws IOException {
+                        SealedSegmentsMapShard.SealedSegmentsRecordBuilder sealedSegmentsRecordBuilder) throws IOException {
         sealedSegmentsRecordBuilder.sealedSegmentsSizeMap(revisionDataInput.readMap(DataInput::readLong, DataInput::readLong));
     }
 
-    private void write00(SealedSegmentsRecord sealedSegmentsRecord, RevisionDataOutput revisionDataOutput) throws IOException {
+    private void write00(SealedSegmentsMapShard sealedSegmentsRecord, RevisionDataOutput revisionDataOutput) throws IOException {
         revisionDataOutput.writeMap(sealedSegmentsRecord.getSealedSegmentsSizeMap(), DataOutput::writeLong, DataOutput::writeLong);
     }
 
     @Override
-    protected SealedSegmentsRecord.SealedSegmentsRecordBuilder newBuilder() {
-        return SealedSegmentsRecord.builder();
+    protected SealedSegmentsMapShard.SealedSegmentsRecordBuilder newBuilder() {
+        return SealedSegmentsMapShard.builder();
     }
 }

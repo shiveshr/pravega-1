@@ -52,9 +52,4 @@ public class Cache<T> {
         cache.invalidate(key);
         return null;
     }
-
-    public Void invalidateAll() {
-        cache.invalidateAll();
-        return null;
-    }
 }

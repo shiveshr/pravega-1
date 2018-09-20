@@ -20,12 +20,9 @@ import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.CompletedTxnRecord;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
-import io.pravega.controller.store.stream.tables.SegmentRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StateRecord;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
-import io.pravega.controller.store.stream.tables.StreamCutRecord;
-import io.pravega.controller.store.stream.tables.RetentionRecord;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 import org.junit.Test;
 

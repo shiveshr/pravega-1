@@ -17,6 +17,8 @@ import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
+import io.pravega.controller.store.stream.tables.RetentionSet;
+import io.pravega.controller.store.stream.tables.RetentionSetRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
@@ -233,6 +235,22 @@ public interface StreamMetadataStore {
                                             final Executor executor);
 
     /**
+     * Start new stream truncation.
+     *
+     * @param scope         stream scope
+     * @param name          stream name.
+     * @param streamCut     new stream cut.
+     * @param context       operation context
+     * @param executor      callers executor
+     * @return future of operation.
+     */
+    CompletableFuture<Void> startTruncation(final String scope,
+                                            final String name,
+                                            final StreamCutRecord streamCut,
+                                            final OperationContext context,
+                                            final Executor executor);
+
+    /**
      * Complete an ongoing stream truncation.
      *
      * @param scope               stream scope
@@ -316,7 +334,7 @@ public interface StreamMetadataStore {
      * @param executor  callers executor
      * @return the list of segments numbers active at timestamp.
      */
-    CompletableFuture<Map<Long, Long>> getActiveSegments(final String scope, final String name, final long timestamp, final OperationContext context, final Executor executor);
+    CompletableFuture<Map<Segment, Long>> getActiveSegments(final String scope, final String name, final long timestamp, final OperationContext context, final Executor executor);
 
     /**
      * Returns the segments in the specified epoch of the specified stream.
@@ -328,27 +346,11 @@ public interface StreamMetadataStore {
      * @param executor callers executor
      * @return         list of active segments in specified epoch.
      */
-    CompletableFuture<List<Segment>> getActiveSegments(final String scope,
+    CompletableFuture<List<Segment>> getSegmentsInEpoch(final String scope,
                                                        final String stream,
                                                        final int epoch,
                                                        final OperationContext context,
                                                        final Executor executor);
-
-    /**
-     * Returns the segments in the specified epoch of the specified stream.
-     *
-     * @param scope    scope.
-     * @param stream   stream.
-     * @param epoch    epoch.
-     * @param context  operation context
-     * @param executor callers executor
-     * @return         list of active segments in specified epoch.
-     */
-    CompletableFuture<List<Long>> getActiveSegmentIds(final String scope,
-                                                                   final String stream,
-                                                                   final int epoch,
-                                                                   final OperationContext context,
-                                                                   final Executor executor);
 
     /**
      * Given a segment return a map containing the numbers of the segments immediately succeeding it
@@ -361,11 +363,11 @@ public interface StreamMetadataStore {
      * @param executor      callers executor
      * @return segments that immediately follow the specified segment and the segments they follow.
      */
-    CompletableFuture<Map<Long, List<Long>>> getSuccessors(final String scope,
-                                                                                     final String streamName,
-                                                                                     final long segmentId,
-                                                                                     final OperationContext context,
-                                                                                     final Executor executor);
+    CompletableFuture<Map<Segment, List<Long>>> getSuccessors(final String scope,
+                                                                             final String streamName,
+                                                                             final long segmentId,
+                                                                             final OperationContext context,
+                                                                             final Executor executor);
 
     /**
      * Given two stream cuts, this method return a list of segments that lie between given stream cuts.
@@ -452,7 +454,7 @@ public interface StreamMetadataStore {
                                                 final Executor executor);
 
     /**
-     * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
+     * This method is called from Rolling transaction workflow after new segments that are duplicate of active segments
      * have been created successfully in segment store.
      * This method will update metadata records for epoch to add two new epochs, one for duplicate txn epoch where transactions
      * are merged and the other for duplicate active epoch.
@@ -477,13 +479,12 @@ public interface StreamMetadataStore {
      * @param name           stream name.
      * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing
      * @param activeEpoch    active epoch against which rolling txn was started
-     * @param time           timestamp
      * @param context        operation context
      * @param executor       callers executor
      * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.
      */
     CompletableFuture<Void> rollingTxnActiveEpochSealed(final String scope, final String name, final Map<Long, Long> sealedActiveEpochSegments,
-                                                        final int activeEpoch, final long time, final OperationContext context, final Executor executor);
+                                                        final int activeEpoch, final OperationContext context, final Executor executor);
 
 
     /**
@@ -761,11 +762,13 @@ public interface StreamMetadataStore {
      *
      * @param scope    stream scope
      * @param name     stream name.
+     *                 // TODO: shivesh
      * @param executor callers executor
      * @param context  operation context
      * @return currently active segments
      */
-    CompletableFuture<List<ScaleMetadata>> getScaleMetadata(final String scope, final String name, final OperationContext context, final Executor executor);
+    CompletableFuture<List<ScaleMetadata>> getScaleMetadata(final String scope, final String name, final long from, final long to,
+                                                            final OperationContext context, final Executor executor);
 
     /**
      * Method to register listener for changes to bucket's ownership.
@@ -859,20 +862,32 @@ public interface StreamMetadataStore {
      * @param executor executor
      * @return future
      */
-    CompletableFuture<List<StreamCutRecord>> getStreamCutsFromRetentionSet(final String scope, final String stream,
-                                                                           final OperationContext context, final Executor executor);
+    CompletableFuture<RetentionSet> getRetentionSet(final String scope, final String stream,
+                                                          final OperationContext context, final Executor executor);
+
+    /**
+     * // TODO: shivesh
+     *
+     * @param scope    scope
+     * @param stream   stream
+     * @param record   retention set record
+     * @param context  context
+     * @param executor executor
+     * @return future
+     */
+    CompletableFuture<StreamCutRecord> getStreamCutRecord(final String scope, final String stream, final RetentionSetRecord record,
+                                                    final OperationContext context, final Executor executor);
 
     /**
      * Delete all stream cuts with recording time before the supplied stream cut from the retention set of the stream.
      *
      * @param scope     scope
      * @param stream    stream
-     * @param streamCut stream cut to purge from
      * @param context   context
      * @param executor  executor
      * @return future
      */
-    CompletableFuture<Void> deleteStreamCutBefore(final String scope, final String stream, final StreamCutRecord streamCut,
+    CompletableFuture<Void> deleteFromRetentionSetBefore(final String scope, final String stream, final RetentionSetRecord record,
                                                   final OperationContext context, final Executor executor);
 
     /**
@@ -885,8 +900,15 @@ public interface StreamMetadataStore {
      * @param executor executor
      * @return A CompletableFuture which, when completed, will contain size of stream till given streamCut.
      */
-    CompletableFuture<Long> getSizeTillStreamCut(final String scope, final String stream, final Map<Long, Long> streamCut,
+    CompletableFuture<Long> getSizeTillStreamCut(final String scope, final String stream, final Map<Segment, Long> streamCut,
+                                                 final Optional<StreamCutRecord> reference,
                                                  final OperationContext context, final ScheduledExecutorService executor);
+
+    /**
+     * TODO: shivesh
+     * @return
+     */
+    CompletableFuture<EpochTransitionRecord> getEpochTransition();
 
     /**
      * Method to create committing transaction record in the store for a given stream.

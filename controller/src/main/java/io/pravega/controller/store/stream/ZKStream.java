@@ -49,7 +49,7 @@ import java.util.stream.Collectors;
  * This shall reduce store round trips for answering queries, thus making them efficient.
  */
 @Slf4j
-class ZKStream extends PersistentStreamBase<Integer> {
+class ZKStream extends AbstractStreamWithCache<Integer> {
     private static final String SCOPE_PATH = "/store/%s";
     private static final String STREAM_PATH = SCOPE_PATH + "/%s";
     private static final String CREATION_TIME_PATH = STREAM_PATH + "/creationTime";
@@ -96,7 +96,6 @@ class ZKStream extends PersistentStreamBase<Integer> {
     @Getter(AccessLevel.PACKAGE)
     private final String streamPath;
 
-    private final Cache<Integer> cache;
     private final Supplier<Integer> currentBatchSupplier;
 
     @VisibleForTesting
@@ -105,7 +104,7 @@ class ZKStream extends PersistentStreamBase<Integer> {
     }
 
     ZKStream(final String scopeName, final String streamName, ZKStoreHelper storeHelper, Supplier<Integer> currentBatchSupplier) {
-        super(scopeName, streamName);
+        super(scopeName, streamName, () -> new Cache<>(storeHelper::getData));
         store = storeHelper;
         scopePath = String.format(SCOPE_PATH, scopeName);
         streamPath = String.format(STREAM_PATH, scopeName, streamName);
@@ -126,7 +125,6 @@ class ZKStream extends PersistentStreamBase<Integer> {
         waitingRequestProcessorPath = String.format(WAITING_REQUEST_PROCESSOR_PATH, scopeName, streamName);
         markerPath = String.format(MARKER_PATH, scopeName, streamName);
 
-        cache = new Cache<>(store::getData);
         this.currentBatchSupplier = currentBatchSupplier;
     }
 
@@ -143,12 +141,7 @@ class ZKStream extends PersistentStreamBase<Integer> {
     private CompletableFuture<Integer> getNumberOfOngoingTransactions(int epoch) {
         return store.getChildren(getEpochPath(epoch)).thenApply(List::size);
     }
-
-    @Override
-    public void refresh() {
-        cache.invalidateAll();
-    }
-
+    
     @Override
     public CompletableFuture<Void> deleteStream() {
         return store.deleteTree(streamPath);
@@ -180,8 +173,9 @@ class ZKStream extends PersistentStreamBase<Integer> {
         CreateStreamResponse.CreateStatus status = creationTimeMatched ?
                 CreateStreamResponse.CreateStatus.NEW : CreateStreamResponse.CreateStatus.EXISTS_CREATING;
 
-        return getConfiguration().thenCompose(config -> store.checkExists(statePath)
+        return getConfigurationRecord(true).thenCompose(configRecord -> store.checkExists(statePath)
                 .thenCompose(stateExists -> {
+                    StreamConfiguration config = configRecord.getStreamConfiguration();
                     if (!stateExists) {
                         return CompletableFuture.completedFuture(new CreateStreamResponse(status, config, creationTime, startingSegmentNumber));
                     }
@@ -218,12 +212,8 @@ class ZKStream extends PersistentStreamBase<Integer> {
     }
 
     @Override
-    CompletableFuture<Void> createSealedSegmentsRecord(byte[] sealedSegmentsRecord) {
-        return store.createZNodeIfNotExist(sealedSegmentsPath, sealedSegmentsRecord);
-    }
-
-    @Override
-    CompletableFuture<Data<Integer>> getSealedSegmentsRecord() {
+    CompletableFuture<Data<Integer>> getSealedSegmentRecord(long segmentId) {
+        // read sealed segment map shard
         return store.getData(sealedSegmentsPath);
     }
 
@@ -261,22 +251,7 @@ class ZKStream extends PersistentStreamBase<Integer> {
 
     @Override
     CompletableFuture<Data<Integer>> getEpochTransitionNode() {
-        cache.invalidateCache(epochTransitionPath);
-        return cache.getCachedData(epochTransitionPath);
-    }
-
-    @Override
-    CompletableFuture<Void> deleteEpochTransitionNode() {
-        return store.deleteNode(epochTransitionPath);
-    }
-
-    @Override
-    CompletableFuture<Void> storeCreationTimeIfAbsent(final long creationTime) {
-        byte[] b = new byte[Long.BYTES];
-        BitConverter.writeLong(b, 0, creationTime);
-
-        return store.createZNodeIfNotExist(creationPath, b)
-            .thenApply(x -> cache.invalidateCache(creationPath));
+        return store.getData(epochTransitionPath);
     }
 
     @Override
@@ -289,31 +264,6 @@ class ZKStream extends PersistentStreamBase<Integer> {
     public CompletableFuture<Void> createStateIfAbsent(final State state) {
         return store.createZNodeIfNotExist(statePath, StateRecord.builder().state(state).build().toByteArray())
                 .thenApply(x -> cache.invalidateCache(statePath));
-    }
-
-    @Override
-    public CompletableFuture<Void> createSegmentTableIfAbsent(final Data<Integer> segmentTable) {
-
-        return store.createZNodeIfNotExist(segmentPath, segmentTable.getData())
-                .thenApply(x -> cache.invalidateCache(segmentPath));
-    }
-
-    @Override
-    public CompletableFuture<Void> createHistoryIndexIfAbsent(final Data<Integer> indexTable) {
-        return store.createZNodeIfNotExist(historyIndexPath, indexTable.getData())
-                .thenApply(x -> cache.invalidateCache(historyIndexPath));
-    }
-
-    @Override
-    public CompletableFuture<Void> createHistoryTableIfAbsent(final Data<Integer> historyTable) {
-        return store.createZNodeIfNotExist(historyPath, historyTable.getData())
-                .thenApply(x -> cache.invalidateCache(historyPath));
-    }
-
-    @Override
-    public CompletableFuture<Void> updateHistoryTable(final Data<Integer> updated) {
-        return store.setData(historyPath, updated)
-                .whenComplete((r, e) -> cache.invalidateCache(historyPath));
     }
 
     @Override
@@ -641,8 +591,7 @@ class ZKStream extends PersistentStreamBase<Integer> {
 
     @Override
     CompletableFuture<Data<Integer>> getCommittingTxnRecord() {
-        cache.invalidateCache(committingTxnsPath);
-        return cache.getCachedData(committingTxnsPath);
+        return store.getData(committingTxnsPath);
     }
 
     @Override
@@ -684,4 +633,10 @@ class ZKStream extends PersistentStreamBase<Integer> {
         return ZKPaths.makePath(completedTxPathOldScheme, txId);
     }
     // endregion
+
+    @Override
+    public String getMarkerKey(long segmentId) {
+        return ZKPaths.makePath(markerPath, String.format("%d", segmentId));
+    }
+
 }

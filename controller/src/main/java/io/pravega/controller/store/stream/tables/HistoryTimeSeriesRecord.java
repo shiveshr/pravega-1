@@ -13,7 +13,6 @@ import com.google.common.collect.ImmutableList;
 import io.pravega.common.ObjectBuilder;
 import io.pravega.common.util.ArrayView;
 import io.pravega.controller.store.stream.Segment;
-import io.pravega.controller.store.stream.tables.serializers.HistoryRecordSerializer;
 import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
@@ -22,16 +21,12 @@ import lombok.SneakyThrows;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 
-/**
- * Class corresponding to one row in the HistoryTable.
- * HistoryRecords are of variable length, so we will use history index for
- * traversal.
- * Row : [epoch][List-of-active-segment-numbers], [scaleTime]
- */
-public class HistoryRecord {
-    public static final HistoryRecordSerializer SERIALIZER = new HistoryRecordSerializer();
+public class HistoryTimeSeriesRecord {
+    public static final HistoryTimeSeriesRecordSerializer SERIALIZER = new HistoryTimeSeriesRecordSerializer();
 
     @Getter
     private final int epoch;
@@ -51,26 +46,32 @@ public class HistoryRecord {
      * Note: secondary id is optional and 0 value will signify its absence.
      */
     @Getter
-    private final ImmutableList<Segment> segments;
+    private final ImmutableList<Segment> segmentsSealed;
+
+    @Getter
+    private final ImmutableList<Segment> segmentsCreated;
+
     @Getter
     private final long scaleTime;
 
     @Builder
-    HistoryRecord(int epoch, int referenceEpoch, List<Segment> segments, long creationTime) {
+    HistoryTimeSeriesRecord(int epoch, int referenceEpoch, List<Segment> segmentsSealed, List<Segment> segmentsCreated,
+                            long creationTime) {
         this.epoch = epoch;
         this.referenceEpoch = referenceEpoch;
-        this.segments = ImmutableList.copyOf(segments);
+        this.segmentsSealed = ImmutableList.copyOf(segmentsSealed);
+        this.segmentsCreated = ImmutableList.copyOf(segmentsCreated);
         this.scaleTime = creationTime;
     }
 
     @Builder
-    HistoryRecord(int epoch, List<Segment> segments, long creationTime) {
-        this(epoch, epoch, segments, creationTime);
+    HistoryTimeSeriesRecord(int epoch, List<Segment> segmentsSealed, List<Segment> segmentsCreated, long creationTime) {
+        this(epoch, epoch, segmentsSealed, segmentsCreated, creationTime);
     }
 
     @SneakyThrows(IOException.class)
-    public byte[] toByteArray() {
-        return SERIALIZER.serialize(this).getCopy();
+    public ArrayView toArrayView() {
+        return SERIALIZER.serialize(this);
     }
 
     public boolean isDuplicate() {
@@ -78,12 +79,12 @@ public class HistoryRecord {
     }
 
     @SneakyThrows(IOException.class)
-    public static HistoryRecord parse(final byte[] record) {
+    public static HistoryTimeSeriesRecord parse(final byte[] record) {
         InputStream inputStream = new ByteArrayInputStream(record, 0, record.length);
         return SERIALIZER.deserialize(inputStream);
     }
 
-    public static class HistoryRecordBuilder implements ObjectBuilder<HistoryRecord> {
+    public static class HistoryTimeSeriesRecordBuilder implements ObjectBuilder<HistoryTimeSeriesRecord> {
 
     }
 }

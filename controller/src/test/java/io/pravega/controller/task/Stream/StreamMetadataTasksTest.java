@@ -50,7 +50,6 @@ import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
-import io.pravega.controller.store.stream.tables.StreamCutRecord;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 import io.pravega.controller.store.task.TaskMetadataStore;
 import io.pravega.controller.store.task.TaskStoreFactory;

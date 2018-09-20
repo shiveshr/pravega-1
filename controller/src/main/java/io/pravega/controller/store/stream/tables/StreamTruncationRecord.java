@@ -13,6 +13,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.pravega.common.ObjectBuilder;
+import io.pravega.controller.store.stream.Segment;
 import io.pravega.controller.store.stream.tables.serializers.StreamTruncationRecordSerializer;
 import lombok.Builder;
 import lombok.Data;
@@ -56,7 +57,8 @@ public class StreamTruncationRecord  {
      * applied on it to find segments that are available for consumption.
      * Refer to TableHelper.getActiveSegmentsAt
      */
-    private final ImmutableMap<Long, Integer> cutEpochMap;
+    private final ImmutableMap<Segment, Integer> cutEpochMap;
+
     /**
      * All segments that have been deleted for this stream so far.
      */
@@ -71,11 +73,8 @@ public class StreamTruncationRecord  {
     private final boolean updating;
 
     @Builder
-    public StreamTruncationRecord(Map<Long, Long> streamCut,
-                                  Map<Long, Integer> cutEpochMap,
-                                  Set<Long> deletedSegments,
-                                  Set<Long> toDelete,
-                                  boolean updating) {
+    public StreamTruncationRecord(Map<Long, Long> streamCut, Map<Segment, Integer> cutEpochMap,
+                                  Set<Long> deletedSegments, Set<Long> toDelete, boolean updating) {
         this.streamCut = ImmutableMap.copyOf(streamCut);
         this.cutEpochMap = ImmutableMap.copyOf(cutEpochMap);
         this.deletedSegments = ImmutableSet.copyOf(deletedSegments);
@@ -95,7 +94,7 @@ public class StreamTruncationRecord  {
         return streamCut;
     }
 
-    public ImmutableMap<Long, Integer> getCutEpochMap() {
+    public ImmutableMap<Segment, Integer> getCutEpochMap() {
         return cutEpochMap;
     }
 
