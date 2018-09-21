@@ -168,14 +168,10 @@ public abstract class PersistentStreamBase<T> implements Stream {
         return createRetentionSetData(new Data<>(set.toByteArray(), 0));
     }
 
-    protected abstract CompletableFuture<Void> createRetentionSetData(Data<Integer> data);
-
     private CompletableFuture<Void> createSegmentSealedChunk(int shardNumber) {
         SealedSegmentsMapShard shard = new SealedSegmentsMapShard(shardNumber, Collections.emptyMap());
         return createSegmentSealedChunkData(shardNumber, shard.toByteArray());
     }
-
-    protected abstract CompletableFuture<Void> createSegmentSealedChunkData(int shardNumber, byte[] data);
 
     CompletableFuture<Void> createHistoryTimeSeriesChunk(int chunkNumber, HistoryTimeSeriesRecord epoch) {
         HistoryTimeSeries timeSeries = HistoryTimeSeries.builder().build();
@@ -196,20 +192,70 @@ public abstract class PersistentStreamBase<T> implements Stream {
                 });
     }
 
-    protected abstract CompletableFuture<Void> createHistoryLeaf(int leafChunkNumber, byte[] data);
-
-    protected abstract CompletableFuture<Void> createHistoryIndexRoot(byte[] data);
-    protected abstract CompletableFuture<Void> createHistoryTimeSeriesChunkData(int chunkNumber, byte[] data);
-
-    abstract CompletableFuture<Void> createCurrentEpochRecordData(byte[] data);
-    abstract CompletableFuture<Void> updateCurrentEpochRecordData(Data<T> data);
-    abstract CompletableFuture<Data<T>> getCurrentEpochRecordData();
-
     @Override
     public CompletableFuture<Void> delete() {
         return deleteStream();
     }
     // endregion
+
+    @Override
+    public CompletableFuture<Void> startTruncation(final Map<Long, Long> streamCut) {
+        return computeEpochCutMap(streamCut)
+                .thenCompose(epochCutMap -> getTruncationData(true)
+                        .thenCompose(truncationData -> {
+                            Preconditions.checkNotNull(truncationData);
+                            StreamTruncationRecord previous = StreamTruncationRecord.parse(truncationData.getData());
+                            Exceptions.checkArgument(!previous.isUpdating(), "TruncationRecord", "Truncation record conflict");
+
+                            // check greater than
+                            Exceptions.checkArgument(epochCutMap.keySet().stream().allMatch(x ->
+                                            previous.getCutEpochMap().keySet().stream().noneMatch(y -> y.overlaps(x) && y.segmentId() > x.segmentId())),
+                                    "StreamCut", "Greater than previous truncation point");
+
+                            return computeTruncationRecord(previous, streamCut, epochCutMap)
+                                    .thenCompose(prop -> setTruncationData(new Data<>(prop.toByteArray(), truncationData.getVersion())));
+                        }));
+
+    }
+
+    private CompletableFuture<StreamTruncationRecord> computeTruncationRecord(StreamTruncationRecord previous,
+                                                                              Map<Long, Long> streamCut,
+                                                                              Map<Segment, Integer> epochCutMap) {
+        log.debug("computing truncation for stream {}/{}", scope, name);
+        // compute segments to delete between previous and streamcut.
+
+        // find segments between "previous" stream cut and current stream cut. these are segments to delete.
+        // Note: exclude segments in current streamcut
+        return segmentsBetweenStreamCuts(previous.getCutEpochMap(), epochCutMap)
+                .thenApply(segmentsBetween -> {
+                    // toDelete =
+                    // all segments in between
+                    // all segments from previous that are not present in streamCut
+                    List<Long> toDelete = segmentsBetween.stream().filter(x -> !streamCut.containsKey(x))
+                            .map(Segment::segmentId).collect(Collectors.toList());
+
+                    return new StreamTruncationRecord(ImmutableMap.copyOf(streamCut), ImmutableMap.copyOf(epochCutMap),
+                            previous.getDeletedSegments(), ImmutableSet.copyOf(toDelete), true);
+                });
+    }
+
+    @Override
+    public CompletableFuture<Void> completeTruncation() {
+        return checkState(state -> state.equals(State.TRUNCATING))
+            .thenCompose(v -> getTruncationData(true)
+                .thenCompose(truncationData -> {
+                    Preconditions.checkNotNull(truncationData);
+                    StreamTruncationRecord current = StreamTruncationRecord.parse(truncationData.getData());
+                    if (current.isUpdating()) {
+                        StreamTruncationRecord completedProp = StreamTruncationRecord.complete(current);
+
+                        return setTruncationData(new Data<>(completedProp.toByteArray(), truncationData.getVersion()));
+                    } else {
+                        // idempotent
+                        return CompletableFuture.completedFuture(null);
+                    }
+                }));
+    }
 
     @Override
     public CompletableFuture<Boolean> updateState(final State state) {
@@ -287,70 +333,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
     public CompletableFuture<StreamConfigurationRecord> getConfigurationRecord(boolean ignoreCached) {
         return getConfigurationData(ignoreCached)
                 .thenApply(data -> StreamConfigurationRecord.parse(data.getData()));
-    }
-
-    @Override
-    public CompletableFuture<Void> startTruncation(final Map<Long, Long> streamCut) {
-        return computeEpochCutMap(streamCut)
-            .thenCompose(epochCutMap -> getTruncationData(true)
-                .thenCompose(truncationData -> {
-                    Preconditions.checkNotNull(truncationData);
-                    StreamTruncationRecord previous = StreamTruncationRecord.parse(truncationData.getData());
-                    Exceptions.checkArgument(!previous.isUpdating(), "TruncationRecord", "Truncation record conflict");
-
-                    // check greater than
-                    Exceptions.checkArgument(epochCutMap.keySet().stream().allMatch(x ->
-                            previous.getCutEpochMap().keySet().stream().noneMatch(y -> y.overlaps(x) && y.segmentId() > x.segmentId())),
-                            "StreamCut", "Greater than previous truncation point");
-
-                    return computeTruncationRecord(previous, streamCut, epochCutMap)
-                            .thenCompose(prop -> setTruncationData(new Data<>(prop.toByteArray(), truncationData.getVersion())));
-                }));
-
-    }
-
-    private CompletableFuture<StreamTruncationRecord> computeTruncationRecord(StreamTruncationRecord previous,
-                                                                              Map<Long, Long> streamCut,
-                                                                              Map<Segment, Integer> epochCutMap) {
-        log.debug("computing truncation for stream {}/{}", scope, name);
-        // compute segments to delete between previous and streamcut.
-
-        // find segments between "previous" stream cut and current stream cut. these are segments to delete.
-        // Note: exclude segments in current streamcut
-        return segmentsBetweenStreamCuts(previous.getCutEpochMap(), epochCutMap)
-                .thenApply(segmentsBetween -> {
-                    // toDelete =
-                    // all segments in between
-                    // all segments from previous that are not present in streamCut
-                    List<Long> toDelete = segmentsBetween.stream().filter(x -> !streamCut.containsKey(x))
-                            .map(Segment::segmentId).collect(Collectors.toList());
-
-                    return new StreamTruncationRecord(ImmutableMap.copyOf(streamCut), ImmutableMap.copyOf(epochCutMap),
-                            previous.getDeletedSegments(), ImmutableSet.copyOf(toDelete), true);
-                });
-    }
-
-    private Map<Segment, Long> transform(Map<Long, Long> streamCut, Map<Segment, Integer> cutEpochMap) {
-        return streamCut.entrySet().stream().collect(Collectors.toMap(x -> cutEpochMap.keySet().stream()
-                        .filter(y -> y.segmentId() == x.getKey()).findAny().get(), Map.Entry::getValue));
-    }
-
-    @Override
-    public CompletableFuture<Void> completeTruncation() {
-        return checkState(state -> state.equals(State.TRUNCATING))
-                .thenCompose(v -> getTruncationData(true)
-                        .thenCompose(truncationData -> {
-                            Preconditions.checkNotNull(truncationData);
-                            StreamTruncationRecord current = StreamTruncationRecord.parse(truncationData.getData());
-                            if (current.isUpdating()) {
-                                StreamTruncationRecord completedProp = StreamTruncationRecord.complete(current);
-
-                                return setTruncationData(new Data<>(completedProp.toByteArray(), truncationData.getVersion()));
-                            } else {
-                                // idempotent
-                                return CompletableFuture.completedFuture(null);
-                            }
-                        }));
     }
 
     @Override
@@ -444,8 +426,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
                 .thenApply(x -> HistoryTimeSeries.parse(x.getData()));
     }
 
-    protected abstract CompletableFuture<Data<T>> getHistoryTimeSeriesChunkData(int chunkNumber);
-
     private List<ScaleMetadata> mapToScaleMetadata(List<HistoryRecord> historyRecords) {
         final AtomicReference<List<Segment>> previous = new AtomicReference<>();
         return historyRecords.stream()
@@ -516,8 +496,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
         return getSegmentSealedRecordData(segmentId).thenApply(x -> BitConverter.readInt(x.getData(), 0));
     }
 
-    protected abstract CompletableFuture<Data<T>> getSegmentSealedRecordData(long segmentId);
-
     @Override
     public CompletableFuture<List<Segment>> getActiveSegments() {
         // read current epoch record
@@ -555,13 +533,9 @@ public abstract class PersistentStreamBase<T> implements Stream {
         return getHistoryIndexLeafData(leaf).thenApply(x -> HistoryIndexLeaf.parse(x.getData()));
     }
 
-    protected abstract CompletableFuture<Data<T>> getHistoryIndexLeafData(int leaf);
-
     private CompletableFuture<HistoryIndexRootNode> getHistoryIndexRootNode() {
         return getHistoryIndexRootNodeData().thenApply(x -> HistoryIndexRootNode.parse(x.getData()));
     }
-
-    protected abstract CompletableFuture<Data<T>> getHistoryIndexRootNodeData();
 
     @Override
     public CompletableFuture<List<Segment>> getSegmentsInEpoch(final int epoch) {
@@ -772,7 +746,7 @@ public abstract class PersistentStreamBase<T> implements Stream {
                     .thenCompose(indexRootData -> {
                         HistoryIndexRootNode indexRoot = HistoryIndexRootNode.parse(indexRootData.getData());
                         HistoryIndexRootNode update = HistoryIndexRootNode.addNewLeaf(indexRoot, indexRecord.getTime());
-                        return updateHistoryIndexData(new Data<>(update.toByteArray(), indexRootData.getVersion()));
+                        return updateHistoryIndexRootData(new Data<>(update.toByteArray(), indexRootData.getVersion()));
                     })
                     .thenCompose(v -> {
                         HistoryIndexLeaf historyIndexLeaf = new HistoryIndexLeaf(Lists.newArrayList(indexRecord));
@@ -789,7 +763,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
 
     }
 
-    protected abstract CompletableFuture<Void> updateHistoryLeafData(Data<T> tData);
 
     private CompletableFuture<Void> updateHistoryTimeSeries(HistoryTimeSeriesRecord record) {
         int historyChunk = record.getEpoch() / HISTORY_CHUNK_SIZE;
@@ -807,13 +780,9 @@ public abstract class PersistentStreamBase<T> implements Stream {
         }
     }
 
-    protected abstract CompletionStage<Void> updateHistoryTimeSeriesChunkData(int historyChunk, Data<T> tData);
-
     private CompletableFuture<Void> createEpochRecord(HistoryRecord epoch) {
         return createEpochRecordData(new Data<>(epoch.toByteArray(), 0));
     }
-
-    protected abstract CompletableFuture<Void> createEpochRecordData(Data<Integer> data);
 
     private CompletableFuture<EpochTransitionRecord> migrateManualScaleToNewEpoch(Data<T> epochTransitionData) {
         EpochTransitionRecord epochTransition = EpochTransitionRecord.parse(epochTransitionData.getData());
@@ -873,8 +842,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
         return createSealedSegmentRecordData(segmentToSeal, array);
     }
 
-    protected abstract CompletableFuture<Void> createSealedSegmentRecordData(long segmentToSeal, byte[] data);
-
     private CompletableFuture<Void> clearMarkers(final Set<Long> segments) {
         return Futures.toVoid(Futures.allOfWithResults(segments.stream().parallel()
                 .map(this::removeColdMarker).collect(Collectors.toList())));
@@ -917,10 +884,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
                     }));
         }).collect(Collectors.toList()));
     }
-
-    protected abstract CompletableFuture<Void> updateSealedSegmentSizesShardData(Data<T> data);
-
-    abstract CompletableFuture<Data<T>> getSealedSegmentShardData(int shard);
 
     @Override
     public CompletableFuture<Void> rollingTxnNewSegmentsCreated(Map<Long, Long> sealedTxnEpochSegments, int transactionEpoch, long time) {
@@ -1234,8 +1197,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
         return getEpochRecordData().thenApply(epochRecordData -> HistoryRecord.parse(epochRecordData.getData()));
     }
 
-    protected abstract CompletableFuture<Data<T>> getEpochRecordData();
-
     @Override
     public CompletableFuture<Void> setColdMarker(long segmentId, long timestamp) {
         return verifyLegalState().thenCompose(v -> getMarkerData(segmentId)).thenCompose(x -> {
@@ -1313,10 +1274,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
                 });
     }
 
-    protected abstract CompletableFuture<Void> createStreamCutRecord(Data<T> tData);
-
-    protected abstract CompletableFuture<Void> updateRetentionSetData(Data<T> tData);
-
     @Override
     public CompletableFuture<RetentionSet> getRetentionSet() {
         return getRetentionSetData()
@@ -1334,10 +1291,6 @@ public abstract class PersistentStreamBase<T> implements Stream {
                             .thenCompose(x -> updateRetentionSetData(new Data<>(update.toByteArray(), data.getVersion())));
                 });
     }
-
-    protected abstract CompletableFuture<Void> deleteStreamCutRecordData(long recordingTime);
-
-    protected abstract CompletableFuture<Data<T>> getRetentionSetData();
 
     @Override
     public CompletableFuture<Void> createCommittingTransactionsRecord(final int epoch, final List<UUID> txnsToCommit) {
@@ -1437,14 +1390,14 @@ public abstract class PersistentStreamBase<T> implements Stream {
         return HistoryRecord.builder().epoch(epoch).referenceEpoch(referenceEpoch).segments(segments).creationTime(time).build();
     }
 
-    protected int getTransactionEpoch(UUID txId) {
+    int getTransactionEpoch(UUID txId) {
         // epoch == UUID.msb >> 32
         return TableHelper.getTransactionEpoch(txId);
     }
 
+    abstract CompletableFuture<CreateStreamResponse> checkStreamExists(final StreamConfiguration configuration,
+                                                                       final long creationTime, final int startingSegmentNumber);
     abstract CompletableFuture<Void> deleteStream();
-
-    abstract CompletableFuture<CreateStreamResponse> checkStreamExists(final StreamConfiguration configuration, final long creationTime, final int startingSegmentNumber);
 
     abstract CompletableFuture<Void> createConfigurationIfAbsent(final StreamConfigurationRecord configuration);
 
@@ -1464,11 +1417,43 @@ public abstract class PersistentStreamBase<T> implements Stream {
 
     abstract CompletableFuture<Data<T>> getStateData(boolean ignoreCached);
 
-    abstract CompletableFuture<Data<T>> getHistoryIndexData();
+    abstract CompletableFuture<Void> createRetentionSetData(Data<Integer> data);
 
-    abstract CompletableFuture<Data<T>> getHistoryIndexFromStore();
+    abstract CompletableFuture<Void> createSegmentSealedChunkData(int shardNumber, byte[] data);
 
-    abstract CompletableFuture<Void> updateHistoryIndexData(final Data<T> updated);
+    abstract CompletableFuture<Void> createHistoryLeaf(int leafChunkNumber, byte[] data);
+
+    abstract CompletableFuture<Void> createHistoryIndexRoot(byte[] data);
+    abstract CompletableFuture<Void> createHistoryTimeSeriesChunkData(int chunkNumber, byte[] data);
+
+    abstract CompletableFuture<Void> createCurrentEpochRecordData(byte[] data);
+    abstract CompletableFuture<Void> updateCurrentEpochRecordData(Data<T> data);
+    abstract CompletableFuture<Data<T>> getCurrentEpochRecordData();
+
+    abstract CompletableFuture<Data<T>> getHistoryTimeSeriesChunkData(int chunkNumber);
+
+    abstract CompletableFuture<Data<T>> getSegmentSealedRecordData(long segmentId);
+
+    abstract CompletableFuture<Data<T>> getHistoryIndexLeafData(int leaf);
+    abstract CompletableFuture<Data<T>> getHistoryIndexRootNodeData();
+    abstract CompletableFuture<Void> updateHistoryIndexRootData(final Data<T> updated);
+
+    abstract CompletableFuture<Void> updateHistoryLeafData(Data<T> tData);
+    abstract CompletionStage<Void> updateHistoryTimeSeriesChunkData(int historyChunk, Data<T> tData);
+    abstract CompletableFuture<Void> createEpochRecordData(Data<Integer> data);
+    abstract CompletableFuture<Void> createSealedSegmentRecordData(long segmentToSeal, byte[] data);
+    abstract CompletableFuture<Void> updateSealedSegmentSizesShardData(Data<T> data);
+
+    abstract CompletableFuture<Data<T>> getSealedSegmentShardData(int shard);
+    abstract CompletableFuture<Data<T>> getEpochRecordData();
+
+    abstract CompletableFuture<Void> createStreamCutRecord(Data<T> tData);
+
+    abstract CompletableFuture<Void> updateRetentionSetData(Data<T> tData);
+
+    abstract CompletableFuture<Void> deleteStreamCutRecordData(long recordingTime);
+
+    abstract CompletableFuture<Data<T>> getRetentionSetData();
 
     abstract CompletableFuture<Void> createNewTransaction(final UUID txId,
                                                              final long timestamp,

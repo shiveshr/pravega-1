@@ -217,7 +217,7 @@ public class StreamMetadataTasks extends TaskBase {
         return streamMetadataStore.getRetentionSet(scope, stream, context, executor)
                 .thenCompose(retentionSet -> {
                     // retention set contains (time, size) mapping
-                    RetentionSetRecord latestRetentionRecord = retentionSet.getRetentionRecords().get(retentionSet.getRetentionRecords().size() - 1);
+                    RetentionSetRecord latestRetentionRecord = retentionSet.getLatest();
                     return checkGenerateStreamCut(scope, stream, context, latestRetentionRecord, recordingTime, delegationToken)
                             .thenCompose(newRecord -> truncate(scope, stream, policy, context, retentionSet, newRecord, recordingTime));
                 })
@@ -251,7 +251,7 @@ public class StreamMetadataTasks extends TaskBase {
                             return startTruncation(scope, stream, streamCut, context)
                             .thenCompose(started -> {
                                 if (started) {
-                                    return streamMetadataStore.deleteFromRetentionSetBefore(scope, stream, record.getRecordingTime(), context, executor);
+                                    return streamMetadataStore.deleteFromRetentionSetBefore(scope, stream, record, context, executor);
                                 } else {
                                     throw new RuntimeException("Could not start truncation");
                                 }
@@ -308,7 +308,8 @@ public class StreamMetadataTasks extends TaskBase {
                         .collect(Collectors.toMap(x -> x, x -> getSegmentOffset(scope, stream, x.segmentId(), delegationToken)))))
                 .thenCompose(map -> {
                     final long generationTime = System.currentTimeMillis();
-                    return streamMetadataStore.getSizeTillStreamCut(scope, stream, map, Optional.ofNullable(previous), context, executor)
+                    return streamMetadataStore.getSizeTillStreamCut(scope, stream, map.entrySet().stream()
+                            .collect(Collectors.toMap(x -> x.getKey().segmentId(), Map.Entry::getValue)), Optional.ofNullable(previous), context, executor)
                             .thenApply(sizeTill -> new StreamCutRecord(generationTime, sizeTill, ImmutableMap.copyOf(map)));
                 });
     }

@@ -350,7 +350,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                     }, executor).thenApplyAsync(v -> {
                         List<Segment> segments = segmentsFuture.join().stream().map(x -> {
                             long generalizedSegmentId = TableHelper.generalizedSegmentId(x.segmentId(), txnId);
-                            return new Segment(generalizedSegmentId, x.getKeyStart(), x.getKeyEnd());
+                            return new Segment(generalizedSegmentId, x.getStart(), x.getKeyStart(), x.getKeyEnd());
                         }).collect(Collectors.toList());
 
                         return new ImmutablePair<>(txnFuture.join(), segments);

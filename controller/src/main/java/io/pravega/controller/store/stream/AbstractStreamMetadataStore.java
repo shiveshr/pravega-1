@@ -472,7 +472,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<Long> getSizeTillStreamCut(final String scope, final String name, final Map<Segment, Long> streamCut,
+    public CompletableFuture<Long> getSizeTillStreamCut(final String scope, final String name, final Map<Long, Long> streamCut,
                                                         final Optional<StreamCutRecord> reference,
                                                         final OperationContext context, final ScheduledExecutorService executor) {
         Stream stream = getStream(scope, name, context);
