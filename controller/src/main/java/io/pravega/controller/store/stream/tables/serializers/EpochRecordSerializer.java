@@ -12,14 +12,13 @@ package io.pravega.controller.store.stream.tables.serializers;
 import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
-import io.pravega.controller.store.stream.tables.HistoryRecord;
+import io.pravega.controller.store.stream.tables.EpochRecord;
+import io.pravega.controller.store.stream.tables.SegmentRecord;
 
-import java.io.DataInput;
-import java.io.DataOutput;
 import java.io.IOException;
 import java.util.ArrayList;
 
-public class HistoryRecordSerializer extends VersionedSerializer.WithBuilder<HistoryRecord, HistoryRecord.HistoryRecordBuilder> {
+public class EpochRecordSerializer extends VersionedSerializer.WithBuilder<EpochRecord, EpochRecord.EpochRecordBuilder> {
     @Override
     protected byte getWriteVersion() {
         return 0;
@@ -30,22 +29,22 @@ public class HistoryRecordSerializer extends VersionedSerializer.WithBuilder<His
         version(0).revision(0, this::write00, this::read00);
     }
 
-    private void read00(RevisionDataInput revisionDataInput, HistoryRecord.HistoryRecordBuilder builder) throws IOException {
+    private void read00(RevisionDataInput revisionDataInput, EpochRecord.EpochRecordBuilder builder) throws IOException {
         builder.epoch(revisionDataInput.readInt())
                 .referenceEpoch(revisionDataInput.readInt())
-                .segments(revisionDataInput.readCollection(DataInput::readLong, ArrayList::new))
+                .segments(revisionDataInput.readCollection(SegmentRecord.SERIALIZER::deserialize, ArrayList::new))
                 .creationTime(revisionDataInput.readLong());
     }
 
-    private void write00(HistoryRecord history, RevisionDataOutput revisionDataOutput) throws IOException {
+    private void write00(EpochRecord history, RevisionDataOutput revisionDataOutput) throws IOException {
         revisionDataOutput.writeInt(history.getEpoch());
         revisionDataOutput.writeInt(history.getReferenceEpoch());
-        revisionDataOutput.writeCollection(history.getSegments(), DataOutput::writeLong);
-        revisionDataOutput.writeLong(history.getScaleTime());
+        revisionDataOutput.writeCollection(history.getSegments(), SegmentRecord.SERIALIZER::serialize);
+        revisionDataOutput.writeLong(history.getCreationTime());
     }
 
     @Override
-    protected HistoryRecord.HistoryRecordBuilder newBuilder() {
-        return HistoryRecord.builder();
+    protected EpochRecord.EpochRecordBuilder newBuilder() {
+        return EpochRecord.builder();
     }
 }

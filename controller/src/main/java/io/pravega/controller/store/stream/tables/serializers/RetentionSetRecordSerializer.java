@@ -18,8 +18,8 @@ import io.pravega.controller.store.stream.tables.RetentionSetRecord;
 import java.io.IOException;
 import java.util.ArrayList;
 
-public class RetentionSetSerializer
-        extends VersionedSerializer.WithBuilder<RetentionSet, RetentionSet.RetentionSetBuilder> {
+public class RetentionSetRecordSerializer
+        extends VersionedSerializer.WithBuilder<RetentionSetRecord, RetentionSetRecord.RetentionSetRecordBuilder> {
     @Override
     protected byte getWriteVersion() {
         return 0;
@@ -30,18 +30,19 @@ public class RetentionSetSerializer
         version(0).revision(0, this::write00, this::read00);
     }
 
-    private void read00(RevisionDataInput revisionDataInput, RetentionSet.RetentionSetBuilder retentionRecordBuilder)
+    private void read00(RevisionDataInput revisionDataInput, RetentionSetRecord.RetentionSetRecordBuilder retentionRecordBuilder)
             throws IOException {
-        retentionRecordBuilder.retentionRecords(revisionDataInput.readCollection(RetentionSetRecord.SERIALIZER::deserialize,
-                ArrayList::new));
+        retentionRecordBuilder.recordingSize(revisionDataInput.readLong());
+        retentionRecordBuilder.recordingTime(revisionDataInput.readLong());
     }
 
-    private void write00(RetentionSet retentionRecord, RevisionDataOutput revisionDataOutput) throws IOException {
-        revisionDataOutput.writeCollection(retentionRecord.getRetentionRecords(), RetentionSetRecord.SERIALIZER::serialize);
+    private void write00(RetentionSetRecord retentionRecord, RevisionDataOutput revisionDataOutput) throws IOException {
+        revisionDataOutput.writeLong(retentionRecord.getRecordingSize());
+        revisionDataOutput.writeLong(retentionRecord.getRecordingTime());
     }
 
     @Override
-    protected RetentionSet.RetentionSetBuilder newBuilder() {
-        return RetentionSet.builder();
+    protected RetentionSetRecord.RetentionSetRecordBuilder newBuilder() {
+        return RetentionSetRecord.builder();
     }
 }

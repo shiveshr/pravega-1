@@ -13,6 +13,7 @@ import com.google.common.collect.ImmutableList;
 import io.pravega.common.ObjectBuilder;
 import io.pravega.common.util.ArrayView;
 import io.pravega.controller.store.stream.Segment;
+import io.pravega.controller.store.stream.tables.serializers.HistoryTimeSeriesRecordSerializer;
 import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
@@ -46,16 +47,16 @@ public class HistoryTimeSeriesRecord {
      * Note: secondary id is optional and 0 value will signify its absence.
      */
     @Getter
-    private final ImmutableList<Segment> segmentsSealed;
+    private final List<SegmentRecord> segmentsSealed;
 
     @Getter
-    private final ImmutableList<Segment> segmentsCreated;
+    private final List<SegmentRecord> segmentsCreated;
 
     @Getter
     private final long scaleTime;
 
     @Builder
-    HistoryTimeSeriesRecord(int epoch, int referenceEpoch, List<Segment> segmentsSealed, List<Segment> segmentsCreated,
+    HistoryTimeSeriesRecord(int epoch, int referenceEpoch, List<SegmentRecord> segmentsSealed, List<SegmentRecord> segmentsCreated,
                             long creationTime) {
         this.epoch = epoch;
         this.referenceEpoch = referenceEpoch;
@@ -65,7 +66,7 @@ public class HistoryTimeSeriesRecord {
     }
 
     @Builder
-    HistoryTimeSeriesRecord(int epoch, List<Segment> segmentsSealed, List<Segment> segmentsCreated, long creationTime) {
+    HistoryTimeSeriesRecord(int epoch, List<SegmentRecord> segmentsSealed, List<SegmentRecord> segmentsCreated, long creationTime) {
         this(epoch, epoch, segmentsSealed, segmentsCreated, creationTime);
     }
 

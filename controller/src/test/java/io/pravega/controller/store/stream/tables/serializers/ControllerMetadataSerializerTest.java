@@ -19,10 +19,14 @@ import io.pravega.controller.store.stream.TxnStatus;
 import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
 import io.pravega.controller.store.stream.tables.CompletedTxnRecord;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
-import io.pravega.controller.store.stream.tables.HistoryRecord;
+import io.pravega.controller.store.stream.tables.EpochRecord;
+import io.pravega.controller.store.stream.tables.RetentionSet;
+import io.pravega.controller.store.stream.tables.RetentionSetRecord;
+import io.pravega.controller.store.stream.tables.SegmentRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StateRecord;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
+import io.pravega.controller.store.stream.tables.StreamCutRecord;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 import org.junit.Test;
 
@@ -40,7 +44,7 @@ public class ControllerMetadataSerializerTest {
 
     @Test
     public void streamCutRecordTest() throws IOException {
-        Map<Long, Long> streamcut = new HashMap<>();
+        Map<SegmentRecord, Long> streamcut = new HashMap<>();
         streamcut.put(0L, 1L);
         streamcut.put(1L, 1L);
         StreamCutRecord record = new StreamCutRecord(1L, 1L, streamcut);
@@ -51,15 +55,15 @@ public class ControllerMetadataSerializerTest {
 
     @Test
     public void retentionRecordTest() throws IOException {
-        Map<Long, Long> map = new HashMap<>();
+        Map<SegmentRecord, Long> map = new HashMap<>();
         map.put(0L, 1L);
         map.put(1L, 1L);
         StreamCutRecord s1 = new StreamCutRecord(1L, 1L, map);
         StreamCutRecord s2 = new StreamCutRecord(1L, 1L, map);
         List<StreamCutRecord> streamCuts = Lists.newArrayList(s1, s2);
-        RetentionRecord record = RetentionRecord.builder().streamCuts(streamCuts).build();
-        byte[] serialized = RetentionRecord.SERIALIZER.serialize(record).array();
-        RetentionRecord deserialized = RetentionRecord.SERIALIZER.deserialize(serialized);
+        RetentionSet record = RetentionSet.builder().retentionRecords(streamCuts).build();
+        byte[] serialized = RetentionSet.SERIALIZER.serialize(record).array();
+        RetentionSet deserialized = RetentionSet.SERIALIZER.deserialize(serialized);
         assertEquals(record, deserialized);
     }
 
@@ -91,7 +95,7 @@ public class ControllerMetadataSerializerTest {
         streamCut.put(2L, 1L);
         streamCut.put(3L, 1L);
 
-        ImmutableMap<Long, Integer> epochMap = ImmutableMap.copyOf(new HashMap<>());
+        ImmutableMap<SegmentRecord, Integer> epochMap = ImmutableMap.copyOf(new HashMap<>());
         ImmutableSet<Long> deleted = ImmutableSet.copyOf(new HashSet<>());
         StreamTruncationRecord record = StreamTruncationRecord.builder().cutEpochMap(epochMap)
                 .streamCut(ImmutableMap.copyOf(streamCut))
@@ -134,7 +138,7 @@ public class ControllerMetadataSerializerTest {
 
     @Test
     public void segmentRecordTest() throws IOException {
-        SegmentRecord record = SegmentRecord.builder().creationEpoch(0).routingKeyEnd(0.0).routingKeyEnd(0.1).startTime(1L).segmentNumber(1).build();
+        SegmentRecord record = SegmentRecord.newSegmentRecord(1, 0, 1L, 0.0, 1.0);
         byte[] serialized = SegmentRecord.SERIALIZER.serialize(record).array();
         SegmentRecord deserialized = SegmentRecord.SERIALIZER.deserialize(serialized);
         assertEquals(record, deserialized);
@@ -142,10 +146,10 @@ public class ControllerMetadataSerializerTest {
 
     @Test
     public void historyRecordTest() throws IOException {
-        List<Long> segments = Lists.newArrayList(1L, 2L, 3L);
-        HistoryRecord record = HistoryRecord.builder().epoch(0).creationTime(System.currentTimeMillis()).segments(segments).build();
-        byte[] serialized = HistoryRecord.SERIALIZER.serialize(record).array();
-        HistoryRecord deserialized = HistoryRecord.SERIALIZER.deserialize(serialized);
+        List<SegmentRecord> segments = Lists.newArrayList(1L, 2L, 3L);
+        EpochRecord record = EpochRecord.builder().epoch(0).creationTime(System.currentTimeMillis()).segments(segments).build();
+        byte[] serialized = EpochRecord.SERIALIZER.serialize(record).array();
+        EpochRecord deserialized = EpochRecord.SERIALIZER.deserialize(serialized);
         assertEquals(record, deserialized);
     }
 

@@ -154,7 +154,7 @@ public class ControllerService {
         Exceptions.checkNotNullOrEmpty(stream, "stream");
 
         // First fetch segments active at specified timestamp from the specified stream.
-        return streamStore.getActiveSegments(scope, stream, timestamp, null, executor).thenApply(segments -> {
+        return streamStore.getSegmentsAtTime(scope, stream, timestamp, null, executor).thenApply(segments -> {
             return segments.entrySet().stream()
                            .collect(Collectors.toMap(entry -> ModelHelper.createSegmentId(scope, stream, entry.getKey().segmentId()),
                                    Map.Entry::getValue));

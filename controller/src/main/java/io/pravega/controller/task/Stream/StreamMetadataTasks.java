@@ -11,7 +11,6 @@ package io.pravega.controller.task.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
 import io.pravega.client.ClientFactory;
 import io.pravega.client.netty.impl.ConnectionFactory;
 import io.pravega.client.stream.EventStreamWriter;
@@ -35,6 +34,7 @@ import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.tables.RetentionSet;
 import io.pravega.controller.store.stream.tables.RetentionSetRecord;
+import io.pravega.controller.store.stream.tables.SegmentRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
 import io.pravega.controller.store.task.Resource;
@@ -270,7 +270,7 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     private Optional<RetentionSetRecord> findTruncationRecord(RetentionPolicy policy, RetentionSet retentionSet,
-                                                           StreamCutRecord newRecord, long recordingTime) {
+                                                              StreamCutRecord newRecord, long recordingTime) {
         switch (policy.getRetentionType()) {
             case TIME:
                 return retentionSet.getRetentionRecords().stream().filter(x -> x.getRecordingTime() < recordingTime - policy.getRetentionParam())
@@ -308,10 +308,18 @@ public class StreamMetadataTasks extends TaskBase {
                         .collect(Collectors.toMap(x -> x, x -> getSegmentOffset(scope, stream, x.segmentId(), delegationToken)))))
                 .thenCompose(map -> {
                     final long generationTime = System.currentTimeMillis();
-                    return streamMetadataStore.getSizeTillStreamCut(scope, stream, map.entrySet().stream()
-                            .collect(Collectors.toMap(x -> x.getKey().segmentId(), Map.Entry::getValue)), Optional.ofNullable(previous), context, executor)
-                            .thenApply(sizeTill -> new StreamCutRecord(generationTime, sizeTill, ImmutableMap.copyOf(map)));
+                    final Map<SegmentRecord, Long> transformedMap = map.entrySet().stream()
+                            .collect(Collectors.toMap(x -> transform(x.getKey()), Map.Entry::getValue));
+                    Map<Long, Long> streamCut = map.entrySet().stream()
+                            .collect(Collectors.toMap(x -> x.getKey().segmentId(), Map.Entry::getValue));
+                    return streamMetadataStore.getSizeTillStreamCut(scope, stream, streamCut, Optional.ofNullable(previous), context, executor)
+                            .thenApply(sizeTill -> new StreamCutRecord(generationTime, sizeTill, transformedMap));
                 });
+    }
+
+    private SegmentRecord transform(Segment segment) {
+        return SegmentRecord.builder().creationEpoch(segment.getEpoch()).segmentNumber(segment.getNumber()).creationTime(segment.getStart())
+                .keyStart(segment.getKeyStart()).keyEnd(segment.getKeyEnd()).build();
     }
 
     /**
@@ -512,7 +520,7 @@ public class StreamMetadataTasks extends TaskBase {
      */
     public CompletableFuture<ScaleStatusResponse> checkScale(String scope, String stream, int epoch,
                                                                         OperationContext context) {
-        return streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor)
+        return streamMetadataStore.getActiveEpoch(scope, stream, true, context, executor)
                         .handle((activeEpoch, ex) -> {
                             ScaleStatusResponse.Builder response = ScaleStatusResponse.newBuilder();
 

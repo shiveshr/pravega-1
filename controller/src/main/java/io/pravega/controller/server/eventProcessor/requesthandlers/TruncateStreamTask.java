@@ -20,6 +20,7 @@ import io.pravega.shared.controller.event.TruncateStreamEvent;
 import io.pravega.shared.metrics.DynamicLogger;
 import io.pravega.shared.metrics.MetricsProvider;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
@@ -76,12 +77,17 @@ public class TruncateStreamTask implements StreamTask<TruncateStreamEvent> {
     private CompletableFuture<Void> processTruncate(String scope, String stream, StreamTruncationRecord truncationRecord,
                                                     OperationContext context, String delegationToken) {
         log.info("Truncating stream {}/{} at stream cut: {}", scope, stream, truncationRecord.getStreamCut());
-        return Futures.toVoid(streamMetadataStore.setState(scope, stream, State.TRUNCATING, context, executor)
+        CompletableFuture<Void> retVal = Futures.toVoid(streamMetadataStore.setState(scope, stream, State.TRUNCATING, context, executor)
                 .thenCompose(x -> notifyTruncateSegments(scope, stream, truncationRecord.getStreamCut(), delegationToken))
                 .thenCompose(x -> notifyDeleteSegments(scope, stream, truncationRecord.getToDelete(), delegationToken))
-                 .thenAccept(x -> DYNAMIC_LOGGER.reportGaugeValue(nameFromStream(TRUNCATED_SIZE, scope, stream), truncationRecord.getSizeTill()))
-                 .thenCompose(x -> streamMetadataStore.completeTruncation(scope, stream, context, executor))
-                 .thenCompose(x -> streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor)));
+                .thenCompose(x -> streamMetadataStore.completeTruncation(scope, stream, context, executor))
+                .thenCompose(x -> streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor)));
+
+        retVal.thenCompose(x -> streamMetadataStore.getSizeTillStreamCut(scope, stream, truncationRecord.getStreamCut(),
+                Optional.empty(), context, executor))
+                .thenAccept(sizeTill -> DYNAMIC_LOGGER.reportGaugeValue(nameFromStream(TRUNCATED_SIZE, scope, stream), sizeTill));
+
+        return retVal;
     }
 
     private CompletableFuture<Void> notifyDeleteSegments(String scope, String stream, Set<Long> segmentsToDelete, String delegationToken) {

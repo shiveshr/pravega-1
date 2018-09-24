@@ -266,9 +266,8 @@ public class ZkStreamTest {
         EpochTransitionRecord response = store.startScale(SCOPE, streamName, sealedSegments, newRanges, scale1, false, context, executor).get();
         ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> newSegments = response.getNewSegmentsWithRange();
         store.setState(SCOPE, streamName, State.SCALING, null, executor).join();
-        store.scaleCreateNewSegments(SCOPE, streamName, false, context, executor).get();
-        store.scaleNewSegmentsCreated(SCOPE, streamName, context, executor).get();
-        store.scaleSegmentsSealed(SCOPE, streamName, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.scaleCreateNewEpoch(SCOPE, streamName, false, context, executor).get();
+        store.completeScale(SCOPE, streamName, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 context, executor).get();
         store.setState(SCOPE, streamName, State.ACTIVE, null, executor).join();
         segments = store.getActiveSegments(SCOPE, streamName, context, executor).get();
@@ -290,9 +289,8 @@ public class ZkStreamTest {
         response = store.startScale(SCOPE, streamName, sealedSegments1, newRanges, scale2, false, context, executor).get();
         ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> segmentsCreated = response.getNewSegmentsWithRange();
         store.setState(SCOPE, streamName, State.SCALING, null, executor).join();
-        store.scaleCreateNewSegments(SCOPE, streamName, false, context, executor).get();
-        store.scaleNewSegmentsCreated(SCOPE, streamName, context, executor).get();
-        store.scaleSegmentsSealed(SCOPE, streamName, sealedSegments1.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.scaleCreateNewEpoch(SCOPE, streamName, false, context, executor).get();
+        store.completeScale(SCOPE, streamName, sealedSegments1.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 context, executor).get();
         store.setState(SCOPE, streamName, State.ACTIVE, null, executor).join();
 
@@ -315,9 +313,8 @@ public class ZkStreamTest {
         response = store.startScale(SCOPE, streamName, sealedSegments2, newRanges, scale3, false, context, executor).get();
         segmentsCreated = response.getNewSegmentsWithRange();
         store.setState(SCOPE, streamName, State.SCALING, null, executor).join();
-        store.scaleCreateNewSegments(SCOPE, streamName, false, context, executor).get();
-        store.scaleNewSegmentsCreated(SCOPE, streamName, context, executor).get();
-        store.scaleSegmentsSealed(SCOPE, streamName, sealedSegments2.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.scaleCreateNewEpoch(SCOPE, streamName, false, context, executor).get();
+        store.completeScale(SCOPE, streamName, sealedSegments2.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 context, executor).get();
         store.setState(SCOPE, streamName, State.ACTIVE, null, executor).join();
 
@@ -325,7 +322,7 @@ public class ZkStreamTest {
         assertEquals(segments.size(), 5);
         assertTrue(segments.stream().allMatch(x -> Lists.newArrayList(0L, six, nine, ten, eleven).contains(x.segmentId())));
 
-        Map<Long, List<Long>> successors = store.getSuccessors(SCOPE, streamName, 0L, context, executor).get();
+        Map<Segment, List<Long>> successors = store.getSuccessors(SCOPE, streamName, 0L, context, executor).get();
         assertTrue(successors.isEmpty());
         successors = store.getSuccessors(SCOPE, streamName, 1L, context, executor).get();
         assertTrue(successors.size() == 2 &&
@@ -365,32 +362,32 @@ public class ZkStreamTest {
         successors = store.getSuccessors(SCOPE, streamName, eleven, context, executor).get();
         assertTrue(successors.isEmpty());
         // start -1
-        Map<Long, Long> historicalSegments = store.getActiveSegments(SCOPE, streamName, start - 1, context, executor).get();
+        Map<Segment, Long> historicalSegments = store.getSegmentsAtTime(SCOPE, streamName, start - 1, context, executor).get();
         assertEquals(historicalSegments.size(), 5);
         assertTrue(historicalSegments.keySet().containsAll(Lists.newArrayList(0L, 1L, 2L, 3L, 4L)));
 
         // start + 1
-        historicalSegments = store.getActiveSegments(SCOPE, streamName, start + 1, context, executor).get();
+        historicalSegments = store.getSegmentsAtTime(SCOPE, streamName, start + 1, context, executor).get();
         assertEquals(historicalSegments.size(), 5);
         assertTrue(historicalSegments.keySet().containsAll(Lists.newArrayList(0L, 1L, 2L, 3L, 4L)));
 
         // scale1 + 1
-        historicalSegments = store.getActiveSegments(SCOPE, streamName, scale1 + 1000, context, executor).get();
+        historicalSegments = store.getSegmentsAtTime(SCOPE, streamName, scale1 + 1000, context, executor).get();
         assertEquals(historicalSegments.size(), 4);
         assertTrue(historicalSegments.keySet().containsAll(Lists.newArrayList(0L, 1L, 2L, five)));
 
         // scale2 + 1
-        historicalSegments = store.getActiveSegments(SCOPE, streamName, scale2 + 1000, context, executor).get();
+        historicalSegments = store.getSegmentsAtTime(SCOPE, streamName, scale2 + 1000, context, executor).get();
         assertEquals(historicalSegments.size(), 4);
         assertTrue(historicalSegments.keySet().containsAll(Lists.newArrayList(0L, six, seven, eight)));
 
         // scale3 + 1
-        historicalSegments = store.getActiveSegments(SCOPE, streamName, scale3 + 1000, context, executor).get();
+        historicalSegments = store.getSegmentsAtTime(SCOPE, streamName, scale3 + 1000, context, executor).get();
         assertEquals(historicalSegments.size(), 5);
         assertTrue(historicalSegments.keySet().containsAll(Lists.newArrayList(0L, six, nine, ten, eleven)));
 
         // scale 3 + 10000
-        historicalSegments = store.getActiveSegments(SCOPE, streamName, scale3 + 10000, context, executor).get();
+        historicalSegments = store.getSegmentsAtTime(SCOPE, streamName, scale3 + 10000, context, executor).get();
         assertEquals(historicalSegments.size(), 5);
         assertTrue(historicalSegments.keySet().containsAll(Lists.newArrayList(0L, six, nine, ten, eleven)));
 

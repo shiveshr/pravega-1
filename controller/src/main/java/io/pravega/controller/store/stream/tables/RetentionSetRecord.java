@@ -10,6 +10,7 @@
 package io.pravega.controller.store.stream.tables;
 
 import io.pravega.common.ObjectBuilder;
+import io.pravega.controller.store.stream.tables.serializers.RetentionSetRecordSerializer;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

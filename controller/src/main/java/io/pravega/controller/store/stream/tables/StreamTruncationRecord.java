@@ -31,7 +31,7 @@ import java.util.Set;
  */
 @Data
 @Slf4j
-public class StreamTruncationRecord  {
+public class StreamTruncationRecord {
     public static final StreamTruncationRecordSerializer SERIALIZER = new StreamTruncationRecordSerializer();
 
     public static final StreamTruncationRecord EMPTY = new StreamTruncationRecord(ImmutableMap.of(),
@@ -57,7 +57,7 @@ public class StreamTruncationRecord  {
      * applied on it to find segments that are available for consumption.
      * Refer to TableHelper.getActiveSegmentsAt
      */
-    private final ImmutableMap<Segment, Integer> cutEpochMap;
+    private final ImmutableMap<SegmentRecord, Integer> cutEpochMap;
 
     /**
      * All segments that have been deleted for this stream so far.
@@ -73,7 +73,7 @@ public class StreamTruncationRecord  {
     private final boolean updating;
 
     @Builder
-    public StreamTruncationRecord(Map<Long, Long> streamCut, Map<Segment, Integer> cutEpochMap,
+    public StreamTruncationRecord(Map<Long, Long> streamCut, Map<SegmentRecord, Integer> cutEpochMap,
                                   Set<Long> deletedSegments, Set<Long> toDelete, boolean updating) {
         this.streamCut = ImmutableMap.copyOf(streamCut);
         this.cutEpochMap = ImmutableMap.copyOf(cutEpochMap);
@@ -94,7 +94,7 @@ public class StreamTruncationRecord  {
         return streamCut;
     }
 
-    public ImmutableMap<Segment, Integer> getCutEpochMap() {
+    public ImmutableMap<SegmentRecord, Integer> getCutEpochMap() {
         return cutEpochMap;
     }
 

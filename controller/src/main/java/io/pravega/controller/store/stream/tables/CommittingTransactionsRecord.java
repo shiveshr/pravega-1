@@ -9,6 +9,7 @@
  */
 package io.pravega.controller.store.stream.tables;
 
+import com.google.common.collect.ImmutableList;
 import io.pravega.common.ObjectBuilder;
 import io.pravega.controller.store.stream.tables.serializers.CommittingTransactionsRecordSerializer;
 import lombok.AllArgsConstructor;
@@ -30,7 +31,8 @@ import java.util.UUID;
  */
 public class CommittingTransactionsRecord {
     public static final CommittingTransactionsRecordSerializer SERIALIZER = new CommittingTransactionsRecordSerializer();
-
+    public static CommittingTransactionsRecord EMPTY = CommittingTransactionsRecord.builder().epoch(Integer.MIN_VALUE)
+            .transactionsToCommit(ImmutableList.of()).activeEpoch(Integer.MIN_VALUE).build();
     /**
      * Epoch from which transactions are committed.
      */
@@ -40,8 +42,18 @@ public class CommittingTransactionsRecord {
      */
     final List<UUID> transactionsToCommit;
 
-    public static class CommittingTransactionsRecordBuilder implements ObjectBuilder<CommittingTransactionsRecord> {
+    /**
+     * Epoch from which transactions are committed.
+     */
+    final int activeEpoch;
 
+    public CommittingTransactionsRecord(int epoch, List<UUID> transactionsToCommit) {
+        this.epoch = epoch;
+        this.transactionsToCommit = transactionsToCommit;
+        this.activeEpoch = Integer.MIN_VALUE;
+    }
+
+    public static class CommittingTransactionsRecordBuilder implements ObjectBuilder<CommittingTransactionsRecord> {
     }
 
     @SneakyThrows(IOException.class)
@@ -52,5 +64,13 @@ public class CommittingTransactionsRecord {
     @SneakyThrows(IOException.class)
     public byte[] toByteArray() {
         return SERIALIZER.serialize(this).getCopy();
+    }
+
+    public static CommittingTransactionsRecord startRollingTxn(CommittingTransactionsRecord record, int activeEpoch) {
+        if (record.activeEpoch != Integer.MIN_VALUE) {
+            return new CommittingTransactionsRecord(record.epoch, record.transactionsToCommit, activeEpoch);
+        } else {
+            return record;
+        }
     }
 }

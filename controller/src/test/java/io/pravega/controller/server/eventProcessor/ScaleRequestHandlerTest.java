@@ -37,7 +37,7 @@ import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.TxnStatus;
 import io.pravega.controller.store.stream.VersionedTransactionData;
-import io.pravega.controller.store.stream.tables.HistoryRecord;
+import io.pravega.controller.store.stream.tables.EpochRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.task.TaskMetadataStore;
 import io.pravega.controller.store.task.TaskStoreFactory;
@@ -55,6 +55,7 @@ import io.pravega.test.common.TestingServerStarter;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.AbstractMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -269,18 +270,20 @@ public class ScaleRequestHandlerTest {
                 null, executor).join();
         streamStore.sealTransaction(scope, stream, txnData.getId(), true, Optional.empty(), null, executor).join();
 
-        HistoryRecord epochZero = streamStore.getActiveEpoch(scope, stream, null, true, executor).join();
+        EpochRecord epochZero = streamStore.getActiveEpoch(scope, stream, true, null, executor).join();
         assertEquals(0, epochZero.getEpoch());
 
         // 2. start scale
+        ArrayList<AbstractMap.SimpleEntry<Double, Double>> newRange = new ArrayList<>();
+        newRange.add(new AbstractMap.SimpleEntry<>(0.0, 1.0));
         requestHandler.process(new ScaleOpEvent(scope, stream, Lists.newArrayList(0L, 1L, 2L),
-                Lists.newArrayList(new AbstractMap.SimpleEntry<>(0.0, 1.0)), false, System.currentTimeMillis())).join();
+                newRange, false, System.currentTimeMillis())).join();
 
         // 3. verify that scale is complete
         State state = streamStore.getState(scope, stream, false, null, executor).join();
         assertEquals(State.ACTIVE, state);
 
-        HistoryRecord epochOne = streamStore.getActiveEpoch(scope, stream, null, true, executor).join();
+        EpochRecord epochOne = streamStore.getActiveEpoch(scope, stream, true, null, executor).join();
         assertEquals(1, epochOne.getEpoch());
 
         // 4. create transaction -> verify that this is created on new epoch
@@ -294,12 +297,12 @@ public class ScaleRequestHandlerTest {
         TxnStatus txnStatus = streamStore.transactionStatus(scope, stream, txnIdOldEpoch, null, executor).join();
         assertEquals(TxnStatus.COMMITTED, txnStatus);
 
-        HistoryRecord epochTwo = streamStore.getEpoch(scope, stream, 2, null, executor).join();
-        HistoryRecord epochThree = streamStore.getEpoch(scope, stream, 3, null, executor).join();
+        EpochRecord epochTwo = streamStore.getEpoch(scope, stream, 2, null, executor).join();
+        EpochRecord epochThree = streamStore.getEpoch(scope, stream, 3, null, executor).join();
         assertEquals(0, epochTwo.getReferenceEpoch());
         assertEquals(1, epochThree.getReferenceEpoch());
 
-        HistoryRecord activeEpoch = streamStore.getActiveEpoch(scope, stream, null, true, executor).join();
+        EpochRecord activeEpoch = streamStore.getActiveEpoch(scope, stream, true, null, executor).join();
         assertEquals(epochThree, activeEpoch);
 
         // 6. commit on new epoch. This should happen on duplicate of new epoch successfully
@@ -307,7 +310,7 @@ public class ScaleRequestHandlerTest {
         txnStatus = streamStore.transactionStatus(scope, stream, txnIdNewEpoch, null, executor).join();
         assertEquals(TxnStatus.COMMITTED, txnStatus);
 
-        activeEpoch = streamStore.getActiveEpoch(scope, stream, null, true, executor).join();
+        activeEpoch = streamStore.getActiveEpoch(scope, stream, true, null, executor).join();
         assertEquals(epochThree, activeEpoch);
     }
 
@@ -339,19 +342,25 @@ public class ScaleRequestHandlerTest {
                 null, executor).join();
         streamStore.sealTransaction(scope, stream, txnData2.getId(), true, Optional.empty(), null, executor).join();
 
-        HistoryRecord epochZero = streamStore.getActiveEpoch(scope, stream, null, true, executor).join();
+        EpochRecord epochZero = streamStore.getActiveEpoch(scope, stream, true, null, executor).join();
         assertEquals(0, epochZero.getEpoch());
 
         // 2. start scale
+        ArrayList<AbstractMap.SimpleEntry<Double, Double>> newRange = new ArrayList<>();
+        newRange.add(new AbstractMap.SimpleEntry<>(0.0, 0.25));
+        newRange.add(new AbstractMap.SimpleEntry<>(0.25, 0.5));
         requestHandler.process(new ScaleOpEvent(scope, stream, Lists.newArrayList(0L),
-                Lists.newArrayList(new AbstractMap.SimpleEntry<>(0.0, 0.25), new AbstractMap.SimpleEntry<>(0.25, 0.5)), false, System.currentTimeMillis())).join();
+                newRange, false, System.currentTimeMillis())).join();
 
         // 3. verify that scale is complete
         State state = streamStore.getState(scope, stream, false, null, executor).join();
         assertEquals(State.ACTIVE, state);
 
         // 4. just submit a new scale. don't let it run. this should create an epoch transition. state should still be active
-        streamStore.startScale(scope, stream, Lists.newArrayList(1L), Lists.newArrayList(new AbstractMap.SimpleEntry<>(0.5, 0.75), new AbstractMap.SimpleEntry<>(0.75, 1.0)),
+        ArrayList<AbstractMap.SimpleEntry<Double, Double>> newRanges = new ArrayList<>();
+        newRanges.add(new AbstractMap.SimpleEntry<>(0.5, 0.75));
+        newRanges.add(new AbstractMap.SimpleEntry<>(0.75, 1.0));
+        streamStore.startScale(scope, stream, Lists.newArrayList(1L), newRanges,
         System.currentTimeMillis(), false, null, executor).join();
 
         // 5. commit on old epoch. this should roll over.
@@ -359,9 +368,9 @@ public class ScaleRequestHandlerTest {
         TxnStatus txnStatus = streamStore.transactionStatus(scope, stream, txnIdOldEpoch, null, executor).join();
         assertEquals(TxnStatus.COMMITTED, txnStatus);
 
-        // 6. run scale. this should fail in scaleCreateNewSegments with IllegalArgumentException with epochTransitionConsistent
+        // 6. run scale. this should fail in scaleCreateNewEpoch with IllegalArgumentException with epochTransitionConsistent
         AssertExtensions.assertThrows("epoch transition should be inconsistent", requestHandler.process(new ScaleOpEvent(scope, stream, Lists.newArrayList(1L),
-                Lists.newArrayList(new AbstractMap.SimpleEntry<>(0.5, 0.75), new AbstractMap.SimpleEntry<>(0.75, 1.0)),
+                newRanges,
                 false, System.currentTimeMillis())), e -> Exceptions.unwrap(e) instanceof IllegalStateException);
 
         state = streamStore.getState(scope, stream, false, null, executor).join();
@@ -396,19 +405,25 @@ public class ScaleRequestHandlerTest {
                 null, executor).join();
         streamStore.sealTransaction(scope, stream, txnData2.getId(), true, Optional.empty(), null, executor).join();
 
-        HistoryRecord epochZero = streamStore.getActiveEpoch(scope, stream, null, true, executor).join();
+        EpochRecord epochZero = streamStore.getActiveEpoch(scope, stream, true, null, executor).join();
         assertEquals(0, epochZero.getEpoch());
 
         // 2. start scale
+        ArrayList<AbstractMap.SimpleEntry<Double, Double>> newRange = new ArrayList<>();
+        newRange.add(new AbstractMap.SimpleEntry<>(0.0, 0.25));
+        newRange.add(new AbstractMap.SimpleEntry<>(0.25, 0.5));
         requestHandler.process(new ScaleOpEvent(scope, stream, Lists.newArrayList(0L),
-                Lists.newArrayList(new AbstractMap.SimpleEntry<>(0.0, 0.25), new AbstractMap.SimpleEntry<>(0.25, 0.5)), false, System.currentTimeMillis())).join();
+                newRange, false, System.currentTimeMillis())).join();
 
         // 3. verify that scale is complete
         State state = streamStore.getState(scope, stream, false, null, executor).join();
         assertEquals(State.ACTIVE, state);
 
         // 4. just submit a new scale. don't let it run. this should create an epoch transition. state should still be active
-        streamStore.startScale(scope, stream, Lists.newArrayList(1L), Lists.newArrayList(new AbstractMap.SimpleEntry<>(0.5, 0.75), new AbstractMap.SimpleEntry<>(0.75, 1.0)),
+        ArrayList<AbstractMap.SimpleEntry<Double, Double>> newRanges = new ArrayList<>();
+        newRanges.add(new AbstractMap.SimpleEntry<>(0.5, 0.75));
+        newRanges.add(new AbstractMap.SimpleEntry<>(0.75, 1.0));
+        streamStore.startScale(scope, stream, Lists.newArrayList(1L), newRanges,
         System.currentTimeMillis(), false, null, executor).join();
 
         // 5. commit on old epoch. this should roll over.
@@ -418,12 +433,12 @@ public class ScaleRequestHandlerTest {
 
         // 6. run scale against old record but with manual scale flag set to true. This should be migrated to new epoch and processed.
         requestHandler.process(new ScaleOpEvent(scope, stream, Lists.newArrayList(1L),
-                Lists.newArrayList(new AbstractMap.SimpleEntry<>(0.5, 0.75), new AbstractMap.SimpleEntry<>(0.75, 1.0)),
+                newRanges,
                 true, System.currentTimeMillis())).join();
 
         state = streamStore.getState(scope, stream, false, null, executor).join();
         assertEquals(State.ACTIVE, state);
-        HistoryRecord epoch = streamStore.getActiveEpoch(scope, stream, null, true, executor).join();
+        EpochRecord epoch = streamStore.getActiveEpoch(scope, stream, true, null, executor).join();
         assertEquals(4, epoch.getEpoch());
     }
 

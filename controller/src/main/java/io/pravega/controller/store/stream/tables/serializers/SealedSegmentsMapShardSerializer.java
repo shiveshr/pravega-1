@@ -18,8 +18,8 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
-public class SealedSegmentsRecordSerializer
-        extends VersionedSerializer.WithBuilder<SealedSegmentsMapShard, SealedSegmentsMapShard.SealedSegmentsRecordBuilder> {
+public class SealedSegmentsMapShardSerializer
+        extends VersionedSerializer.WithBuilder<SealedSegmentsMapShard, SealedSegmentsMapShard.SealedSegmentsMapShardBuilder> {
     @Override
     protected byte getWriteVersion() {
         return 0;
@@ -31,7 +31,7 @@ public class SealedSegmentsRecordSerializer
     }
 
     private void read00(RevisionDataInput revisionDataInput,
-                        SealedSegmentsMapShard.SealedSegmentsRecordBuilder sealedSegmentsRecordBuilder) throws IOException {
+                        SealedSegmentsMapShard.SealedSegmentsMapShardBuilder sealedSegmentsRecordBuilder) throws IOException {
         sealedSegmentsRecordBuilder.sealedSegmentsSizeMap(revisionDataInput.readMap(DataInput::readLong, DataInput::readLong));
     }
 
@@ -40,7 +40,7 @@ public class SealedSegmentsRecordSerializer
     }
 
     @Override
-    protected SealedSegmentsMapShard.SealedSegmentsRecordBuilder newBuilder() {
+    protected SealedSegmentsMapShard.SealedSegmentsMapShardBuilder newBuilder() {
         return SealedSegmentsMapShard.builder();
     }
 }

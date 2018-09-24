@@ -13,6 +13,7 @@ import com.google.common.collect.ImmutableSet;
 import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
+import io.pravega.controller.store.stream.tables.SegmentRecord;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 
 import java.io.DataInput;
@@ -36,7 +37,7 @@ public class StreamTruncationRecordSerializer
             throws IOException {
         streamTruncationRecordBuilder
                 .streamCut(revisionDataInput.readMap(DataInput::readLong, DataInput::readLong))
-                .cutEpochMap(revisionDataInput.readMap(DataInput::readLong, DataInput::readInt))
+                .cutEpochMap(revisionDataInput.readMap(SegmentRecord.SERIALIZER::deserialize, DataInput::readInt))
                 .deletedSegments(ImmutableSet.copyOf(revisionDataInput.readCollection(DataInput::readLong)))
                 .toDelete(ImmutableSet.copyOf(revisionDataInput.readCollection(DataInput::readLong)))
                 .updating(revisionDataInput.readBoolean());
@@ -45,7 +46,7 @@ public class StreamTruncationRecordSerializer
     private void write00(StreamTruncationRecord streamTruncationRecord, RevisionDataOutput revisionDataOutput)
             throws IOException {
         revisionDataOutput.writeMap(streamTruncationRecord.getStreamCut(), DataOutput::writeLong, DataOutput::writeLong);
-        revisionDataOutput.writeMap(streamTruncationRecord.getCutEpochMap(), DataOutput::writeLong, DataOutput::writeInt);
+        revisionDataOutput.writeMap(streamTruncationRecord.getCutEpochMap(), SegmentRecord.SERIALIZER::serialize, DataOutput::writeInt);
         revisionDataOutput.writeCollection(streamTruncationRecord.getDeletedSegments(), DataOutput::writeLong);
         revisionDataOutput.writeCollection(streamTruncationRecord.getToDelete(), DataOutput::writeLong);
         revisionDataOutput.writeBoolean(streamTruncationRecord.isUpdating());

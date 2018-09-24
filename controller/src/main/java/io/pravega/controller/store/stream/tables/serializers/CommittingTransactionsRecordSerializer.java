@@ -32,12 +32,14 @@ public class CommittingTransactionsRecordSerializer
     private void read00(RevisionDataInput revisionDataInput, CommittingTransactionsRecord.CommittingTransactionsRecordBuilder builder)
             throws IOException {
         builder.epoch(revisionDataInput.readInt())
-                .transactionsToCommit(revisionDataInput.readCollection(RevisionDataInput::readUUID, ArrayList::new));
+                .transactionsToCommit(revisionDataInput.readCollection(RevisionDataInput::readUUID, ArrayList::new))
+                .activeEpoch(revisionDataInput.readInt());
     }
 
     private void write00(CommittingTransactionsRecord record, RevisionDataOutput revisionDataOutput) throws IOException {
         revisionDataOutput.writeInt(record.getEpoch());
         revisionDataOutput.writeCollection(record.getTransactionsToCommit(), RevisionDataOutput::writeUUID);
+        revisionDataOutput.writeInt(record.getActiveEpoch());
     }
 
     @Override

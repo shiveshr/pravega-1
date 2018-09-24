@@ -13,30 +13,21 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.pravega.common.Exceptions;
-import io.pravega.common.util.ArrayView;
 import io.pravega.controller.store.stream.Segment;
-import io.pravega.controller.store.stream.StoreException;
 import io.pravega.shared.segment.StreamSegmentNameUtils;
-import lombok.Lombok;
-import lombok.SneakyThrows;
-import org.apache.commons.lang3.tuple.ImmutablePair;
-import org.apache.commons.lang3.tuple.Pair;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -57,9 +48,9 @@ public class TableHelper {
      * @param truncationRecord truncation record
      * @return list of active segments.
      */
-    public static Map<Segment, Long> getActiveSegments(HistoryRecord record, final StreamTruncationRecord truncationRecord) {
+    public static Map<SegmentRecord, Long> getActiveSegments(EpochRecord record, final StreamTruncationRecord truncationRecord) {
 
-        Map<Segment, Long> segmentsWithOffset;
+        Map<SegmentRecord, Long> segmentsWithOffset;
         if (truncationRecord.equals(StreamTruncationRecord.EMPTY)) {
             segmentsWithOffset = record.getSegments().stream().collect(Collectors.toMap(x -> x, x -> 0L));
         } else {
@@ -78,7 +69,7 @@ public class TableHelper {
                 // take remaining segments from this epoch.
                 segmentsWithOffset = new HashMap<>();
                 // all segments from stream cut that have epoch >= this epoch
-                List<Segment> fromStreamCut = truncationRecord.getCutEpochMap().entrySet().stream()
+                List<SegmentRecord> fromStreamCut = truncationRecord.getCutEpochMap().entrySet().stream()
                         .filter(x -> x.getValue() >= record.getEpoch())
                         .map(Map.Entry::getKey)
                         .collect(Collectors.toList());
@@ -128,7 +119,7 @@ public class TableHelper {
      * @param segmentsToSeal segments to seal
 \     * @return true if a scale operation can be performed, false otherwise
      */
-    public static boolean canScaleFor(final List<Long> segmentsToSeal, final HistoryRecord currentEpoch) {
+    public static boolean canScaleFor(final List<Long> segmentsToSeal, final EpochRecord currentEpoch) {
         return segmentsToSeal.stream().allMatch(x -> currentEpoch.getSegments().stream().anyMatch(y -> y.segmentId() == x));
     }
 
@@ -141,7 +132,7 @@ public class TableHelper {
      */
     public static boolean isScaleInputValid(final List<Long> segmentsToSeal,
                                             final List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
-                                            final HistoryRecord currentEpoch) {
+                                            final EpochRecord currentEpoch) {
         boolean newRangesPredicate = newRanges.stream().noneMatch(x -> x.getKey() >= x.getValue() &&
                 x.getKey() >= 0 && x.getValue() > 0);
 
@@ -163,12 +154,12 @@ public class TableHelper {
      * @param scaleTimestamp scale time
      * @return new epoch transition record based on supplied input
      */
-    public static EpochTransitionRecord computeEpochTransition(HistoryRecord currentEpoch, List<Long> segmentsToSeal,
-                                                         List<AbstractMap.SimpleEntry<Double, Double>> newRanges, long scaleTimestamp) {
+    public static EpochTransitionRecord computeEpochTransition(EpochRecord currentEpoch, List<Long> segmentsToSeal,
+                                                               List<AbstractMap.SimpleEntry<Double, Double>> newRanges, long scaleTimestamp) {
         Preconditions.checkState(currentEpoch.getSegments().containsAll(segmentsToSeal), "Invalid epoch transition request");
 
         int newEpoch = currentEpoch.getEpoch() + 1;
-        int nextSegmentNumber = currentEpoch.getSegments().stream().mapToInt(Segment::getNumber).max().getAsInt();
+        int nextSegmentNumber = currentEpoch.getSegments().stream().mapToInt(SegmentRecord::getSegmentNumber).max().getAsInt();
         Map<Long, AbstractMap.SimpleEntry<Double, Double>> newSegments = new HashMap<>();
         IntStream.range(0, newRanges.size()).forEach(x -> {
             newSegments.put(computeSegmentId(nextSegmentNumber + x, newEpoch), newRanges.get(x));
@@ -266,4 +257,28 @@ public class TableHelper {
     public static long generalizedSegmentId(long segmentId, UUID txId) {
         return computeSegmentId(getSegmentNumber(segmentId), getTransactionEpoch(txId));
     }
+
+    public static <T> int binarySearch(final List<T> list, final int lower, final int upper, final long time, Function<T, Long> getTime) {
+        if (upper < lower) {
+            assert getTime.apply(list.get(0)) > time;
+            // return index 0.
+            return 0;
+        }
+
+        final int middle = (lower + upper) / 2;
+
+        T middleRecord = list.get(middle);
+
+        if (getTime.apply(middleRecord) <= time) {
+            T next = list.size() > middle + 1 ? list.get(middle + 1) : null;
+            if (next == null || (getTime.apply(next) > time)) {
+                return middle;
+            } else {
+                return binarySearch(list, middle + 1, upper, time, getTime);
+            }
+        } else {
+            return binarySearch(list, lower, middle - 1, time, getTime);
+        }
+    }
+
 }

@@ -13,6 +13,7 @@ import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
+import io.pravega.controller.store.stream.tables.SegmentRecord;
 
 import java.io.DataInput;
 import java.io.DataOutput;
@@ -34,13 +35,13 @@ public class StreamCutRecordSerializer
             throws IOException {
         streamCutRecordBuilder.recordingTime(revisionDataInput.readLong())
                 .recordingSize(revisionDataInput.readLong())
-                .streamCut(revisionDataInput.readMap(DataInput::readLong, DataInput::readLong));
+                .streamCut(revisionDataInput.readMap(SegmentRecord.SERIALIZER::deserialize, DataInput::readLong));
     }
 
     private void write00(StreamCutRecord streamCutRecord, RevisionDataOutput revisionDataOutput) throws IOException {
         revisionDataOutput.writeLong(streamCutRecord.getRecordingTime());
         revisionDataOutput.writeLong(streamCutRecord.getRecordingSize());
-        revisionDataOutput.writeMap(streamCutRecord.getStreamCut(), DataOutput::writeLong, DataOutput::writeLong);
+        revisionDataOutput.writeMap(streamCutRecord.getStreamCut(), SegmentRecord.SERIALIZER::serialize, DataOutput::writeLong);
     }
 
     @Override

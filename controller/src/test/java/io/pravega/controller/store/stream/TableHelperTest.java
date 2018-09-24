@@ -11,7 +11,7 @@ package io.pravega.controller.store.stream;
 
 import com.google.common.collect.Lists;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
-import io.pravega.controller.store.stream.tables.HistoryRecord;
+import io.pravega.controller.store.stream.tables.EpochRecord;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 import io.pravega.controller.store.stream.tables.TableHelper;
 import io.pravega.test.common.AssertExtensions;
@@ -35,88 +35,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class TableHelperTest {
-
-    @Test
-    public void getSegmentTest() {
-        for (int startingSegmentNumber = 0; startingSegmentNumber < 20; startingSegmentNumber++) {
-            long time = System.currentTimeMillis();
-            int epoch = 0;
-            final List<Long> startSegments = Lists.newArrayList(startingSegmentNumber + 0L, startingSegmentNumber + 1L,
-                    startingSegmentNumber + 2L, startingSegmentNumber + 3L, startingSegmentNumber + 4L);
-            Pair<byte[], byte[]> segmentTableAndIndex = createSegmentTableAndIndex(5, time, startingSegmentNumber);
-            byte[] segmentTable = segmentTableAndIndex.getValue();
-            byte[] segmentIndex = segmentTableAndIndex.getKey();
-            assertEquals(startingSegmentNumber + 5, TableHelper.getNextSegmentNumber(segmentIndex, segmentTable));
-            byte[] historyTable = TableHelper.createHistoryTable(time, startSegments);
-            byte[] historyIndex = TableHelper.createHistoryIndex();
-
-            assertEquals(startingSegmentNumber, TableHelper.getStartingSegmentNumber(segmentIndex));
-
-            Segment segment = TableHelper.getSegment(startingSegmentNumber, segmentIndex, segmentTable, historyIndex, historyTable);
-            assertEquals(segment.segmentId(), startingSegmentNumber + 0L);
-            assertEquals(segment.getStart(), time);
-            assertEquals(segment.getKeyStart(), 0, 0);
-            assertEquals(segment.getKeyEnd(), 1.0 / 5, 0);
-
-            time = System.currentTimeMillis();
-            epoch++;
-            segmentTableAndIndex = updateSegmentTableAndIndex(segmentIndex, segmentTable, 5, epoch, time);
-            segmentTable = segmentTableAndIndex.getValue();
-            segmentIndex = segmentTableAndIndex.getKey();
-            assertEquals(startingSegmentNumber + 10, TableHelper.getNextSegmentNumber(segmentIndex, segmentTable));
-
-            List<Long> newSegments = Lists.newArrayList(computeSegmentId(startingSegmentNumber + 5, 1),
-                    computeSegmentId(startingSegmentNumber + 6, 1),
-                    computeSegmentId(startingSegmentNumber + 7, 1),
-                    computeSegmentId(startingSegmentNumber + 8, 1),
-                    computeSegmentId(startingSegmentNumber + 9, 1));
-            historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
-            historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
-            HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
-            historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, time);
-
-            segment = TableHelper.getSegment(computeSegmentId(startingSegmentNumber + 9, 1),
-                    segmentIndex, segmentTable, historyIndex, historyTable);
-            assertEquals(computeSegmentId(startingSegmentNumber + 9, 1), segment.segmentId());
-            assertEquals(segment.getStart(), time);
-            assertEquals(segment.getKeyStart(), 1.0 / 5 * 4, 0);
-            assertEquals(segment.getKeyEnd(), 1.0, 0);
-
-            // Test with updated index but stale segment table
-            time = System.currentTimeMillis();
-            segmentTableAndIndex = updateSegmentTableAndIndex(segmentIndex, segmentTable, 5, 2, time);
-            final byte[] segmentIndex2 = segmentTableAndIndex.getKey();
-            final byte[] segmentTablecopy = segmentTable;
-            final byte[] historyIndexCopy = historyIndex;
-            final byte[] historyTablecopy = historyTable;
-
-            final int s10 = startingSegmentNumber + 10;
-            AssertExtensions.assertThrows(StoreException.class, () ->
-                    TableHelper.getSegment(computeSegmentId(s10, 1),
-                    segmentIndex2, segmentTablecopy, historyIndexCopy, historyTablecopy));
-            assertEquals(startingSegmentNumber + 10, TableHelper.getNextSegmentNumber(segmentIndex2, segmentTable));
-
-            segmentTableAndIndex = updateSegmentTableAndIndex(segmentIndex2, segmentTable, 5, 2, time);
-            byte[] segmentTable3 = segmentTableAndIndex.getValue();
-            byte[] segmentIndex3 = segmentTableAndIndex.getKey();
-
-            newSegments = Lists.newArrayList(computeSegmentId(startingSegmentNumber + 11, 2),
-                    computeSegmentId(startingSegmentNumber + 12, 2),
-                    computeSegmentId(startingSegmentNumber + 13, 2),
-                    computeSegmentId(startingSegmentNumber + 14, 2),
-                    computeSegmentId(startingSegmentNumber + 15, 2));
-            historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
-            historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
-            partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
-            historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, time);
-
-            segment = TableHelper.getSegment(computeSegmentId(startingSegmentNumber + 10, 2),
-                    segmentIndex3, segmentTable3, historyIndex, historyTable);
-            assertEquals(segment.segmentId(), computeSegmentId(startingSegmentNumber + 10, 2));
-            assertEquals(startingSegmentNumber + 15, TableHelper.getNextSegmentNumber(segmentIndex3, segmentTable3));
-        }
-    }
-
     @Test
     public void getActiveSegmentsTest() {
         for (int startingSegmentNumber = 0; startingSegmentNumber < 20; startingSegmentNumber++) {
@@ -140,14 +58,14 @@ public class TableHelperTest {
             activeSegments = TableHelper.getActiveSegments(historyIndex, historyTable);
             assertEquals(activeSegments, startSegments);
 
-            HistoryRecord activeEpoch = TableHelper.getActiveEpoch(historyIndex, historyTable);
+            EpochRecord activeEpoch = TableHelper.getActiveEpoch(historyIndex, historyTable);
             int epoch = activeEpoch.getEpoch();
             assertEquals(0, epoch);
-            epoch = HistoryRecord.fetchNext(activeEpoch, historyIndex, historyTable, false).get().getEpoch();
+            epoch = EpochRecord.fetchNext(activeEpoch, historyIndex, historyTable, false).get().getEpoch();
             assertEquals(1, epoch);
 
             timestamp = timestamp + 5;
-            HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            EpochRecord partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
             activeSegments = TableHelper.getActiveSegments(historyIndex, historyTable);
@@ -187,7 +105,7 @@ public class TableHelperTest {
             historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
 
             timestamp = timestamp + 5;
-            HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            EpochRecord partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
             // test active segments while rolling transaction is ongoing
@@ -196,7 +114,7 @@ public class TableHelperTest {
             historyIndex = historyAndIndexPair.getKey();
 
             // try with only index updated
-            HistoryRecord activeEpoch = TableHelper.getActiveEpoch(historyIndex, historyTable);
+            EpochRecord activeEpoch = TableHelper.getActiveEpoch(historyIndex, historyTable);
             assertEquals(1, activeEpoch.getEpoch());
 
             // now test with history table updates with 2 new epochs for txn.duplicate and active.duplicate
@@ -211,17 +129,17 @@ public class TableHelperTest {
             long fiveThree = computeSegmentId(startingSegmentNumber + 5, 3);
             long sixThree = computeSegmentId(startingSegmentNumber + 6, 3);
             long sevenThree = computeSegmentId(startingSegmentNumber + 7, 3);
-            HistoryRecord epoch0 = TableHelper.getEpochRecord(historyIndex, historyTable, 0); // 0, 1, 2, 3, 4
-            HistoryRecord epoch1 = TableHelper.getEpochRecord(historyIndex, historyTable, 1); // 0, 1, 5.1, 6.1, 7.1
-            HistoryRecord epoch2 = TableHelper.getEpochRecord(historyIndex, historyTable, 2); // 0.2, 1.2, 2.2, 3.2, 4.2
-            HistoryRecord epoch3 = TableHelper.getEpochRecord(historyIndex, historyTable, 3); // 0.3, 1.3, 5.3, 6.3, 7.3
+            EpochRecord epoch0 = TableHelper.getEpochRecord(historyIndex, historyTable, 0); // 0, 1, 2, 3, 4
+            EpochRecord epoch1 = TableHelper.getEpochRecord(historyIndex, historyTable, 1); // 0, 1, 5.1, 6.1, 7.1
+            EpochRecord epoch2 = TableHelper.getEpochRecord(historyIndex, historyTable, 2); // 0.2, 1.2, 2.2, 3.2, 4.2
+            EpochRecord epoch3 = TableHelper.getEpochRecord(historyIndex, historyTable, 3); // 0.3, 1.3, 5.3, 6.3, 7.3
 
             activeEpoch = TableHelper.getActiveEpoch(historyIndex, historyTable);
             assertEquals(1, activeEpoch.getEpoch());
 
-            HistoryRecord epochRecordTxnEpoch = TableHelper.getEpochRecord(historyIndex, historyTable, 2);
+            EpochRecord epochRecordTxnEpoch = TableHelper.getEpochRecord(historyIndex, historyTable, 2);
             assertEquals(0, epochRecordTxnEpoch.getReferenceEpoch());
-            HistoryRecord epochRecordActiveDuplicate = TableHelper.getEpochRecord(historyIndex, historyTable, 3);
+            EpochRecord epochRecordActiveDuplicate = TableHelper.getEpochRecord(historyIndex, historyTable, 3);
             assertEquals(1, epochRecordActiveDuplicate.getReferenceEpoch());
 
             List<Long> candidates = TableHelper.findSegmentSuccessorCandidates(new Segment(startingSegmentNumber, 0L, 0.0, 1.0), historyIndex, historyTable);
@@ -233,7 +151,7 @@ public class TableHelperTest {
             candidates = TableHelper.findSegmentSuccessorCandidates(new Segment(sevenThree, 0L, 0.0, 1.0), historyIndex, historyTable);
             assertTrue(candidates.isEmpty());
 
-            partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             assertEquals(partial, epochRecordActiveDuplicate);
 
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
@@ -350,7 +268,7 @@ public class TableHelperTest {
             assertEquals(predecessors, Lists.newArrayList(s3, s4));
             assertEquals(successors, Lists.newArrayList(fiveSegmentId));
 
-            HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            EpochRecord partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
             // 1 -> 6,7.. 2,5 -> 8
@@ -389,7 +307,7 @@ public class TableHelperTest {
             assertEquals(predecessors, Lists.newArrayList(s3, s4));
             assertEquals(successors, Lists.newArrayList(eightSegmentId));
 
-            partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             timestamp = timestamp + 5;
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
@@ -410,7 +328,7 @@ public class TableHelperTest {
 
             historyIndex = TableHelper.updateHistoryIndex(historyIndex, nextHistoryOffset);
             historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
-            partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             timestamp = timestamp + 5;
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
@@ -708,7 +626,7 @@ public class TableHelperTest {
                     segmentIndex, segmentTable));
 
             // complete history record
-            HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            EpochRecord partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 2);
             // nothing should change the consistency even with history table update
             assertTrue(TableHelper.isEpochTransitionConsistent(consistentEpochTransitionRecord, historyIndex, historyTable,
@@ -872,7 +790,7 @@ public class TableHelperTest {
             segmentTable = segmentTableAndIndex.getValue();
             historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
             historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments1);
-            HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            EpochRecord partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 1);
 
             // epoch 2 --> 0, 2, 4, 5
@@ -890,7 +808,7 @@ public class TableHelperTest {
             segmentTable = segmentTableAndIndex.getValue();
             historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
             historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments2);
-            partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 2);
 
             // epoch 3 --> 0, 4, 5, 6, 7
@@ -910,7 +828,7 @@ public class TableHelperTest {
             segmentTable = segmentTableAndIndex.getValue();
             historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
             historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments3);
-            partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 3);
 
             // epoch 4 --> 4, 5, 6, 7, 8, 9
@@ -930,7 +848,7 @@ public class TableHelperTest {
             segmentTable = segmentTableAndIndex.getValue();
             historyIndex = TableHelper.updateHistoryIndex(historyIndex, historyTable.length);
             historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments4);
-            partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+            partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
             historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp + 4);
 
             // happy day
@@ -946,7 +864,7 @@ public class TableHelperTest {
                     truncationRecord.getCutEpochMap().get(startingSegmentNumber + 1L) == 0);
             truncationRecord = StreamTruncationRecord.complete(truncationRecord);
 
-            // getActiveSegments wrt first truncation record which is on epoch 0
+            // getSegmentsAtTime wrt first truncation record which is on epoch 0
             Map<Long, Long> activeSegmentsWithOffset;
             // 1. truncationRecord = 0/1, 1/1
 
@@ -1050,7 +968,7 @@ public class TableHelperTest {
             truncationRecord = StreamTruncationRecord.complete(truncationRecord);
 
             // 3. truncation record 2/10, 4/10, 5/10, 8/10, 9/10
-            // getActiveSegments wrt first truncation record which spans epoch 2 to 4
+            // getSegmentsAtTime wrt first truncation record which spans epoch 2 to 4
 
             // 3.1 epoch at time 0 = 0 = {0, 1}
             // expected active segments = 2/10, 4/10, 5/10, 8/10, 9/10
@@ -1232,7 +1150,7 @@ public class TableHelperTest {
 
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, nextHistoryOffset);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
-        HistoryRecord partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        EpochRecord partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
         // 6, 7, 8 -> 10
@@ -1255,7 +1173,7 @@ public class TableHelperTest {
 
         historyIndex = TableHelper.updateHistoryIndex(historyIndex, nextHistoryOffset);
         historyTable = TableHelper.addPartialRecordToHistoryTable(historyIndex, historyTable, newSegments);
-        partial = HistoryRecord.readLatestRecord(historyIndex, historyTable, false).get();
+        partial = EpochRecord.readLatestRecord(historyIndex, historyTable, false).get();
         historyTable = TableHelper.completePartialRecordInHistoryTable(historyIndex, historyTable, partial, timestamp);
 
         return Lists.newArrayList(segmentIndex, segmentTable, historyIndex, historyTable);

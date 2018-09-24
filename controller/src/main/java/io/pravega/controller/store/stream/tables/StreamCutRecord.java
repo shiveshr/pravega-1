@@ -10,7 +10,6 @@
 package io.pravega.controller.store.stream.tables;
 
 import io.pravega.common.ObjectBuilder;
-import io.pravega.controller.store.stream.Segment;
 import io.pravega.controller.store.stream.tables.serializers.StreamCutRecordSerializer;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -43,7 +42,11 @@ public class StreamCutRecord {
     /**
      * Actual Stream cut.
      */
-    final Map<Segment, Long> streamCut;
+    final Map<SegmentRecord, Long> streamCut;
+
+    public RetentionSetRecord getRetentionRecord() {
+        return new RetentionSetRecord(recordingTime, recordingSize);
+    }
 
     public static class StreamCutRecordBuilder implements ObjectBuilder<StreamCutRecord> {
 

@@ -15,6 +15,7 @@ import com.google.common.collect.Lists;
 import io.pravega.common.ObjectBuilder;
 import io.pravega.common.util.ArrayView;
 import io.pravega.controller.store.stream.Segment;
+import io.pravega.controller.store.stream.tables.serializers.HistoryTimeSeriesSerializer;
 import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
@@ -34,7 +35,7 @@ import java.util.List;
  */
 @Data
 public class HistoryTimeSeries {
-    public static final HistoryTimeSeriesSerializer SERIALIZER = new HistoryTimeRecordSerializer();
+    public static final HistoryTimeSeriesSerializer SERIALIZER = new HistoryTimeSeriesSerializer();
 
     private final List<HistoryTimeSeriesRecord> historyRecords;
 
@@ -61,6 +62,10 @@ public class HistoryTimeSeries {
 
     public ImmutableList<HistoryTimeSeriesRecord> getHistoryRecords() {
         return ImmutableList.copyOf(historyRecords);
+    }
+
+    public HistoryTimeSeriesRecord getLatestRecord() {
+        return historyRecords.get(historyRecords.size() - 1);
     }
 
     public static HistoryTimeSeries addHistoryRecord(HistoryTimeSeries series, HistoryTimeSeriesRecord record) {

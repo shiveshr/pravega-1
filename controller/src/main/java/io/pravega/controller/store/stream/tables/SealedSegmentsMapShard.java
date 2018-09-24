@@ -9,10 +9,10 @@
  */
 package io.pravega.controller.store.stream.tables;
 
+import com.google.common.collect.ImmutableMap;
 import io.pravega.common.ObjectBuilder;
-import io.pravega.controller.store.stream.tables.serializers.SealedSegmentsRecordSerializer;
+import io.pravega.controller.store.stream.tables.serializers.SealedSegmentsMapShardSerializer;
 import lombok.Builder;
-import lombok.Data;
 import lombok.SneakyThrows;
 import lombok.Synchronized;
 import lombok.extern.slf4j.Slf4j;
@@ -28,7 +28,7 @@ import java.util.Map;
 @Builder
 @Slf4j
 public class SealedSegmentsMapShard {
-    public static final SealedSegmentsRecordSerializer SERIALIZER = new SealedSegmentsRecordSerializer();
+    public static final SealedSegmentsMapShardSerializer SERIALIZER = new SealedSegmentsMapShardSerializer();
 
     private final int shardNumber;
     /**
@@ -44,7 +44,7 @@ public class SealedSegmentsMapShard {
 
     public SealedSegmentsMapShard(int shardNumber, Map<Long, Long> sealedSegmentsSizeMap) {
         this.shardNumber = shardNumber;
-        this.sealedSegmentsSizeMap = Collections.unmodifiableMap(new HashMap<>(sealedSegmentsSizeMap));
+        this.sealedSegmentsSizeMap = new HashMap<>(sealedSegmentsSizeMap);
     }
 
     public static class SealedSegmentsMapShardBuilder implements ObjectBuilder<SealedSegmentsMapShard> {
@@ -69,5 +69,10 @@ public class SealedSegmentsMapShard {
     @Synchronized
     public void addSealedSegmentSize(long segmentId, long sealedSize) {
         sealedSegmentsSizeMap.put(segmentId, sealedSize);
+    }
+
+    @Synchronized
+    public Map<Long, Long> getSealedSegmentsSizeMap() {
+        return Collections.unmodifiableMap(sealedSegmentsSizeMap);
     }
 }

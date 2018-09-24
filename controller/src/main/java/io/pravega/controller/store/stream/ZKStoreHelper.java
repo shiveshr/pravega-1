@@ -167,7 +167,7 @@ public class ZKStoreHelper {
         return result;
     }
 
-    CompletableFuture<Void> setData(final String path, final Data<Integer> data) {
+    <U> CompletableFuture<Void> setData(final String path, final Data<Integer> data) {
         final CompletableFuture<Void> result = new CompletableFuture<>();
         try {
             if (data.getVersion() == null) {

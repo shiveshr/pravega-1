@@ -15,11 +15,11 @@ import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.store.stream.OperationContext;
-import io.pravega.controller.store.stream.Segment;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.TxnStatus;
-import io.pravega.controller.store.stream.tables.HistoryRecord;
+import io.pravega.controller.store.stream.tables.EpochRecord;
+import io.pravega.controller.store.stream.tables.SegmentRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
@@ -157,26 +157,28 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                     // can run concurrently
                                     return future.thenCompose(v -> getEpochRecords(scope, stream, txnEpoch, context)
                                             .thenCompose(records -> {
-                                                HistoryRecord txnEpochRecord = records.get(0);
-                                                HistoryRecord activeEpochRecord = records.get(1);
+                                                EpochRecord txnEpochRecord = records.get(0);
+                                                EpochRecord activeEpochRecord = records.get(1);
                                                 if (activeEpochRecord.getEpoch() == txnEpoch ||
                                                         activeEpochRecord.getReferenceEpoch() == txnEpochRecord.getReferenceEpoch()) {
                                                     // If active epoch's reference is same as transaction epoch,
                                                     // we can commit transactions immediately
-                                                    List<Long> segments = activeEpochRecord.getSegments().stream()
-                                                            .map(Segment::segmentId).collect(Collectors.toList());
-                                                    return commitTransactions(scope, stream, segments, txnList, context);
+                                                    List<Long> segmentIds = activeEpochRecord.getSegments().stream()
+                                                            .map(SegmentRecord::segmentId).collect(Collectors.toList());
+
+                                                    return commitTransactions(scope, stream, segmentIds, txnList);
                                                 } else {
                                                     return rollTransactions(scope, stream, txnEpochRecord, activeEpochRecord, txnList, context);
                                                 }
-                                            }));
+                                            }))
+                                            .thenCompose(v -> markCommitted(scope, stream, txnList, context));
                                 }
                             });
 
-                    // once all commits are done, delete the committing txn record.
+                    // once all commits are done, reset the committing txn record.
                     // reset state to ACTIVE if it was COMMITTING_TXN
                     return Futures.toVoid(commitFuture
-                            .thenCompose(v -> streamMetadataStore.deleteCommittingTransactionsRecord(scope, stream, context, executor))
+                            .thenCompose(v -> streamMetadataStore.resetCommittingTransactionsRecord(scope, stream, context, executor))
                             .thenCompose(v -> streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING_TXN, context, executor)));
                 });
     }
@@ -211,7 +213,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
      * 5. seal active segments
      * 6. complete partial record in history table
      */
-    private CompletableFuture<Void> rollTransactions(String scope, String stream, HistoryRecord txnEpoch, HistoryRecord activeEpoch,
+    private CompletableFuture<Void> rollTransactions(String scope, String stream, EpochRecord txnEpoch, EpochRecord activeEpoch,
                                                      List<UUID> transactionsToCommit, OperationContext context) {
         // Idempotent: check if all transactions are already committed. if so, do nothing and return immediately
         // Just checking the last transaction id in list of transactions to commit suffices as we perform processing of
@@ -228,11 +230,11 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                 });
     }
 
-    private CompletionStage<Void> runRollingTxn(String scope, String stream, HistoryRecord txnEpoch, HistoryRecord activeEpoch,
+    private CompletionStage<Void> runRollingTxn(String scope, String stream, EpochRecord txnEpoch, EpochRecord activeEpoch,
                                                 List<UUID> transactionsToCommit, OperationContext context) {
         String delegationToken = streamMetadataTasks.retrieveDelegationToken();
         long timestamp = System.currentTimeMillis();
-        streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor);
+        streamMetadataStore.getActiveEpoch(scope, stream, true, context, executor);
 
         int newTxnEpoch = activeEpoch.getEpoch() + 1;
         int newActiveEpoch = newTxnEpoch + 1;
@@ -243,12 +245,13 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
         List<Long> activeEpochDuplicate = activeEpochSegments.stream()
                 .map(segment -> computeSegmentId(getSegmentNumber(segment), newActiveEpoch)).collect(Collectors.toList());
 
-        return copyTxnEpochSegmentsAndCommitTxns(scope, stream, transactionsToCommit, txnEpochDuplicate, context)
+        return streamMetadataStore.startRollingTxn(scope, stream, txnEpoch.getEpoch(), activeEpoch.getEpoch(), context, executor)
+            .thenCompose(r -> copyTxnEpochSegmentsAndCommitTxns(scope, stream, transactionsToCommit, txnEpochDuplicate)
                 .thenCompose(v -> streamMetadataTasks.notifyNewSegments(scope, stream, activeEpochDuplicate, context, delegationToken))
                 .thenCompose(v -> streamMetadataTasks.getSealedSegmentsSize(scope, stream, txnEpochDuplicate, delegationToken))
                 .thenCompose(sealedSegmentsMap -> {
                     log.debug("Rolling transaction, created duplicate of active epoch {} for stream {}/{}", activeEpoch, scope, stream);
-                    return streamMetadataStore.rollingTxnNewSegmentsCreated(scope, stream, sealedSegmentsMap, txnEpoch.getEpoch(),
+                    return streamMetadataStore.rollingTxnCreateNewEpochs(scope, stream, sealedSegmentsMap,
                             timestamp, context, executor);
                 })
                 .thenCompose(v -> streamMetadataTasks.notifySealedSegments(scope, stream, activeEpochSegments,
@@ -257,21 +260,9 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                         delegationToken))
                 .thenCompose(sealedSegmentsMap -> {
                     log.debug("Rolling transaction, sealed active epoch {} for stream {}/{}", activeEpoch, scope, stream);
-                    return streamMetadataStore.rollingTxnActiveEpochSealed(scope, stream, sealedSegmentsMap, activeEpoch.getEpoch(),
+                    return streamMetadataStore.completeRollingTxn(scope, stream, sealedSegmentsMap,
                             context, executor);
-                })
-                // We will mark transaction as committed in metadata store only after active epoch is sealed
-                // This is because there can be non zero time between marking a txn as committed and
-                // previous active epoch segments to be sealed. If we let the client know that transaction is committed
-                // then its data should be available to be read.
-                .thenCompose(x -> Futures.allOf(transactionsToCommit.stream()
-                        .map(txnId -> streamMetadataStore.commitTransaction(scope, stream, txnId, context, executor)
-                                .thenAccept(done -> {
-                                    log.debug("transaction {} on stream {}/{} committed successfully", txnId, scope, stream);
-                                })).collect(Collectors.toList())));
-
-        // TODO: shivesh: in a rerun of this method after having updated the epoch but before updating txn records will
-        // cause a new rolling txn to happen, though the data wont be duplicated.
+                }));
     }
 
     /**
@@ -280,7 +271,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
      * those duplicate segments.
      */
     private CompletableFuture<Void> copyTxnEpochSegmentsAndCommitTxns(String scope, String stream, List<UUID> transactionsToCommit,
-                                                                      List<Long> segmentIds, OperationContext context) {
+                                                                      List<Long> segmentIds) {
         // 1. create duplicate segments
         // 2. merge transactions in those segments
         // 3. seal txn epoch segments
@@ -295,21 +286,21 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                 .thenCompose(v -> {
                     log.debug("Rolling transaction, successfully created duplicate txn epoch {} for stream {}/{}", segmentIds, scope, stream);
                     // now commit transactions into these newly created segments
-                    return commitTransactions(scope, stream, segmentIds, transactionsToCommit, context);
+                    return commitTransactions(scope, stream, segmentIds, transactionsToCommit);
                 })
                 .thenCompose(v -> streamMetadataTasks.notifySealedSegments(scope, stream, segmentIds, delegationToken));
     }
 
     /**
-     * This method loops over each transaction in the list, commits them by calling into segment store followed by marking
-     * the transaction metadata as COMMITTED.
-     * At the end of this method's execution, all transactions in the list would have committed.
+     * This method loops over each transaction in the list, and commits them in order
+     * At the end of this method's execution, all transactions in the list would have committed into given list of segments.
      */
     private CompletableFuture<Void> commitTransactions(String scope, String stream, List<Long> segments,
-                                                       List<UUID> transactionsToCommit, OperationContext context) {
+                                                       List<UUID> transactionsToCommit) {
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+
         for (UUID txnId : transactionsToCommit) {
             log.debug("Committing transaction {} on stream {}/{}", txnId, scope, stream);
             // commit transaction in segment store
@@ -319,6 +310,27 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                     // transaction's epoch.
                     // And we are creating duplicates of txn epoch keeping the primary same.
                     .thenCompose(v -> streamMetadataTasks.notifyTxnCommit(scope, stream, segments, txnId));
+        }
+        return future;
+    }
+
+    /**
+     * This method loops over each transaction in the list, and marks transaction metadata as COMMITTED.
+     * At the end of this method's execution, all transactions in the list would have committed.
+     */
+    private CompletableFuture<Void> markCommitted(String scope, String stream, List<UUID> transactionsToCommit, OperationContext context) {
+        // Chain all transaction commit futures one after the other. This will ensure that order of commit
+        // if honoured and is based on the order in the list.
+        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+        for (UUID txnId : transactionsToCommit) {
+            log.debug("Committing transaction {} on stream {}/{}", txnId, scope, stream);
+            // commit transaction in segment store
+            future = future
+                    // mark transaction as committed in metadata store.
+                    .thenCompose(x -> streamMetadataStore.commitTransaction(scope, stream, txnId, context, executor)
+                            .thenAccept(done -> {
+                                log.debug("transaction {} on stream {}/{} committed successfully", txnId, scope, stream);
+                            }));
         }
         return future;
     }
@@ -350,10 +362,10 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
     /**
      * Fetches epoch history records for active epoch and the supplied `epoch` from the store.
      */
-    private CompletableFuture<List<HistoryRecord>> getEpochRecords(String scope, String stream, int epoch, OperationContext context) {
-        List<CompletableFuture<HistoryRecord>> list = new ArrayList<>();
+    private CompletableFuture<List<EpochRecord>> getEpochRecords(String scope, String stream, int epoch, OperationContext context) {
+        List<CompletableFuture<EpochRecord>> list = new ArrayList<>();
         list.add(streamMetadataStore.getEpoch(scope, stream, epoch, context, executor));
-        list.add(streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor));
+        list.add(streamMetadataStore.getActiveEpoch(scope, stream, true, context, executor));
         return Futures.allOfWithResults(list);
     }
 
