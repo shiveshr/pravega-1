@@ -10,14 +10,16 @@
 package io.pravega.controller.store.stream;
 
 import io.pravega.client.stream.StreamConfiguration;
+import io.pravega.controller.store.stream.records.CommitTransactionsRecord;
+import io.pravega.controller.store.stream.records.EpochRecord;
+import io.pravega.controller.store.stream.records.RetentionSet;
+import io.pravega.controller.store.stream.records.RetentionSetRecord;
+import io.pravega.controller.store.stream.records.RetentionStreamCutRecord;
+import io.pravega.controller.store.stream.records.TruncationRecord;
 import io.pravega.controller.store.stream.tables.ActiveTxnRecord;
-import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
-import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
-import io.pravega.controller.store.stream.tables.StreamCutRecord;
-import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 
 import java.util.AbstractMap;
 import java.util.AbstractMap.SimpleEntry;
@@ -70,14 +72,14 @@ interface Stream {
      * @param configuration new stream configuration.
      * @return future of new StreamConfigWithVersion.
      */
-    CompletableFuture<Void> startUpdateConfiguration(final StreamConfiguration configuration);
+    CompletableFuture<Integer> startUpdateConfiguration(final StreamConfiguration configuration);
 
     /**
      * Completes an ongoing updates configuration of an existing stream.
      *
      * @return future of new StreamConfigWithVersion.
      */
-    CompletableFuture<Void> completeUpdateConfiguration();
+    CompletableFuture<Void> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> versionedMetadata);
 
     /**
      * Fetches the current stream configuration.
@@ -86,14 +88,7 @@ interface Stream {
      */
     CompletableFuture<StreamConfiguration> getConfiguration();
 
-    /**
-     * Fetches the current stream configuration.
-     *
-     * @param ignoreCached ignore cached
-     *
-     * @return current stream configuration.
-     */
-    CompletableFuture<StreamConfigurationRecord> getConfigurationRecord(boolean ignoreCached);
+    CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> getVersionedConfigurationRecord();
 
     /**
      * Starts truncating an existing stream.
@@ -108,23 +103,29 @@ interface Stream {
      *
      * @return future of operation.
      */
-    CompletableFuture<Void> completeTruncation();
+    CompletableFuture<Void> completeTruncation(VersionedMetadata<TruncationRecord> truncationRecord);
 
     /**
      * Fetches the current stream cut.
      *
-     * @param ignoreCached ignore cached
-     *
      * @return current stream cut.
      */
-    CompletableFuture<StreamTruncationRecord> getTruncationRecord(boolean ignoreCached);
+    CompletableFuture<VersionedMetadata<TruncationRecord>> getVersionedTruncationRecord();
 
     /**
      * Update the state of the stream.
      *
      * @return boolean indicating whether the state of stream is updated.
      */
-    CompletableFuture<Boolean> updateState(final State state);
+    CompletableFuture<Integer> updateState(final State state);
+
+    /**
+     * TODO: shivesh
+     * @param state
+     * @param version
+     * @return
+     */
+    CompletableFuture<Integer> updateState(final State state, int version);
 
     /**
      * Get the state of the stream.
@@ -135,12 +136,19 @@ interface Stream {
     CompletableFuture<State> getState(boolean ignoreCached);
 
     /**
+     * TODO: shivesh
+     * @param ignoreCached
+     * @return
+     */
+    CompletableFuture<VersionedMetadata<State>> getVersionedState(boolean ignoreCached);
+
+    /**
      * If state is matches the given state then reset it back to State.ACTIVE
      *
      * @param state state to compare
      * @return Future which when completed has reset the state
      */
-    CompletableFuture<Void> resetStateConditionally(State state);
+    CompletableFuture<Boolean> resetStateConditionally(State state, Optional<Integer> version);
 
     /**
      * Fetches details of specified segment.
@@ -150,13 +158,13 @@ interface Stream {
      */
     CompletableFuture<Segment> getSegment(final long segmentId);
 
-    CompletableFuture<List<ScaleMetadata>> getScaleMetadata();
+    CompletableFuture<List<ScaleMetadata>> getScaleMetadata(final long from, final long to);
 
     /**
      * @param segmentId segment number.
      * @return successors of specified segment mapped to the list of their predecessors
      */
-    CompletableFuture<Map<Long, List<Long>>> getSuccessorsWithPredecessors(final long segmentId);
+    CompletableFuture<Map<Segment, List<Long>>> getSuccessorsWithPredecessors(final long segmentId);
 
     /**
      * Method to get all segments between given stream cuts.
@@ -179,13 +187,13 @@ interface Stream {
     /**
      * @return currently active segments
      */
-    CompletableFuture<List<Long>> getActiveSegments();
+    CompletableFuture<List<Segment>> getActiveSegments();
 
     /**
      * @param timestamp point in time.
      * @return the list of segments active at timestamp.
      */
-    CompletableFuture<Map<Long, Long>> getActiveSegments(final long timestamp);
+    CompletableFuture<Map<Segment, Long>> getSegmentsAtTime(final long timestamp);
 
     /**
      * Returns the active segments in the specified epoch.
@@ -193,7 +201,9 @@ interface Stream {
      * @param epoch epoch number.
      * @return list of numbers of segments active in the specified epoch.
      */
-    CompletableFuture<List<Long>> getActiveSegments(int epoch);
+    CompletableFuture<List<Segment>> getSegmentsInEpoch(int epoch);
+
+    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> getVersionedEpochTransition();
 
     /**
      * Called to start metadata updates to stream store wrt new scale event.
@@ -203,32 +213,36 @@ interface Stream {
      * @param runOnlyIfStarted run only if scale is started
      * @return sequence of newly created segments
      */
-    CompletableFuture<EpochTransitionRecord> startScale(final List<Long> sealedSegments,
-                                                        final List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
-                                                        final long scaleTimestamp,
-                                                        final boolean runOnlyIfStarted);
-    
+    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> startScale(final List<Long> sealedSegments,
+                                                                           final List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
+                                                                           final long scaleTimestamp,
+                                                                           final boolean runOnlyIfStarted);
+
     /**
-     * Called after epochTransition entry is created. Implementation of this method should create new segments that are
-     * specified in epochTransition in stream metadata tables.
+     * Called after epochTransition entry is created. Implementation of this method should create metadata about new segments
+     * and epoch that are specified in epochTransition.
      *
      * @param isManualScale flag to indicate if epoch transition should be migrated to latest epoch
      * @return Future, which when completed will indicate that new segments are created in the metadata store or wouldl
      * have failed with appropriate exception.
      */
-    CompletableFuture<Void> scaleCreateNewSegments(boolean isManualScale);
-
-    /**
-     * Called after new segment creation is complete.
-     */
-    CompletableFuture<Void> scaleNewSegmentsCreated();
+    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> scaleCreateNewEpoch(boolean isManualScale,
+                                                                                    VersionedMetadata<EpochTransitionRecord> versionedMetadata);
 
     /**
      * Called after sealing old segments is complete.
      *
      * @param sealedSegmentSizes sealed segments with absolute sizes
      */
-    CompletableFuture<Void> scaleOldSegmentsSealed(Map<Long, Long> sealedSegmentSizes);
+    CompletableFuture<Void> completeScale(Map<Long, Long> sealedSegmentSizes, VersionedMetadata<EpochTransitionRecord> versionedMetadata);
+
+    /**
+     *
+     * @param txnEpoch
+     * @param activeEpoch
+     * @return
+     */
+    CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int txnEpoch, int activeEpoch);
 
     /**
      * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
@@ -237,23 +251,22 @@ interface Stream {
      * are merged and the other for duplicate active epoch.
      *
      * @param sealedTxnEpochSegments sealed segments from intermediate txn epoch with size at the time of sealing.
-     * @param transactionEpoch epoch for transactions that need to be rolled over.
      * @param time timestamp
      *
      * @return CompletableFuture which upon completion will indicate that we have successfully created new epoch entries.
      */
-    CompletableFuture<Void> rollingTxnNewSegmentsCreated(Map<Long, Long> sealedTxnEpochSegments, int transactionEpoch, long time);
+    CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> rollingTxnCreateNewEpochs(Map<Long, Long> sealedTxnEpochSegments, long time,
+                                                      VersionedMetadata<CommitTransactionsRecord> committingTransactionsRecord);
 
     /**
      * This is the final step of rolling transaction and is called after old segments are sealed in segment store.
      * This should complete the epoch transition in the metadata store.
      *
      * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing.
-     * @param activeEpoch active epoch at the time when rolling transaction was started.
-     * @param time sealed segments from active epoch with size at the time of sealing.
      * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.
      */
-    CompletableFuture<Void> rollingTxnActiveEpochSealed(Map<Long, Long> sealedActiveEpochSegments, int activeEpoch, long time);
+    CompletableFuture<Void> completeRollingTxn(Map<Long, Long> sealedActiveEpochSegments,
+                                               VersionedMetadata<CommitTransactionsRecord> committingTransactionsRecord);
 
     /**
      * Sets cold marker which is valid till the specified time stamp.
@@ -371,10 +384,10 @@ interface Stream {
     /**
      * Returns the currently active stream epoch.
      *
-     * @param ignoreCached if ignore cache is set to true then fetch the value from the store. 
+     * @param ignoreCached if ignore cache is set to true then fetch the value from the store.
      * @return currently active stream epoch.
      */
-    CompletableFuture<HistoryRecord> getActiveEpoch(boolean ignoreCached);
+    CompletableFuture<EpochRecord> getActiveEpoch(boolean ignoreCached);
 
     /**
      * Returns the epoch record corresponding to supplied epoch.
@@ -382,7 +395,7 @@ interface Stream {
      * @param epoch epoch to retrieve record for
      * @return CompletableFuture which on completion will have the epoch record corresponding to the given epoch
      */
-    CompletableFuture<HistoryRecord> getEpochRecord(int epoch);
+    CompletableFuture<EpochRecord> getEpochRecord(int epoch);
 
     /**
      * Method to get stream size till the given stream cut
@@ -390,7 +403,7 @@ interface Stream {
      * @param streamCut stream cut
      * @return A CompletableFuture, that when completed, will contain size of stream till given cut.
      */
-    CompletableFuture<Long> getSizeTillStreamCut(Map<Long, Long> streamCut);
+    CompletableFuture<Long> getSizeTillStreamCut(Map<Long, Long> streamCut, Optional<RetentionStreamCutRecord> reference);
 
     /**
      *Add a new Stream cut to retention set.
@@ -398,14 +411,13 @@ interface Stream {
      * @param streamCut stream cut record to add
      * @return future of operation
      */
-    CompletableFuture<Void> addStreamCutToRetentionSet(final StreamCutRecord streamCut);
+    CompletableFuture<Void> addStreamCutToRetentionSet(final RetentionStreamCutRecord streamCut);
 
-    /**
-     * Get all stream cuts stored in the retention set.
-     *
-     * @return list of stream cut records
-     */
-    CompletableFuture<List<StreamCutRecord>> getRetentionStreamCuts();
+    // TODO: shivesh
+    CompletableFuture<RetentionSet> getRetentionSet();
+
+    // TODO: shivesh
+    CompletableFuture<RetentionStreamCutRecord> getStreamCutRecord(RetentionSetRecord record);
 
     /**
      * Delete all stream cuts in the retention set that preceed the supplied stream cut.
@@ -414,7 +426,7 @@ interface Stream {
      * @param streamCut stream cut
      * @return future of operation
      */
-    CompletableFuture<Void> deleteStreamCutBefore(final StreamCutRecord streamCut);
+    CompletableFuture<Void> deleteStreamCutBefore(final RetentionSetRecord streamCut);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.
@@ -425,7 +437,8 @@ interface Stream {
      * @param txnsToCommit transactions to commit within the epoch
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
-    CompletableFuture<Void> createCommittingTransactionsRecord(final int epoch, final List<UUID> txnsToCommit);
+    CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startCommitTransactions(final int epoch, final List<UUID> txnsToCommit,
+                                                                                           VersionedMetadata<CommitTransactionsRecord> versionedMetadata);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.
@@ -434,14 +447,15 @@ interface Stream {
      *
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
-    CompletableFuture<CommittingTransactionsRecord> getCommittingTransactionsRecord();
+    CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> getVersionedCommitTransactionsRecord();
 
     /**
+     * TODO: shivesh
      * Method to delete committing transaction record from the store for a given stream.
      *
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
      */
-    CompletableFuture<Void> deleteCommittingTransactionsRecord();
+    CompletableFuture<Void> completeCommitTransactions(VersionedMetadata<CommitTransactionsRecord> versionedMetadata);
 
     /**
      * Method to get all transactions in a given epoch.
@@ -475,17 +489,4 @@ interface Stream {
      * @return CompletableFuture which indicates completion of processing.
      */
     CompletableFuture<Void> deleteWaitingRequestConditionally(String processorName);
-
-    /**
-     * This method returns the base number that will be used to create segment ids in this stream.
-     *
-     * @return Starting segment number.
-     */
-    CompletableFuture<Integer> getStartingSegmentNumber();
-
-    /**
-     * Refresh the stream object. Typically to be used to invalidate any caches.
-     * This allows us reuse of stream object without having to recreate a new stream object for each new operation
-     */
-    void refresh();
 }
