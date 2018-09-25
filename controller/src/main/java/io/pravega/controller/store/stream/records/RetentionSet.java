@@ -14,6 +14,7 @@ import com.google.common.collect.Lists;
 import io.pravega.common.ObjectBuilder;
 import io.pravega.controller.store.stream.records.serializers.RetentionSetSerializer;
 import lombok.Builder;
+import lombok.Data;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -24,13 +25,14 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Builder
+@Data
 public class RetentionSet {
     public static final RetentionSetSerializer SERIALIZER = new RetentionSetSerializer();
 
     @Getter
     private final List<RetentionSetRecord> retentionRecords;
 
-    public RetentionSet(List<RetentionSetRecord> retentionSetRecords) {
+    RetentionSet(List<RetentionSetRecord> retentionSetRecords) {
         this.retentionRecords = ImmutableList.copyOf(retentionSetRecords);
     }
 
