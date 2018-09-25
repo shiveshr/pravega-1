@@ -44,7 +44,6 @@ import io.pravega.shared.segment.StreamSegmentNameUtils;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import lombok.val;
 
 import java.util.AbstractMap;
 import java.util.AbstractMap.SimpleEntry;
@@ -182,8 +181,8 @@ public abstract class AbstractStream implements Stream {
                         }));
     }
 
-    public CompletableFuture<VersionedMetadata<TruncationRecord>> getVersionedTruncationRecord(boolean ignoreCached) {
-        return getTruncationData(ignoreCached)
+    public CompletableFuture<VersionedMetadata<TruncationRecord>> getVersionedTruncationRecord() {
+        return getTruncationData(true)
                 .thenApply(data -> {
                     TruncationRecord truncationRecord = TruncationRecord.parse(data.getData());
                     return new VersionedMetadata<>(truncationRecord, data.getVersion());
@@ -258,11 +257,11 @@ public abstract class AbstractStream implements Stream {
      */
     @Override
     public CompletableFuture<StreamConfiguration> getConfiguration() {
-        return getVersionedConfigurationRecord(false).thenApply(x -> x.getObject().getStreamConfiguration());
+        return getConfigurationData(false).thenApply(x -> StreamConfigurationRecord.parse(x.getData()).getStreamConfiguration());
     }
 
-    public CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> getVersionedConfigurationRecord(boolean ignoreCached) {
-        return getConfigurationData(ignoreCached)
+    public CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> getVersionedConfigurationRecord() {
+        return getConfigurationData(true)
                 .thenApply(data -> new VersionedMetadata<>(StreamConfigurationRecord.parse(data.getData()), data.getVersion()));
     }
 
@@ -425,15 +424,6 @@ public abstract class AbstractStream implements Stream {
                 });
     }
 
-    private Segment transform(StreamSegmentRecord segmentRecord) {
-        return new Segment(segmentRecord.segmentId(), segmentRecord.getCreationTime(),
-                segmentRecord.getKeyStart(), segmentRecord.getKeyEnd());
-    }
-
-    private List<Segment> transform(List<StreamSegmentRecord> segmentRecords) {
-        return segmentRecords.stream().map(this::transform).collect(Collectors.toList());
-    }
-
     public CompletableFuture<List<Segment>> getCurrentSegments() {
         // read current epoch record
         return getCurrentEpochRecord().thenApply(epochRecord -> transform(epochRecord.getSegments()));
@@ -445,7 +435,7 @@ public abstract class AbstractStream implements Stream {
      * @return : list of active segment numbers at given time stamp
      */
     public CompletableFuture<Map<Segment, Long>> getSegmentsAtTime(final long timestamp) {
-        return getVersionedTruncationRecord(true)
+        return getVersionedTruncationRecord()
                 .thenCompose(truncationRecord -> findEpochAtTime(timestamp)
                         .thenCompose(this::getEpochRecordFor)
                         .thenApply(epochRecord -> RecordHelper.getActiveSegments(epochRecord, truncationRecord.getObject())))
@@ -464,6 +454,15 @@ public abstract class AbstractStream implements Stream {
 
     public CompletableFuture<EpochRecord> getEpochRecordFor(int epoch) {
         return getEpochRecordData(epoch).thenApply(epochRecordData -> EpochRecord.parse(epochRecordData.getData()));
+    }
+
+    private Segment transform(StreamSegmentRecord segmentRecord) {
+        return new Segment(segmentRecord.segmentId(), segmentRecord.getCreationTime(),
+                segmentRecord.getKeyStart(), segmentRecord.getKeyEnd());
+    }
+
+    private List<Segment> transform(List<StreamSegmentRecord> segmentRecords) {
+        return segmentRecords.stream().map(this::transform).collect(Collectors.toList());
     }
 
     private CompletableFuture<Void> createHistoryIndex(long time) {
@@ -846,6 +845,10 @@ public abstract class AbstractStream implements Stream {
     // endregion
 
     // region scale
+    public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> getVersionedEpochTransition() {
+        return getEpochTransitionNode().thenApply(x -> new VersionedMetadata<>(EpochTransitionRecord.parse(x.getData()), x.getVersion()));
+    }
+
     /**
      * This method attempts to start a new scale workflow. For this it first computes epoch transition and stores it in the metadastore.
      * This method can be called by manual scale or during the processing of auto-scale event. Which means there could be
@@ -871,53 +874,6 @@ public abstract class AbstractStream implements Stream {
 
                             return startScale(segmentsToSeal, newRanges, scaleTimestamp, runOnlyIfStarted, currentEpoch);
                         }));
-    }
-
-    private CompletableFuture<VersionedMetadata<EpochTransitionRecord>> startScale(List<Long> segmentsToSeal,
-                                                                                   List<SimpleEntry<Double, Double>> newRanges,
-                                                                                   long scaleTimestamp, boolean runOnlyIfStarted,
-                                                                                   EpochRecord currentEpoch) {
-        return getEpochTransitionNode()
-                .thenCompose(existing -> {
-                    EpochTransitionRecord epochTransitionRecord = EpochTransitionRecord.parse(existing.getData());
-                    // epoch transition should never be null. it may be empty or non empty.
-                    if (!epochTransitionRecord.equals(EpochTransitionRecord.EMPTY)) {
-                        // verify that its the same as the supplied input (--> segments to be sealed
-                        // and new ranges are identical). else throw scale conflict exception
-                        if (!RecordHelper.verifyRecordMatchesInput(segmentsToSeal, newRanges, runOnlyIfStarted, epochTransitionRecord)) {
-                            log.debug("scale conflict, another scale operation is ongoing");
-                            throw new EpochTransitionOperationExceptions.ConflictException();
-                        }
-                        return CompletableFuture.completedFuture(new VersionedMetadata<>(epochTransitionRecord, existing.getVersion()));
-                    } else {
-                        if (runOnlyIfStarted) {
-                            log.info("scale not started, retry later.");
-                            throw new TaskExceptions.StartException("Scale not started yet.");
-                        }
-
-                        // check input is valid and satisfies preconditions
-                        if (!RecordHelper.canScaleFor(segmentsToSeal, currentEpoch)) {
-                            // invalid input, log and ignore
-                            log.warn("scale precondition failed {}", segmentsToSeal);
-                            throw new EpochTransitionOperationExceptions.PreConditionFailureException();
-                        }
-
-                        EpochTransitionRecord epochTransition = RecordHelper.computeEpochTransition(
-                                currentEpoch, segmentsToSeal, newRanges, scaleTimestamp);
-
-                        return updateEpochTransitionNode(new Data<>(epochTransition.toByteArray(), existing.getVersion()))
-                                .handle((r, e) -> {
-                                    if (Exceptions.unwrap(e) instanceof StoreException.WriteConflictException) {
-                                        log.debug("scale conflict, another scale operation is ongoing");
-                                        throw new EpochTransitionOperationExceptions.ConflictException();
-                                    }
-
-                                    log.info("scale for stream {}/{} accepted. Segments to seal = {}", scope, name,
-                                            epochTransition.getSegmentsToSeal());
-                                    return new VersionedMetadata<>(epochTransition, r);
-                                });
-                    }
-                });
     }
 
     public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> scaleCreateNewEpochFor(boolean isManualScale,
@@ -983,8 +939,51 @@ public abstract class AbstractStream implements Stream {
                 });
     }
 
-    public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> getVersionedEpochTransition() {
-        return getEpochTransitionNode().thenApply(x -> new VersionedMetadata<>(EpochTransitionRecord.parse(x.getData()), x.getVersion()));
+    private CompletableFuture<VersionedMetadata<EpochTransitionRecord>> startScale(List<Long> segmentsToSeal,
+                                                                                   List<SimpleEntry<Double, Double>> newRanges,
+                                                                                   long scaleTimestamp, boolean runOnlyIfStarted,
+                                                                                   EpochRecord currentEpoch) {
+        return getEpochTransitionNode()
+                .thenCompose(existing -> {
+                    EpochTransitionRecord epochTransitionRecord = EpochTransitionRecord.parse(existing.getData());
+                    // epoch transition should never be null. it may be empty or non empty.
+                    if (!epochTransitionRecord.equals(EpochTransitionRecord.EMPTY)) {
+                        // verify that its the same as the supplied input (--> segments to be sealed
+                        // and new ranges are identical). else throw scale conflict exception
+                        if (!RecordHelper.verifyRecordMatchesInput(segmentsToSeal, newRanges, runOnlyIfStarted, epochTransitionRecord)) {
+                            log.debug("scale conflict, another scale operation is ongoing");
+                            throw new EpochTransitionOperationExceptions.ConflictException();
+                        }
+                        return CompletableFuture.completedFuture(new VersionedMetadata<>(epochTransitionRecord, existing.getVersion()));
+                    } else {
+                        if (runOnlyIfStarted) {
+                            log.info("scale not started, retry later.");
+                            throw new TaskExceptions.StartException("Scale not started yet.");
+                        }
+
+                        // check input is valid and satisfies preconditions
+                        if (!RecordHelper.canScaleFor(segmentsToSeal, currentEpoch)) {
+                            // invalid input, log and ignore
+                            log.warn("scale precondition failed {}", segmentsToSeal);
+                            throw new EpochTransitionOperationExceptions.PreConditionFailureException();
+                        }
+
+                        EpochTransitionRecord epochTransition = RecordHelper.computeEpochTransition(
+                                currentEpoch, segmentsToSeal, newRanges, scaleTimestamp);
+
+                        return updateEpochTransitionNode(new Data<>(epochTransition.toByteArray(), existing.getVersion()))
+                                .handle((r, e) -> {
+                                    if (Exceptions.unwrap(e) instanceof StoreException.WriteConflictException) {
+                                        log.debug("scale conflict, another scale operation is ongoing");
+                                        throw new EpochTransitionOperationExceptions.ConflictException();
+                                    }
+
+                                    log.info("scale for stream {}/{} accepted. Segments to seal = {}", scope, name,
+                                            epochTransition.getSegmentsToSeal());
+                                    return new VersionedMetadata<>(epochTransition, r);
+                                });
+                    }
+                });
     }
 
     private StreamSegmentRecord newSegmentRecord(long segmentId, long time, Double low, Double high) {
@@ -1068,7 +1067,23 @@ public abstract class AbstractStream implements Stream {
     }
     // endregion
 
-    //region rolling txn
+    //region rolling transactions + transaction commit workflow
+    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startCommitTransactions(final int epoch, final List<UUID> txnsToCommit,
+                                                                                                  VersionedMetadata<CommitTransactionsRecord> versionedMetadata) {
+        CommitTransactionsRecord committingTransactionsRecord = new CommitTransactionsRecord(epoch, txnsToCommit);
+        return updateCommitTxnRecord(new Data<>(committingTransactionsRecord.toByteArray(), versionedMetadata.getVersion()))
+                .thenApply(x -> new VersionedMetadata<>(committingTransactionsRecord, x));
+    }
+
+    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> getVersionedCommitTransactionsRecord() {
+        return getCommitTxnRecord()
+                .thenApply(r -> new VersionedMetadata<>(CommitTransactionsRecord.parse(r.getData()), r.getVersion()));
+    }
+
+    public CompletableFuture<Void> resetCommitTransactionsRecord(VersionedMetadata<CommitTransactionsRecord> versionedMetadata) {
+        return Futures.toVoid(updateCommitTxnRecord(new Data<>(CommitTransactionsRecord.EMPTY.toByteArray(), versionedMetadata.getVersion())));
+    }
+
     public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch) {
         return getCommitTxnRecord().thenCompose(committingTxnRecordData -> {
             CommitTransactionsRecord record = CommitTransactionsRecord.parse(committingTxnRecordData.getData());
@@ -1223,17 +1238,6 @@ public abstract class AbstractStream implements Stream {
         });
     }
 
-    private CompletableFuture<TxnStatus> getCompletedTxnStatus(UUID txId) {
-        return getCompletedTx(txId).handle((ok, ex) -> {
-            if (ex != null && Exceptions.unwrap(ex) instanceof DataNotFoundException) {
-                return TxnStatus.UNKNOWN;
-            } else if (ex != null) {
-                throw new CompletionException(ex);
-            }
-            return CompletedTxnRecord.parse(ok.getData()).getCompletionStatus();
-        });
-    }
-
     @Override
     public CompletableFuture<SimpleEntry<TxnStatus, Integer>> sealTransaction(final UUID txId, final boolean commit,
                                                                               final Optional<Integer> version) {
@@ -1247,62 +1251,6 @@ public abstract class AbstractStream implements Stream {
                         return CompletableFuture.completedFuture(pair);
                     }
                 });
-    }
-
-    /**
-     * Seal a transaction in OPEN/COMMITTING_TXN/ABORTING state. This method does CAS on the transaction Data<Integer> node if
-     * the transaction is in OPEN state, optionally checking version of transaction Data<Integer> node, if required.
-     *
-     * @param epoch   transaction epoch.
-     * @param txId    transaction identifier.
-     * @param commit  boolean indicating whether to commit or abort the transaction.
-     * @param version optional expected version of transaction node to validate before updating it.
-     * @return        a pair containing transaction status and its epoch.
-     */
-    private CompletableFuture<SimpleEntry<TxnStatus, Integer>> sealActiveTxn(final int epoch,
-                                                                             final UUID txId,
-                                                                             final boolean commit,
-                                                                             final Optional<Integer> version) {
-        return getActiveTx(epoch, txId).thenCompose(data -> {
-            ActiveTxnRecord txnRecord = ActiveTxnRecord.parse(data.getData());
-            int dataVersion = version.orElseGet(data::getVersion);
-            TxnStatus status = txnRecord.getTxnStatus();
-            switch (status) {
-                case OPEN:
-                    return sealActiveTx(epoch, txId, commit, txnRecord, dataVersion).thenApply(y ->
-                            new SimpleEntry<>(commit ? TxnStatus.COMMITTING : TxnStatus.ABORTING, epoch));
-                case COMMITTING:
-                case COMMITTED:
-                    if (commit) {
-                        return CompletableFuture.completedFuture(new SimpleEntry<>(status, epoch));
-                    } else {
-                        throw StoreException.create(StoreException.Type.ILLEGAL_STATE,
-                                "Stream: " + getName() + " Transaction: " + txId.toString() +
-                                        " State: " + status.name());
-                    }
-                case ABORTING:
-                case ABORTED:
-                    if (commit) {
-                        throw StoreException.create(StoreException.Type.ILLEGAL_STATE,
-                                "Stream: " + getName() + " Transaction: " + txId.toString() + " State: " +
-                                        status.name());
-                    } else {
-                        return CompletableFuture.completedFuture(new SimpleEntry<>(status, epoch));
-                    }
-                default:
-                    throw StoreException.create(StoreException.Type.DATA_NOT_FOUND,
-                            "Stream: " + getName() + " Transaction: " + txId.toString());
-            }
-        });
-    }
-
-    private CompletableFuture<Integer> sealActiveTx(int epoch, UUID txId, boolean commit, ActiveTxnRecord record, int dataVersion) {
-        final ActiveTxnRecord updated = new ActiveTxnRecord(record.getTxCreationTimestamp(),
-                record.getLeaseExpiryTime(),
-                record.getMaxExecutionExpiryTime(),
-                commit ? TxnStatus.COMMITTING : TxnStatus.ABORTING);
-        final Data<Integer> data = new Data<>(updated.toByteArray(), dataVersion);
-        return updateActiveTx(epoch, txId, data);
     }
 
     @Override
@@ -1362,6 +1310,96 @@ public abstract class AbstractStream implements Stream {
         }).thenCompose(y -> removeActiveTxEntry(epoch, txId)).thenApply(y -> TxnStatus.ABORTED);
     }
 
+    @Override
+    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getActiveTxns() {
+        return getCurrentTxns()
+                .thenApply(x -> x.entrySet()
+                        .stream()
+                        .collect(toMap(k -> UUID.fromString(k.getKey()),
+                                v -> ActiveTxnRecord.parse(v.getValue().getData()))));
+    }
+
+    @Override
+    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getTransactionsInEpoch(final int epoch) {
+        return getTxnInEpoch(epoch)
+                .thenApply(x -> x.entrySet()
+                        .stream()
+                        .collect(toMap(k -> UUID.fromString(k.getKey()),
+                                v -> ActiveTxnRecord.parse(v.getValue().getData()))));
+    }
+
+    private int getTransactionEpoch(UUID txId) {
+        // epoch == UUID.msb >> 32
+        return TableHelper.getTransactionEpoch(txId);
+    }
+
+    private CompletableFuture<TxnStatus> getCompletedTxnStatus(UUID txId) {
+        return getCompletedTx(txId).handle((ok, ex) -> {
+            if (ex != null && Exceptions.unwrap(ex) instanceof DataNotFoundException) {
+                return TxnStatus.UNKNOWN;
+            } else if (ex != null) {
+                throw new CompletionException(ex);
+            }
+            return CompletedTxnRecord.parse(ok.getData()).getCompletionStatus();
+        });
+    }
+
+    /**
+     * Seal a transaction in OPEN/COMMITTING_TXN/ABORTING state. This method does CAS on the transaction Data<Integer> node if
+     * the transaction is in OPEN state, optionally checking version of transaction Data<Integer> node, if required.
+     *
+     * @param epoch   transaction epoch.
+     * @param txId    transaction identifier.
+     * @param commit  boolean indicating whether to commit or abort the transaction.
+     * @param version optional expected version of transaction node to validate before updating it.
+     * @return        a pair containing transaction status and its epoch.
+     */
+    private CompletableFuture<SimpleEntry<TxnStatus, Integer>> sealActiveTxn(final int epoch,
+                                                                             final UUID txId,
+                                                                             final boolean commit,
+                                                                             final Optional<Integer> version) {
+        return getActiveTx(epoch, txId).thenCompose(data -> {
+            ActiveTxnRecord txnRecord = ActiveTxnRecord.parse(data.getData());
+            int dataVersion = version.orElseGet(data::getVersion);
+            TxnStatus status = txnRecord.getTxnStatus();
+            switch (status) {
+                case OPEN:
+                    return sealActiveTx(epoch, txId, commit, txnRecord, dataVersion).thenApply(y ->
+                            new SimpleEntry<>(commit ? TxnStatus.COMMITTING : TxnStatus.ABORTING, epoch));
+                case COMMITTING:
+                case COMMITTED:
+                    if (commit) {
+                        return CompletableFuture.completedFuture(new SimpleEntry<>(status, epoch));
+                    } else {
+                        throw StoreException.create(StoreException.Type.ILLEGAL_STATE,
+                                "Stream: " + getName() + " Transaction: " + txId.toString() +
+                                        " State: " + status.name());
+                    }
+                case ABORTING:
+                case ABORTED:
+                    if (commit) {
+                        throw StoreException.create(StoreException.Type.ILLEGAL_STATE,
+                                "Stream: " + getName() + " Transaction: " + txId.toString() + " State: " +
+                                        status.name());
+                    } else {
+                        return CompletableFuture.completedFuture(new SimpleEntry<>(status, epoch));
+                    }
+                default:
+                    throw StoreException.create(StoreException.Type.DATA_NOT_FOUND,
+                            "Stream: " + getName() + " Transaction: " + txId.toString());
+            }
+        });
+    }
+
+    private CompletableFuture<Integer> sealActiveTx(int epoch, UUID txId, boolean commit, ActiveTxnRecord record, int dataVersion) {
+        final ActiveTxnRecord updated = new ActiveTxnRecord(record.getTxCreationTimestamp(),
+                record.getLeaseExpiryTime(),
+                record.getMaxExecutionExpiryTime(),
+                commit ? TxnStatus.COMMITTING : TxnStatus.ABORTING);
+        final Data<Integer> data = new Data<>(updated.toByteArray(), dataVersion);
+        return updateActiveTx(epoch, txId, data);
+    }
+
     @SneakyThrows
     private TxnStatus handleDataNotFoundException(Throwable ex) {
         if (Exceptions.unwrap(ex) instanceof DataNotFoundException) {
@@ -1383,57 +1421,6 @@ public abstract class AbstractStream implements Stream {
                         "Stream: " + getName() + " Transaction: " + txId.toString() + " State: " + status.name());
             }
         });
-    }
-
-    @Override
-    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getActiveTxns() {
-        return getCurrentTxns()
-                .thenApply(x -> x.entrySet()
-                        .stream()
-                        .collect(toMap(k -> UUID.fromString(k.getKey()),
-                                v -> ActiveTxnRecord.parse(v.getValue().getData()))));
-    }
-
-    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startCommitTransactions(final int epoch, final List<UUID> txnsToCommit,
-                                                                                                  VersionedMetadata<CommitTransactionsRecord> versionedMetadata) {
-        CommitTransactionsRecord committingTransactionsRecord = new CommitTransactionsRecord(epoch, txnsToCommit);
-        return updateCommitTxnRecord(new Data<>(committingTransactionsRecord.toByteArray(),  versionedMetadata.getVersion()))
-                .thenApply(x -> new VersionedMetadata<>(committingTransactionsRecord, x));
-    }
-
-    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> getCommitTransactionsRecord() {
-        CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> result = new CompletableFuture<>();
-        getCommitTxnRecord()
-                .whenComplete((r, e) -> {
-                    if (e != null) {
-                        if (Exceptions.unwrap(e) instanceof DataNotFoundException) {
-                            result.complete(null);
-                        } else {
-                            result.completeExceptionally(e);
-                        }
-                    } else {
-                        result.complete(new VersionedMetadata<>(CommitTransactionsRecord.parse(r.getData()), r.getVersion()));
-                    }
-                });
-        return result;
-    }
-
-    public CompletableFuture<Void> resetCommitTransactionsRecord(VersionedMetadata<CommitTransactionsRecord> versionedMetadata) {
-        return Futures.toVoid(updateCommitTxnRecord(new Data<>(CommitTransactionsRecord.EMPTY.toByteArray(), versionedMetadata.getVersion())));
-    }
-
-    @Override
-    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getTransactionsInEpoch(final int epoch) {
-        return getTxnInEpoch(epoch)
-                .thenApply(x -> x.entrySet()
-                        .stream()
-                        .collect(toMap(k -> UUID.fromString(k.getKey()),
-                                v -> ActiveTxnRecord.parse(v.getValue().getData()))));
-    }
-
-    int getTransactionEpoch(UUID txId) {
-        // epoch == UUID.msb >> 32
-        return TableHelper.getTransactionEpoch(txId);
     }
     // endregion
 
