@@ -24,6 +24,7 @@ import java.util.List;
 
 @Data
 public class HistoryTimeIndexRootNode {
+    public static final int HISTORY_INDEX_CHUNK_SIZE = 100000;
     public static final HistoryIndexRootNodeSerializer SERIALIZER = new HistoryIndexRootNodeSerializer();
 
     // Sorted leaves
