@@ -131,7 +131,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                                           final OperationContext context) {
         return streamMetadataStore.getState(scope, stream, true, context, executor)
                 .thenCompose(state -> {
-                    CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> commitFuture = startCommitTransactions(scope, stream, txnEpoch, context)
+                    CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> commitFuture = createRecordAndGetCommitTxnList(scope, stream, txnEpoch, context)
                             .thenCompose(versionedMetadata -> {
                                 if (versionedMetadata.getObject().equals(CommitTransactionsRecord.EMPTY)) {
                                     // reset state conditionally in case we were left with stale committing state from a previous execution
@@ -187,7 +187,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                 });
     }
 
-    private CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startCommitTransactions(String scope, String stream, int epoch, OperationContext context) {
+    private CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> createRecordAndGetCommitTxnList(String scope, String stream, int epoch, OperationContext context) {
         return streamMetadataStore.getCommittingTransactionsRecord(scope, stream, context, executor)
                 .thenCompose(versionedMetadata -> {
                     if (versionedMetadata.getObject().equals(CommitTransactionsRecord.EMPTY)) {
@@ -198,13 +198,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                         if (versionedMetadata.getObject().getEpoch() == epoch) {
                             // Note: If there are transactions that are not included in the commitList but have committing state,
                             // we can be sure they will be completed through another event for this epoch.
-                            List<UUID> transactions = versionedMetadata.getObject().getTransactionsToCommit();
-                            return streamMetadataStore.startCommitTransactions(scope, stream, epoch, transactions, versionedMetadata.getVersion(),
-                                    context, executor)
-                                    .thenApply(x -> {
-                                        log.debug("Transactions {} added to commit list for epoch {} stream {}/{}", transactions, epoch, scope, stream);
-                                        return x;
-                                    });
+                            return CompletableFuture.completedFuture(versionedMetadata);
                         } else {
                             log.debug("Postponing commit on epoch {} as transactions on different epoch {} are being committed for stream {}/{}",
                                     epoch, versionedMetadata.getObject().getEpoch(), scope, stream);
@@ -224,7 +218,13 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                     existing, context, executor));
         }
 
-        return future.thenCompose(record -> runRollingTxn(scope, stream, txnEpoch, activeEpoch, record, context));
+        return future.thenCompose(record -> {
+            if (activeEpoch.getEpoch() < record.getObject().getActiveEpoch()) {
+                return runRollingTxn(scope, stream, txnEpoch, activeEpoch, record, context);
+            } else {
+                return CompletableFuture.completedFuture(record);
+            }
+        });
     }
 
     private CompletionStage<VersionedMetadata<CommitTransactionsRecord>> runRollingTxn(String scope, String stream, EpochRecord txnEpoch,
@@ -237,7 +237,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
 
         List<Long> txnEpochDuplicate = txnEpoch.getSegments().stream().map(segment ->
                 computeSegmentId(getSegmentNumber(segment.segmentId()), newTxnEpoch)).collect(Collectors.toList());
-        List<Long> activeEpochSegments = activeEpoch.getSegments().stream().map(StreamSegmentRecord::segmentId).collect(Collectors.toList());
+        List<Long> activeEpochSegments = activeEpoch.getSegmentIds();
         List<Long> activeEpochDuplicate = activeEpochSegments.stream()
                 .map(segment -> computeSegmentId(getSegmentNumber(segment), newActiveEpoch)).collect(Collectors.toList());
 

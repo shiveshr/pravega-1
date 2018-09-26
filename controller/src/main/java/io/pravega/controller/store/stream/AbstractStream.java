@@ -997,7 +997,7 @@ public abstract class AbstractStream implements Stream {
                     break;
                 }
                 EpochRecord epochRecord = epochs.get(i);
-                List<Long> epochSegments = epochRecord.getSegments().stream().map(StreamSegmentRecord::segmentId).collect(Collectors.toList());
+                List<Long> epochSegments = epochRecord.getSegmentIds();
                 List<Long> found = toFind.stream().filter(epochSegments::contains).collect(Collectors.toList());
                 resultSet.putAll(found.stream().collect(Collectors.toMap(x -> epochRecord.getSegments().stream()
                         .filter(z -> z.segmentId() == x).findFirst().get(), x -> epochRecord.getEpoch())));

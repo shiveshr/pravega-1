@@ -21,6 +21,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * Serializable class that captures an epoch record.
@@ -75,5 +76,9 @@ public class EpochRecord {
 
     public static class EpochRecordBuilder implements ObjectBuilder<EpochRecord> {
 
+    }
+
+    public List<Long> getSegmentIds() {
+        return this.getSegments().stream().map(StreamSegmentRecord::segmentId).collect(Collectors.toList());
     }
 }
