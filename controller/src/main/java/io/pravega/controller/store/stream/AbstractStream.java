@@ -169,15 +169,12 @@ public abstract class AbstractStream implements Stream {
      * @return future of operation.
      */
     @Override
-    public CompletableFuture<Integer> startUpdateConfiguration(final StreamConfiguration newConfiguration) {
-        return getConfigurationData(true)
-                .thenCompose(configData -> {
-                    StreamConfigurationRecord previous = StreamConfigurationRecord.parse(configData.getData());
-                    Preconditions.checkNotNull(previous);
-                    Preconditions.checkArgument(!previous.isUpdating());
-                    StreamConfigurationRecord update = StreamConfigurationRecord.update(newConfiguration);
-                    return setConfigurationData(new Data<>(update.toByteArray(), configData.getVersion()));
-                });
+    public CompletableFuture<Integer> startUpdateConfiguration(final StreamConfiguration newConfiguration,
+                                                               final VersionedMetadata<StreamConfigurationRecord> previous) {
+        Preconditions.checkNotNull(previous);
+        Preconditions.checkArgument(!previous.getObject().isUpdating());
+        StreamConfigurationRecord update = StreamConfigurationRecord.update(newConfiguration);
+        return setConfigurationData(new Data<>(update.toByteArray(), previous.getVersion()));
     }
 
     /**
@@ -267,11 +264,11 @@ public abstract class AbstractStream implements Stream {
      * @return Future which when completes will have reset the state or failed with appropriate exception.
      */
     @Override
-    public CompletableFuture<Boolean> resetStateConditionally(State state, Optional<Integer> version) {
+    public CompletableFuture<Boolean> resetStateConditionally(State state) {
         return getStateData(true)
                 .thenCompose(currState -> {
                     if (state.equals(StateRecord.parse(currState.getData()))) {
-                        return updateState(State.ACTIVE, version.orElse(currState.getVersion())).thenApply(x -> true);
+                        return updateState(State.ACTIVE, currState.getVersion()).thenApply(x -> true);
                     } else {
                         return CompletableFuture.completedFuture(false);
                     }
@@ -387,7 +384,7 @@ public abstract class AbstractStream implements Stream {
 
     @Override
     public CompletableFuture<EpochRecord> getActiveEpoch(boolean ignoreCached) {
-        return getActiveEpochRecordData(ignoreCached).thenApply(currentEpochRecord -> EpochRecord.parse(currentEpochRecord.getData()));
+        return getCurrentEpochRecordData(ignoreCached).thenApply(currentEpochRecord -> EpochRecord.parse(currentEpochRecord.getData()));
     }
 
     @Override
@@ -549,16 +546,16 @@ public abstract class AbstractStream implements Stream {
     }
 
     private CompletableFuture<EpochRecord> getActiveEpochRecord() {
-        return getActiveEpochRecordData(false).thenApply(x -> EpochRecord.parse(x.getData()));
+        return getCurrentEpochRecordData(false).thenApply(x -> EpochRecord.parse(x.getData()));
     }
 
-    private CompletableFuture<Void> updateCurrentEpochRecord(int activeEpoch) {
+    private CompletableFuture<Integer> updateCurrentEpochRecord(int activeEpoch) {
         return getEpochRecord(activeEpoch)
-                .thenCompose(epochRecord -> getActiveEpochRecordData(true)
+                .thenCompose(epochRecord -> getCurrentEpochRecordData(true)
                         .thenCompose(currentEpochRecordData -> {
                             if (EpochRecord.parse(currentEpochRecordData.getData()).getEpoch() < activeEpoch) {
-                                return Futures.toVoid(updateCurrentEpochRecordData(
-                                        new Data<>(epochRecord.toByteArray(), currentEpochRecordData.getVersion())));
+                                return updateCurrentEpochRecordData(
+                                        new Data<>(epochRecord.toByteArray(), currentEpochRecordData.getVersion()));
                             } else if (EpochRecord.parse(currentEpochRecordData.getData()).getEpoch() == activeEpoch) {
                                 return CompletableFuture.completedFuture(null);
                             } else {
@@ -781,11 +778,11 @@ public abstract class AbstractStream implements Stream {
                                 activeEpoch, duplicateSegmentsToSeal, epochTransition.getNewSegmentsWithRange().values().asList(),
                                 epochTransition.getTime());
                         return updateEpochTransitionNode(new Data<>(updatedRecord.toByteArray(), versionedMetadata.getVersion()))
-                                .thenApply(v -> new VersionedMetadata(updatedRecord, v));
+                                .thenApply(v -> new VersionedMetadata<>(updatedRecord, v));
                     } else {
                         // we should never reach here!! rescue and exit
                         return updateEpochTransitionNode(new Data<>(EpochTransitionRecord.EMPTY.toByteArray(), versionedMetadata.getVersion()))
-                                .thenCompose(v -> resetStateConditionally(State.SCALING, Optional.empty()))
+                                .thenCompose(v -> resetStateConditionally(State.SCALING))
                                 .thenApply(v -> {
                                     log.warn("Scale epoch transition record is inconsistent with Data<Integer> in the table. {}",
                                             epochTransition.getNewEpoch());
@@ -1014,22 +1011,20 @@ public abstract class AbstractStream implements Stream {
 
     // region truncation
     @Override
-    public CompletableFuture<Void> startTruncation(final Map<Long, Long> streamCut) {
+    public CompletableFuture<Integer> startTruncation(final Map<Long, Long> streamCut, VersionedMetadata<TruncationRecord> existing) {
+        Preconditions.checkNotNull(existing);
+        Preconditions.checkArgument(!existing.getObject().isUpdating());
         return computeStreamCutSpan(streamCut)
-                .thenCompose(span -> getTruncationData(true)
-                        .thenCompose(truncationData -> {
-                            Preconditions.checkNotNull(truncationData);
-                            TruncationRecord previous = TruncationRecord.parse(truncationData.getData());
-                            Exceptions.checkArgument(!previous.isUpdating(), "TruncationRecord", "Truncation record conflict");
-
+                .thenCompose(span -> {
+                            TruncationRecord previous = existing.getObject();
                             // check greater than
                             Exceptions.checkArgument(span.keySet().stream().allMatch(x ->
                                             previous.getSpan().keySet().stream().noneMatch(y -> y.overlaps(x) && y.segmentId() > x.segmentId())),
                                     "StreamCut", "Supplied streamcut is behind previous truncation point");
 
                             return computeTruncationRecord(previous, streamCut, span)
-                                    .thenCompose(prop -> Futures.toVoid(setTruncationData(new Data<>(prop.toByteArray(), truncationData.getVersion()))));
-                        }));
+                                    .thenCompose(prop -> setTruncationData(new Data<>(prop.toByteArray(), existing.getVersion())));
+                        });
     }
 
     @Override
@@ -1087,10 +1082,10 @@ public abstract class AbstractStream implements Stream {
     //region rolling transactions + transaction commit workflow
     @Override
     public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startCommitTransactions(final int epoch, final List<UUID> txnsToCommit,
-                                                                                                  VersionedMetadata<CommitTransactionsRecord> versionedMetadata) {
+                                                                                                  int previousVersion) {
         CommitTransactionsRecord committingTransactionsRecord = CommitTransactionsRecord.builder().epoch(epoch)
                 .transactionsToCommit(txnsToCommit).build();
-        return updateCommitTxnRecord(new Data<>(committingTransactionsRecord.toByteArray(), versionedMetadata.getVersion()))
+        return updateCommitTxnRecord(new Data<>(committingTransactionsRecord.toByteArray(), previousVersion))
                 .thenApply(x -> new VersionedMetadata<>(committingTransactionsRecord, x));
     }
 
@@ -1106,18 +1101,17 @@ public abstract class AbstractStream implements Stream {
     }
 
     @Override
-    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch) {
-        return getCommitTxnRecord().thenCompose(committingTxnRecordData -> {
-            CommitTransactionsRecord record = CommitTransactionsRecord.parse(committingTxnRecordData.getData());
-            assert(record.getEpoch() == transactionEpoch);
-            if (activeEpoch == record.getActiveEpoch()) {
-                return CompletableFuture.completedFuture(new VersionedMetadata<>(record, committingTxnRecordData.getVersion()));
-            } else {
-                CommitTransactionsRecord update = record.getRollingTxnRecord(activeEpoch);
-                return updateCommitTxnRecord(new Data<>(update.toByteArray(), committingTxnRecordData.getVersion()))
-                        .thenApply(version -> new VersionedMetadata<>(update, version));
-            }
-        });
+    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch,
+                                                                                          VersionedMetadata<CommitTransactionsRecord> existing) {
+        CommitTransactionsRecord record = existing.getObject();
+        assert (record.getEpoch() == transactionEpoch);
+        if (record.isRollingTransactions()) {
+            return CompletableFuture.completedFuture(new VersionedMetadata<>(record, existing.getVersion()));
+        } else {
+            CommitTransactionsRecord update = record.getRollingTxnRecord(activeEpoch);
+            return updateCommitTxnRecord(new Data<>(update.toByteArray(), existing.getVersion()))
+                    .thenApply(version -> new VersionedMetadata<>(update, version));
+        }
     }
 
     @Override
@@ -1179,7 +1173,7 @@ public abstract class AbstractStream implements Stream {
                             if (activeEpochRecord.getEpoch() == activeEpoch) {
                                 return updateSealedSegmentSizes(sealedActiveEpochSegments)
                                         .thenCompose(x -> clearMarkers(sealedActiveEpochSegments.keySet()))
-                                        .thenCompose(x -> updateCurrentEpochRecord(activeEpoch + 2));
+                                        .thenCompose(x -> Futures.toVoid(updateCurrentEpochRecord(activeEpoch + 2)));
                             } else {
                                 return CompletableFuture.completedFuture(null);
                             }
@@ -1353,7 +1347,7 @@ public abstract class AbstractStream implements Stream {
                                 v -> ActiveTxnRecord.parse(v.getValue().getData()))));
     }
 
-    private int getTransactionEpoch(UUID txId) {
+    protected int getTransactionEpoch(UUID txId) {
         // epoch == UUID.msb >> 32
         return TableHelper.getTransactionEpoch(txId);
     }
@@ -1452,13 +1446,13 @@ public abstract class AbstractStream implements Stream {
     // region retention
 
     @Override
-    public CompletableFuture<Void> addStreamCutToRetentionSet(RetentionStreamCutRecord streamCut) {
+    public CompletableFuture<Void> addStreamCutToRetentionSet(RetentionStreamCutRecord record) {
         return getRetentionSetData()
                 .thenCompose(data -> {
                     RetentionSet retention = RetentionSet.parse(data.getData());
 
-                    RetentionSet update = RetentionSet.addStreamCutIfLatest(retention, streamCut);
-                    return createStreamCutRecordData(streamCut.toByteArray())
+                    RetentionSet update = RetentionSet.addStreamCutIfLatest(retention, record);
+                    return createStreamCutRecordData(record.getRecordingTime(), record.toByteArray())
                             .thenCompose(v -> Futures.toVoid(updateRetentionSetData(new Data<>(update.toByteArray(), data.getVersion()))));
                 });
     }
@@ -1561,7 +1555,7 @@ public abstract class AbstractStream implements Stream {
     // region retention
     abstract CompletableFuture<Void> createRetentionSetDataIfAbsent(byte[] data);
 
-    abstract CompletableFuture<Void> createStreamCutRecordData(byte[] record);
+    abstract CompletableFuture<Void> createStreamCutRecordData(long key, byte[] record);
 
     abstract CompletableFuture<Data<Integer>> getStreamCutRecordData(long recordingTime);
 
@@ -1587,7 +1581,7 @@ public abstract class AbstractStream implements Stream {
 
     abstract CompletableFuture<Void> createCurrentEpochRecordDataIfAbsent(byte[] data);
     abstract CompletableFuture<Integer> updateCurrentEpochRecordData(Data<Integer> data);
-    abstract CompletableFuture<Data<Integer>> getActiveEpochRecordData(boolean ignoreCached);
+    abstract CompletableFuture<Data<Integer>> getCurrentEpochRecordData(boolean ignoreCached);
 
     abstract CompletableFuture<Void> createEpochRecordDataIfAbsent(int epoch, byte[] data);
     abstract CompletableFuture<Data<Integer>> getEpochRecordData(int epoch);
@@ -1618,9 +1612,9 @@ public abstract class AbstractStream implements Stream {
 
     abstract CompletableFuture<Void> createCompletedTxEntry(final UUID txId, byte[] data);
 
-    abstract CompletableFuture<Map<String, Data>> getCurrentTxns();
+    abstract CompletableFuture<Map<String, Data<Integer>>> getCurrentTxns();
 
-    abstract CompletableFuture<Map<String, Data>> getTxnInEpoch(int epoch);
+    abstract CompletableFuture<Map<String, Data<Integer>>> getTxnInEpoch(int epoch);
     // endregion
 
     // region marker

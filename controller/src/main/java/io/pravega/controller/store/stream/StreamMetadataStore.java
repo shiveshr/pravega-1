@@ -173,6 +173,7 @@ public interface StreamMetadataStore {
     CompletableFuture<Integer> startUpdateConfiguration(final String scope,
                                                      final String name,
                                                      final StreamConfiguration configuration,
+                                                     final VersionedMetadata<StreamConfigurationRecord> previous,
                                                      final OperationContext context,
                                                      final Executor executor);
 
@@ -227,9 +228,10 @@ public interface StreamMetadataStore {
      * @param executor      callers executor
      * @return future of operation.
      */
-    CompletableFuture<Void> startTruncation(final String scope,
+    CompletableFuture<Integer> startTruncation(final String scope,
                                             final String name,
                                             final Map<Long, Long> streamCut,
+                                            final VersionedMetadata<TruncationRecord> previous,
                                             final OperationContext context,
                                             final Executor executor);
 
@@ -257,9 +259,9 @@ public interface StreamMetadataStore {
      * @param executor     callers executor
      * @return current truncation property.
      */
-    CompletableFuture<VersionedMetadata<TruncationRecord>> getTruncationRecord(final String scope, final String name,
-                                                                               final OperationContext context,
-                                                                               final Executor executor);
+    CompletableFuture<VersionedMetadata<TruncationRecord>> getVersionedTruncationRecord(final String scope, final String name,
+                                                                                        final OperationContext context,
+                                                                                        final Executor executor);
 
     /**
      * Set the stream state to sealed.
@@ -450,6 +452,7 @@ public interface StreamMetadataStore {
      * @return
      */
     CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(String scope, String name, int txnEpoch, int activeEpoch,
+                                                                                   VersionedMetadata<CommitTransactionsRecord> record,
                                                                                    OperationContext context, Executor executor);
 
     /**
@@ -498,7 +501,6 @@ public interface StreamMetadataStore {
      */
     CompletableFuture<Boolean> resetStateConditionally(final String scope, final String name,
                                                     final State state,
-                                                    final Optional<Integer> version,
                                                     final OperationContext context,
                                                     final Executor executor);
 
@@ -912,9 +914,9 @@ public interface StreamMetadataStore {
      * @param context
      * @param executor
      */
-    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> getEpochTransition(String scope, String stream,
-                                                                                   OperationContext context,
-                                                                                   ScheduledExecutorService executor);
+    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> getVersionedEpochTransition(String scope, String stream,
+                                                                                            OperationContext context,
+                                                                                            ScheduledExecutorService executor);
 
     /**
      * Method to create committing transaction record in the store for a given stream.
@@ -932,7 +934,7 @@ public interface StreamMetadataStore {
                                                                                            final String stream,
                                                                                            final int epoch,
                                                                                            final List<UUID> txnsToCommit,
-                                                                                           final VersionedMetadata<CommitTransactionsRecord> versionedMetadata,
+                                                                                           final int previousVersion,
                                                                                            final OperationContext context,
                                                                                            final ScheduledExecutorService executor);
 

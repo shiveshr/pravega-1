@@ -72,7 +72,8 @@ interface Stream {
      * @param configuration new stream configuration.
      * @return future of new StreamConfigWithVersion.
      */
-    CompletableFuture<Integer> startUpdateConfiguration(final StreamConfiguration configuration);
+    CompletableFuture<Integer> startUpdateConfiguration(final StreamConfiguration configuration,
+                                                        final VersionedMetadata<StreamConfigurationRecord> previous);
 
     /**
      * Completes an ongoing updates configuration of an existing stream.
@@ -96,7 +97,7 @@ interface Stream {
      * @param streamCut new stream cut.
      * @return future of new StreamProperty.
      */
-    CompletableFuture<Void> startTruncation(final Map<Long, Long> streamCut);
+    CompletableFuture<Integer> startTruncation(final Map<Long, Long> streamCut, VersionedMetadata<TruncationRecord> previous);
 
     /**
      * Completes an ongoing stream truncation.
@@ -148,7 +149,7 @@ interface Stream {
      * @param state state to compare
      * @return Future which when completed has reset the state
      */
-    CompletableFuture<Boolean> resetStateConditionally(State state, Optional<Integer> version);
+    CompletableFuture<Boolean> resetStateConditionally(State state);
 
     /**
      * Fetches details of specified segment.
@@ -242,7 +243,8 @@ interface Stream {
      * @param activeEpoch
      * @return
      */
-    CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int txnEpoch, int activeEpoch);
+    CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int txnEpoch, int activeEpoch,
+                                                                                   VersionedMetadata<CommitTransactionsRecord> record);
 
     /**
      * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
@@ -438,7 +440,7 @@ interface Stream {
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
     CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startCommitTransactions(final int epoch, final List<UUID> txnsToCommit,
-                                                                                           VersionedMetadata<CommitTransactionsRecord> versionedMetadata);
+                                                                                           int previousVersion);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.

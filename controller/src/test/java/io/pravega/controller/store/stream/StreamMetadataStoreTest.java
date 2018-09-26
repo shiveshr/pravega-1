@@ -443,7 +443,7 @@ public abstract class StreamMetadataStoreTest {
         // endregion
 
         // region concurrent start scale requests
-        // run two concurrent runScale operations such that after doing a getEpochTransition, we create a new epoch
+        // run two concurrent runScale operations such that after doing a getVersionedEpochTransition, we create a new epoch
         // transition node. We should get ScaleConflict in such a case.
         // mock createEpochTransition
         SimpleEntry<Double, Double> segment6 = new SimpleEntry<>(0.0, 1.0);
@@ -841,7 +841,7 @@ public abstract class StreamMetadataStoreTest {
         truncation.put(1L, 0L);
         assertTrue(Futures.await(store.startTruncation(scope, stream, truncation, null, executor)));
         store.setState(scope, stream, State.TRUNCATING, null, executor).join();
-        StreamTruncationRecord truncationProperty = store.getTruncationRecord(scope, stream, true, null, executor).join();
+        StreamTruncationRecord truncationProperty = store.getVersionedTruncationRecord(scope, stream, true, null, executor).join();
         assertTrue(truncationProperty.isUpdating());
 
         Map<Long, Long> truncation2 = new HashMap<>();
@@ -851,7 +851,7 @@ public abstract class StreamMetadataStoreTest {
         assertFalse(Futures.await(store.startTruncation(scope, stream, truncation2, null, executor)));
         assertTrue(Futures.await(store.completeTruncation(scope, stream, null, executor)));
 
-        truncationProperty = store.getTruncationRecord(scope, stream, true, null, executor).join();
+        truncationProperty = store.getVersionedTruncationRecord(scope, stream, true, null, executor).join();
         assertEquals(truncation, truncationProperty.getStreamCut());
 
         assertTrue(truncationProperty.getCutEpochMap().size() == 2);

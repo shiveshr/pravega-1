@@ -202,8 +202,8 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<Boolean> resetStateConditionally(String scope, String name, State state, Optional<Integer> version, OperationContext context, Executor executor) {
-        return withCompletion(getStream(scope, name, context).resetStateConditionally(state, version), executor);
+    public CompletableFuture<Boolean> resetStateConditionally(String scope, String name, State state, OperationContext context, Executor executor) {
+        return withCompletion(getStream(scope, name, context).resetStateConditionally(state), executor);
     }
 
     /**
@@ -271,11 +271,12 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
 
 
     @Override
-    public CompletableFuture<Void> startTruncation(final String scope,
+    public CompletableFuture<Integer> startTruncation(final String scope,
                                                    final String name,
                                                    final Map<Long, Long> streamCut,
+                                                   final VersionedMetadata<TruncationRecord> previous,
                                                    final OperationContext context, final Executor executor) {
-        return withCompletion(getStream(scope, name, context).startTruncation(streamCut), executor);
+        return withCompletion(getStream(scope, name, context).startTruncation(streamCut, previous), executor);
     }
 
     @Override
@@ -285,20 +286,21 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<VersionedMetadata<TruncationRecord>> getTruncationRecord(final String scope,
-                                                                                      final String name,
-                                                                                      final OperationContext context,
-                                                                                      final Executor executor) {
+    public CompletableFuture<VersionedMetadata<TruncationRecord>> getVersionedTruncationRecord(final String scope,
+                                                                                               final String name,
+                                                                                               final OperationContext context,
+                                                                                               final Executor executor) {
         return withCompletion(getStream(scope, name, context).getVersionedTruncationRecord(), executor);
     }
 
     @Override
     public CompletableFuture<Integer> startUpdateConfiguration(final String scope,
-                                                            final String name,
-                                                            final StreamConfiguration configuration,
-                                                            final OperationContext context,
-                                                            final Executor executor) {
-        return withCompletion(getStream(scope, name, context).startUpdateConfiguration(configuration), executor);
+                                                               final String name,
+                                                               final StreamConfiguration configuration,
+                                                               final VersionedMetadata<StreamConfigurationRecord> previous,
+                                                               final OperationContext context,
+                                                               final Executor executor) {
+        return withCompletion(getStream(scope, name, context).startUpdateConfiguration(configuration, previous), executor);
     }
 
     @Override
@@ -396,6 +398,12 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
         return withCompletion(stream.isStreamCutValid(streamCut), executor);
     }
 
+    @Override
+    public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> getVersionedEpochTransition(String scope, String stream,
+                                                                                                   OperationContext context,
+                                                                                                   ScheduledExecutorService executor) {
+        return withCompletion(getStream(scope, stream, context).getVersionedEpochTransition(), executor);
+    }
 
     @Override
     public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> startScale(final String scope,
@@ -442,8 +450,9 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
 
     @Override
     public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(String scope, String name, int txnEpoch, int activeEpoch,
-                                                                                   OperationContext context, Executor executor) {
-        return withCompletion(getStream(scope, name, context).startRollingTxn(txnEpoch, activeEpoch), executor);
+                                                                                          VersionedMetadata<CommitTransactionsRecord> record,
+                                                                                          OperationContext context, Executor executor) {
+        return withCompletion(getStream(scope, name, context).startRollingTxn(txnEpoch, activeEpoch, record), executor);
     }
 
     @Override
@@ -679,9 +688,9 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
 
     @Override
     public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startCommitTransactions(String scope, String stream, int epoch, List<UUID> txnsToCommit,
-                                                           final VersionedMetadata<CommitTransactionsRecord> versionedMetadata,
+                                                           final int previousVersion,
                                                            OperationContext context, ScheduledExecutorService executor) {
-        return withCompletion(getStream(scope, stream, context).startCommitTransactions(epoch, txnsToCommit, versionedMetadata), executor);
+        return withCompletion(getStream(scope, stream, context).startCommitTransactions(epoch, txnsToCommit, previousVersion), executor);
     }
 
     @Override

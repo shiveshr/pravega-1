@@ -18,6 +18,8 @@ import io.pravega.common.lang.Int96;
 import io.pravega.controller.server.retention.BucketChangeListener;
 import io.pravega.controller.server.retention.BucketOwnershipListener;
 import io.pravega.controller.store.index.InMemoryHostIndex;
+import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
+import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.stream.api.grpc.v1.Controller.CreateScopeStatus;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteScopeStatus;
 import lombok.Synchronized;
@@ -33,6 +35,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -151,9 +154,10 @@ class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
 
     @Override
     @Synchronized
-    public CompletableFuture<Void> startUpdateConfiguration(final String scopeName,
+    public CompletableFuture<Integer> startUpdateConfiguration(final String scopeName,
                                                             final String streamName,
                                                             final StreamConfiguration configuration,
+                                                            final VersionedMetadata<StreamConfigurationRecord> previous,
                                                             final OperationContext context,
                                                             final Executor executor) {
         if (scopes.containsKey(scopeName)) {
@@ -162,7 +166,7 @@ class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
                 return Futures.
                         failedFuture(StoreException.create(StoreException.Type.DATA_NOT_FOUND, scopeStreamName));
             }
-            return streams.get(scopeStreamName).startUpdateConfiguration(configuration);
+            return streams.get(scopeStreamName).startUpdateConfiguration(configuration, previous);
         } else {
             return Futures.
                     failedFuture(StoreException.create(StoreException.Type.DATA_NOT_FOUND, scopeName));

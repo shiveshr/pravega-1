@@ -75,4 +75,8 @@ public class CommitTransactionsRecord {
         Preconditions.checkState(this.activeEpoch == Integer.MIN_VALUE);
         return new CommitTransactionsRecord(this.epoch, this.transactionsToCommit, activeEpoch);
     }
+
+    public boolean isRollingTransactions() {
+        return activeEpoch > Integer.MIN_VALUE;
+    }
 }
