@@ -615,7 +615,7 @@ public abstract class AbstractStream implements Stream {
         return verifyNotSealed()
                 .thenCompose(verified -> getCurrentEpochRecord()
                         .thenCompose(currentEpoch -> {
-                            if (!RecordHelper.isScaleInputValid(segmentsToSeal, newRanges, currentEpoch)) {
+                            if (!RecordHelper.validateInputRange(segmentsToSeal, newRanges, currentEpoch)) {
                                 log.error("scale input invalid {} {}", segmentsToSeal, newRanges);
                                 throw new EpochTransitionOperationExceptions.InputInvalidException();
                             }
@@ -624,30 +624,15 @@ public abstract class AbstractStream implements Stream {
                         }));
     }
 
-    public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> scaleCreateNewEpochFor(boolean isManualScale,
-                                                                                              VersionedMetadata<EpochTransitionRecord> versionedMetadata) {
+    public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> scaleCreateNewEpoch(
+            VersionedMetadata<EpochTransitionRecord> versionedMetadata) {
         // check if epoch transition needs to be migrated for manual scale (in case rolling txn happened after the scale was submitted).
         // add new epoch record
         return checkState(state -> state.equals(State.SCALING))
-                .thenCompose((Void v) -> {
-                    if (isManualScale) {
-                        // The epochTransitionNode is the barrier that prevents concurrent scaling.
-                        // State is the barrier to ensure only one work happens at a time.
-                        // However, if epochTransition node is created but before scaling happens,
-                        // we can have rolling transaction kick in which would create newer epochs.
-                        // For auto-scaling, the new duplicate epoch means the segment is sealed and no
-                        // longer hot or cold.
-                        // However for manual scaling, by virtue of accepting the request and creating
-                        // new epoch transition record, we have promised the caller that we would scale
-                        // to create sets of segments as requested by them.
-                        return migrateManualScaleToNewEpoch(versionedMetadata);
-                    } else {
-                        return CompletableFuture.completedFuture(versionedMetadata);
-                    }
-                }).thenCompose(versionedEpochTransition -> getCurrentEpochRecord().thenCompose(currentEpoch -> {
+                .thenCompose(v -> getCurrentEpochRecord().thenCompose(currentEpoch -> {
                     // apply epoch transition on current epoch and compute new epoch
                     // use scale time in epoch transition record
-                    EpochTransitionRecord epochTransition = versionedEpochTransition.getObject();
+                    EpochTransitionRecord epochTransition = versionedMetadata.getObject();
                     List<StreamSegmentRecord> newSegments = epochTransition.getNewSegmentsWithRange().entrySet().stream()
                             .map(x -> newSegmentRecord(x.getKey(), epochTransition.getTime(), x.getValue().getKey(), x.getValue().getKey()))
                             .collect(Collectors.toList());
@@ -663,7 +648,7 @@ public abstract class AbstractStream implements Stream {
                             .thenCompose(x -> Futures.allOf(epochTransition.getSegmentsToSeal().stream()
                                     .map(segmentToSeal -> recordSegmentSealedEpoch(segmentToSeal, epochTransition.getNewEpoch()))
                                     .collect(Collectors.toList())))
-                            .thenApply(x -> versionedEpochTransition);
+                            .thenApply(x -> versionedMetadata);
                 }));
     }
 
@@ -691,18 +676,33 @@ public abstract class AbstractStream implements Stream {
                                                                                    List<SimpleEntry<Double, Double>> newRanges,
                                                                                    long scaleTimestamp, boolean runOnlyIfStarted,
                                                                                    EpochRecord currentEpoch) {
-        return getEpochTransitionNode()
+        return getVersionedEpochTransition()
                 .thenCompose(existing -> {
-                    EpochTransitionRecord epochTransitionRecord = EpochTransitionRecord.parse(existing.getData());
+                    EpochTransitionRecord epochTransitionRecord = existing.getObject();
                     // epoch transition should never be null. it may be empty or non empty.
                     if (!epochTransitionRecord.equals(EpochTransitionRecord.EMPTY)) {
                         // verify that its the same as the supplied input (--> segments to be sealed
                         // and new ranges are identical). else throw scale conflict exception
+                        boolean isManualScale = runOnlyIfStarted;
                         if (!RecordHelper.verifyRecordMatchesInput(segmentsToSeal, newRanges, runOnlyIfStarted, epochTransitionRecord)) {
                             log.debug("scale conflict, another scale operation is ongoing");
                             throw new EpochTransitionOperationExceptions.ConflictException();
                         }
-                        return CompletableFuture.completedFuture(new VersionedMetadata<>(epochTransitionRecord, existing.getVersion()));
+
+                        if (isManualScale) {
+                            // The epochTransitionNode is the barrier that prevents concurrent scaling.
+                            // State is the barrier to ensure only one work happens at a time.
+                            // However, if epochTransition node is created but before scaling happens,
+                            // we can have rolling transaction kick in which would create newer epochs.
+                            // For auto-scaling, the new duplicate epoch means the segment is sealed and no
+                            // longer hot or cold.
+                            // However for manual scaling, by virtue of accepting the request and having created
+                            // new epoch transition record, we have promised the caller that we would scale
+                            // to create sets of segments as requested by them.
+                            return migrateManualScaleToNewEpoch(existing);
+                        } else {
+                            return CompletableFuture.completedFuture(existing);
+                        }
                     } else {
                         if (runOnlyIfStarted) {
                             log.info("scale not started, retry later.");
