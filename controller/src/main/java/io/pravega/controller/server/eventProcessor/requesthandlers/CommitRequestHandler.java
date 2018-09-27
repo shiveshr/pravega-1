@@ -268,7 +268,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                 delegationToken))
                         .thenCompose(sealedSegmentsMap -> {
                             log.debug("Rolling transaction, sealed active epoch {} for stream {}/{}", activeEpoch, scope, stream);
-                            return streamMetadataStore.completeRollingTxn(scope, stream, sealedSegmentsMap, versionedMetadata,
+                            return streamMetadataStore.completeRollingTxn(scope, stream, sealedSegmentsMap, timestamp, versionedMetadata,
                                     context, executor);
                         }));
     }

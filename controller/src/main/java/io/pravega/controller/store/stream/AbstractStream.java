@@ -1085,7 +1085,7 @@ public abstract class AbstractStream implements Stream {
         return Futures.toVoid(updateCommitTxnRecord(new Data<>(CommitTransactionsRecord.EMPTY.toByteArray(), versionedMetadata.getVersion())));
     }
 
-    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch,
+    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch, long time, 
                                                                                           VersionedMetadata<CommitTransactionsRecord> existing) {
         CommitTransactionsRecord record = existing.getObject();
         assert(record.getEpoch() == transactionEpoch);
