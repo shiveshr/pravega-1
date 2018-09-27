@@ -75,16 +75,17 @@ public class TruncateStreamTask implements StreamTask<TruncateStreamEvent> {
                 });
     }
 
-    private CompletableFuture<Void> processTruncate(String scope, String stream, VersionedMetadata<StreamTruncationRecord> truncationRecord,
+    private CompletableFuture<Void> processTruncate(String scope, String stream, VersionedMetadata<StreamTruncationRecord> versionedTruncationRecord,
                                                     OperationContext context, String delegationToken) {
-        log.info("Truncating stream {}/{} at stream cut: {}", scope, stream, truncationRecord.getObject().getStreamCut());
+        StreamTruncationRecord truncationRecord = versionedTruncationRecord.getObject();
+        log.info("Truncating stream {}/{} at stream cut: {}", scope, stream, truncationRecord.getStreamCut());
         return Futures.toVoid(streamMetadataStore.setState(scope, stream, State.TRUNCATING, context, executor)
-                .thenCompose(x -> notifyTruncateSegments(scope, stream, truncationRecord.getObject().getStreamCut(), delegationToken))
-                .thenCompose(x -> notifyDeleteSegments(scope, stream, truncationRecord.getObject().getToDelete(), delegationToken))
-                .thenCompose(x -> streamMetadataStore.getSizeTillStreamCut(scope, stream, truncationRecord.getObject().getStreamCut(),
+                .thenCompose(x -> notifyTruncateSegments(scope, stream, truncationRecord.getStreamCut(), delegationToken))
+                .thenCompose(x -> notifyDeleteSegments(scope, stream, truncationRecord.getToDelete(), delegationToken))
+                .thenCompose(x -> streamMetadataStore.getSizeTillStreamCut(scope, stream, truncationRecord.getStreamCut(),
                         context, executor))
                 .thenAccept(truncatedSize -> DYNAMIC_LOGGER.reportGaugeValue(nameFromStream(TRUNCATED_SIZE, scope, stream), truncatedSize))
-                .thenCompose(deleted -> streamMetadataStore.completeTruncation(scope, stream, truncationRecord, context, executor))
+                .thenCompose(deleted -> streamMetadataStore.completeTruncation(scope, stream, versionedTruncationRecord, context, executor))
                 .thenCompose(x -> streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor)));
     }
 
