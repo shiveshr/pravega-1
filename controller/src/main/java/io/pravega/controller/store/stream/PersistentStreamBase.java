@@ -848,11 +848,27 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> rollingTxnNewSegmentsCreated(Map<Long, Long> sealedTxnEpochSegments, int transactionEpoch, long time) {
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch,
+                                                                                          VersionedMetadata<CommittingTransactionsRecord> existing) {
+        CommittingTransactionsRecord record = existing.getObject();
+        assert (record.getEpoch() == transactionEpoch);
+        if (activeEpoch == record.getActiveEpoch()) {
+            return CompletableFuture.completedFuture(existing);
+        } else {
+            CommittingTransactionsRecord update = record.getRollingTxnRecord(activeEpoch);
+            return updateCommittingTxnRecord(new Data<>(update.toByteArray(), existing.getVersion()))
+                    .thenApply(version -> new VersionedMetadata<>(update, version));
+        }
+    }
+
+    @Override
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> rollingTxnCreateDuplicateEpochs(
+            Map<Long, Long> sealedTxnEpochSegments, long time, VersionedMetadata<CommittingTransactionsRecord> record) {
         return checkState(state -> state.equals(State.COMMITTING_TXN) || state.equals(State.SEALING))
         .thenCompose(v -> addSealedSegmentsToRecord(sealedTxnEpochSegments)
                 .thenCompose(x -> getActiveEpoch(true))
-                .thenCompose(activeEpoch -> rollingTxnAddNewDuplicateEpochs(transactionEpoch, time)));
+                .thenCompose(activeEpoch -> rollingTxnAddNewDuplicateEpochs(record.getObject().getEpoch(), time)))
+                .thenApply(x -> record);
     }
 
     private CompletableFuture<Void> rollingTxnAddNewDuplicateEpochs(final int transactionEpoch, final long time) {
@@ -906,18 +922,19 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> rollingTxnActiveEpochSealed(Map<Long, Long> sealedActiveEpochSegments, int activeEpoch, long time) {
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> completeRollingTxn(Map<Long, Long> sealedActiveEpochSegments,
+                                                                    long time, VersionedMetadata<CommittingTransactionsRecord> existing) {
         Predicate<HistoryRecord> idempotent = input -> {
             Set<Integer> set1 = input.getSegments().stream().map(StreamSegmentNameUtils::getSegmentNumber).collect(Collectors.toSet());
             Set<Integer> set2 = sealedActiveEpochSegments.keySet().stream().map(StreamSegmentNameUtils::getSegmentNumber).collect(Collectors.toSet());
-            return input.getEpoch() == activeEpoch + 2 && set1.equals(set2);
+            return input.getEpoch() == existing.getObject().getActiveEpoch() + 2 && set1.equals(set2);
         };
 
-        // get active epoch from somewhere.. possibly from the code itself.
         return checkState(state -> state.equals(State.COMMITTING_TXN) || state.equals(State.SEALING))
                 .thenCompose(v -> addSealedSegmentsToRecord(sealedActiveEpochSegments)
                 .thenCompose(x -> clearMarkers(sealedActiveEpochSegments.keySet()))
-                .thenCompose(x -> completePartialRecordInHistory(sealedActiveEpochSegments, activeEpoch, time, idempotent)));
+                .thenCompose(x -> completePartialRecordInHistory(sealedActiveEpochSegments, existing.getObject().getActiveEpoch(), time, idempotent)))
+                .thenApply(x -> existing);
     }
 
     /**
@@ -1266,8 +1283,10 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> createCommittingTransactionsRecord(final int epoch, final List<UUID> txnsToCommit) {
-        return createCommittingTxnRecord(new CommittingTransactionsRecord(epoch, txnsToCommit).toByteArray());
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(final int epoch, final List<UUID> txnsToCommit, int previousVersion) {
+        CommittingTransactionsRecord committingTransactionsRecord = new CommittingTransactionsRecord(epoch, txnsToCommit);
+        return updateCommittingTxnRecord(new Data<>(committingTransactionsRecord.toByteArray(), previousVersion))
+                .thenApply(version -> new VersionedMetadata<>(committingTransactionsRecord, version));
     }
 
     @Override
@@ -1285,7 +1304,7 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> resetCommittingTransactionsRecord(int version) {
+    public CompletableFuture<Void> completeCommittingTransactions(int version) {
         return Futures.toVoid(updateCommittingTxnRecord(new Data<>(CommittingTransactionsRecord.EMPTY.toByteArray(), version)));
     }
 

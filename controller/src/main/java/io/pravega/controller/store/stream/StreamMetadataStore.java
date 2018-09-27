@@ -32,6 +32,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 
@@ -484,6 +485,10 @@ public interface StreamMetadataStore {
                                           final OperationContext context,
                                           final Executor executor);
 
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startRollingTxn(String scope, String stream,
+                                       int txnEpoch, int activeEpoch, VersionedMetadata<CommittingTransactionsRecord> existing,
+                                       OperationContext context, ScheduledExecutorService executor);
+
     /**
      * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
      * have been created successfully in segment store.
@@ -493,14 +498,16 @@ public interface StreamMetadataStore {
      * @param scope          stream scope
      * @param name           stream name.
      * @param sealedTxnEpochSegments sealed segments from intermediate txn epoch with size at the time of sealing
-     * @param txnEpoch       epoch for transactions that need to be rolled over
      * @param time           timestamp
+     *                       // TODO: shivesh
      * @param context        operation context
      * @param executor       callers executor
      * @return CompletableFuture which upon completion will indicate that we have successfully created new epoch entries.
      */
-    CompletableFuture<Void> rollingTxnNewSegmentsCreated(final String scope, final String name, Map<Long, Long> sealedTxnEpochSegments,
-                                                         final int txnEpoch, final long time, final OperationContext context, final Executor executor);
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> rollingTxnCreateDuplicateEpochs(final String scope,
+                                           final String name, Map<Long, Long> sealedTxnEpochSegments,
+                                           final long time, final VersionedMetadata<CommittingTransactionsRecord> record,
+                                           final OperationContext context, final Executor executor);
 
     /**
      * This is final step of rolling transaction and is called after old segments are sealed in segment store.
@@ -509,15 +516,14 @@ public interface StreamMetadataStore {
      * @param scope          stream scope
      * @param name           stream name.
      * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing
-     * @param activeEpoch    active epoch against which rolling txn was started
-     * @param time           timestamp
      * @param context        operation context
      * @param executor       callers executor
      * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.
      */
-    CompletableFuture<Void> rollingTxnActiveEpochSealed(final String scope, final String name, final Map<Long, Long> sealedActiveEpochSegments,
-                                                        final int activeEpoch, final long time, final OperationContext context, final Executor executor);
-
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> completeRollingTxn(final String scope, final String name,
+                                                                    final Map<Long, Long> sealedActiveEpochSegments, final long time,
+                                                                    final VersionedMetadata<CommittingTransactionsRecord> record,
+                                                                    final OperationContext context, final Executor executor);
 
     /**
      * If the state of the stream in the store matches supplied state, reset.
@@ -933,8 +939,10 @@ public interface StreamMetadataStore {
      * @param executor executor
      * @return A completableFuture which, when completed, mean that the record has been created successfully.
      */
-    CompletableFuture<Void> createCommittingTransactionsRecord(final String scope, final String stream, final int epoch, final List<UUID> txnsToCommit,
-                                                               final OperationContext context, final ScheduledExecutorService executor);
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommitTransactions(final String scope, final String stream,
+                                                                                               final int epoch, final List<UUID> txnsToCommit,
+                                                                                               final int previousVersion, final OperationContext context,
+                                                                                               final ScheduledExecutorService executor);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.
@@ -959,8 +967,8 @@ public interface StreamMetadataStore {
      * @param executor executor
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
      */
-    CompletableFuture<Void> resetCommittingTransactionsRecord(final String scope, final String stream, final int version,
-                                                              final OperationContext context, final ScheduledExecutorService executor);
+    CompletableFuture<Void> completeCommitTransactions(final String scope, final String stream, final int version,
+                                                       final OperationContext context, final ScheduledExecutorService executor);
 
     /**
      * Method to get all transactions in a given epoch. This method returns a map of transaction id to transaction record.

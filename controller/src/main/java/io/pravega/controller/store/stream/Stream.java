@@ -236,6 +236,9 @@ interface Stream {
      */
     CompletableFuture<Void> scaleOldSegmentsSealed(Map<Long, Long> sealedSegmentSizes, VersionedMetadata<EpochTransitionRecord> record);
 
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startRollingTxn(int activeEpoch, int txnEpoch,
+                                                                                       VersionedMetadata<CommittingTransactionsRecord> existing);
+
     /**
      * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
      * have been created successfully in segment store.
@@ -243,23 +246,22 @@ interface Stream {
      * are merged and the other for duplicate active epoch.
      *
      * @param sealedTxnEpochSegments sealed segments from intermediate txn epoch with size at the time of sealing.
-     * @param transactionEpoch epoch for transactions that need to be rolled over.
      * @param time timestamp
      *
      * @return CompletableFuture which upon completion will indicate that we have successfully created new epoch entries.
      */
-    CompletableFuture<Void> rollingTxnNewSegmentsCreated(Map<Long, Long> sealedTxnEpochSegments, int transactionEpoch, long time);
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> rollingTxnCreateDuplicateEpochs(Map<Long, Long> sealedTxnEpochSegments,
+                                                           long time, VersionedMetadata<CommittingTransactionsRecord> existing);
 
     /**
      * This is the final step of rolling transaction and is called after old segments are sealed in segment store.
      * This should complete the epoch transition in the metadata store.
      *
      * @param sealedActiveEpochSegments sealed segments from active epoch with size at the time of sealing.
-     * @param activeEpoch active epoch at the time when rolling transaction was started.
-     * @param time sealed segments from active epoch with size at the time of sealing.
      * @return CompletableFuture which upon successful completion will indicate that rolling transaction is complete.
      */
-    CompletableFuture<Void> rollingTxnActiveEpochSealed(Map<Long, Long> sealedActiveEpochSegments, int activeEpoch, long time);
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> completeRollingTxn(Map<Long, Long> sealedActiveEpochSegments, long time,
+                                                                                          VersionedMetadata<CommittingTransactionsRecord> existing);
 
     /**
      * Sets cold marker which is valid till the specified time stamp.
@@ -429,9 +431,10 @@ interface Stream {
      *
      * @param epoch epoch
      * @param txnsToCommit transactions to commit within the epoch
+     * @param previousVersion
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
-    CompletableFuture<Void> createCommittingTransactionsRecord(final int epoch, final List<UUID> txnsToCommit);
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(final int epoch, final List<UUID> txnsToCommit, int previousVersion);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.
@@ -448,7 +451,7 @@ interface Stream {
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
      * @param version
      */
-    CompletableFuture<Void> resetCommittingTransactionsRecord(int version);
+    CompletableFuture<Void> completeCommittingTransactions(int version);
 
     /**
      * Method to get all transactions in a given epoch.

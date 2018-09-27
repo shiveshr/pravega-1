@@ -92,8 +92,7 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
         // and deleted in startScale method.
         // if we crash before setting state to active, in rerun (retry) we will find epoch transition to be null and
         // hence reset the state in startScale method before attempting to start scale in idempotent fashion.
-        CompletableFuture<VersionedMetadata<EpochTransitionRecord>> resetFuture =
-                streamMetadataStore.getVersionedEpochTransition(scope, stream, context, executor)
+        return streamMetadataStore.getVersionedEpochTransition(scope, stream, context, executor)
                 .thenCompose(epochTransition -> {
                     CompletableFuture<VersionedMetadata<EpochTransitionRecord>> future = CompletableFuture.completedFuture(epochTransition);
                     if (epochTransition.getObject().equals(EpochTransitionRecord.EMPTY)) {
@@ -101,8 +100,7 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
                                 .thenApply(x -> epochTransition);
                     }
                     return future;
-                });
-        return resetFuture.thenCompose(record -> streamMetadataStore.startScale(scope, stream, scaleInput.getSegmentsToSeal(), scaleInput.getNewRanges(),
+                }).thenCompose(record -> streamMetadataStore.startScale(scope, stream, scaleInput.getSegmentsToSeal(), scaleInput.getNewRanges(),
                 scaleInput.getScaleTime(), runOnlyIfStarted, record, context, executor)
                 .thenCompose(startScaleResponse -> streamMetadataStore.setState(scope, stream, State.SCALING, context, executor)
                         .thenCompose(v -> streamMetadataStore.scaleCreateNewSegments(scope, stream, runOnlyIfStarted, startScaleResponse, context, executor))

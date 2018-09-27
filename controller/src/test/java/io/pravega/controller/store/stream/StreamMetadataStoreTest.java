@@ -705,12 +705,12 @@ public abstract class StreamMetadataStoreTest {
                 Arrays.asList(segment4, segment5), scaleTs2, false, null, executor).join();
         assertEquals(activeEpoch.getEpoch(), response2.getActiveEpoch());
 
-        store.createCommittingTransactionsRecord(scope, stream, tx1.getEpoch(), Lists.newArrayList(tx1.getId(), tx2.getId()), null, executor).join();
+        store.startCommitTransactions(scope, stream, tx1.getEpoch(), Lists.newArrayList(tx1.getId(), tx2.getId()), null, executor).join();
         store.setState(scope, stream, State.COMMITTING_TXN, null, executor).join();
-        store.rollingTxnNewSegmentsCreated(scope, stream, Collections.emptyMap(), tx1.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.rollingTxnCreateDuplicateEpochs(scope, stream, Collections.emptyMap(), tx1.getEpoch(), System.currentTimeMillis(), null, executor).join();
         store.commitTransaction(scope, stream, tx1.getId(), null, executor).get();
         store.commitTransaction(scope, stream, tx2.getId(), null, executor).get();
-        store.rollingTxnActiveEpochSealed(scope, stream, Collections.emptyMap(), activeEpoch.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.completeRollingTxn(scope, stream, Collections.emptyMap(), activeEpoch.getEpoch(), System.currentTimeMillis(), null, executor).join();
         store.setState(scope, stream, State.ACTIVE, null, executor).join();
         activeEpoch = store.getActiveEpoch(scope, stream, null, true, executor).join();
         assertEquals(3, activeEpoch.getEpoch());
@@ -754,9 +754,9 @@ public abstract class StreamMetadataStoreTest {
 
         store.sealTransaction(scope, stream, txn2.getId(), true, Optional.of(txn2.getVersion()), null, executor).get();
         store.setState(scope, stream, State.COMMITTING_TXN, null, executor).get();
-        store.rollingTxnNewSegmentsCreated(scope, stream, Collections.emptyMap(), tx1.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.rollingTxnCreateDuplicateEpochs(scope, stream, Collections.emptyMap(), tx1.getEpoch(), System.currentTimeMillis(), null, executor).join();
         store.commitTransaction(scope, stream, txn2.getId(), null, executor).get();
-        store.rollingTxnActiveEpochSealed(scope, stream, Collections.emptyMap(), activeEpoch.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.completeRollingTxn(scope, stream, Collections.emptyMap(), activeEpoch.getEpoch(), System.currentTimeMillis(), null, executor).join();
         store.setState(scope, stream, State.ACTIVE, null, executor).join();
 
         activeEpoch = store.getActiveEpoch(scope, stream, null, true, executor).join();
@@ -803,11 +803,11 @@ public abstract class StreamMetadataStoreTest {
         assertEquals(1, response.getActiveEpoch());
 
         HistoryRecord activeEpoch = store.getActiveEpoch(scope, stream, null, true, executor).join();
-        store.createCommittingTransactionsRecord(scope, stream, tx1.getEpoch(), Arrays.asList(tx1.getId()), null, executor).join();
+        store.startCommitTransactions(scope, stream, tx1.getEpoch(), Arrays.asList(tx1.getId()), null, executor).join();
         store.setState(scope, stream, State.COMMITTING_TXN, null, executor).join();
-        store.rollingTxnNewSegmentsCreated(scope, stream, Collections.emptyMap(), tx1.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.rollingTxnCreateDuplicateEpochs(scope, stream, Collections.emptyMap(), tx1.getEpoch(), System.currentTimeMillis(), null, executor).join();
         store.commitTransaction(scope, stream, tx1.getId(), null, executor).get();
-        store.rollingTxnActiveEpochSealed(scope, stream, Collections.emptyMap(), activeEpoch.getEpoch(), System.currentTimeMillis(), null, executor).join();
+        store.completeRollingTxn(scope, stream, Collections.emptyMap(), activeEpoch.getEpoch(), System.currentTimeMillis(), null, executor).join();
         store.setState(scope, stream, State.ACTIVE, null, executor).join();
 
         store.setState(scope, stream, State.SCALING, null, executor).join();
