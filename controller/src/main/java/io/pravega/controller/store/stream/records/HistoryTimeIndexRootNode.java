@@ -23,6 +23,10 @@ import java.util.LinkedList;
 import java.util.List;
 
 @Data
+/**
+ * Root node for an n-ary tree for storing time index of epoch records.
+ * This contains a reference to leaf nodes. The reference is based on the timestamp of first record in the leaf node.
+ */
 public class HistoryTimeIndexRootNode {
     public static final int HISTORY_INDEX_CHUNK_SIZE = 100000;
     public static final HistoryIndexRootNodeSerializer SERIALIZER = new HistoryIndexRootNodeSerializer();
@@ -55,7 +59,7 @@ public class HistoryTimeIndexRootNode {
     // helper method to add a new leaf node record here
     public int findLeafNode(long time) {
         // binary search time to find the index which corresponds to leaf node
-        return RecordHelper.binarySearch(leaves, 0, leaves.size(), time, x -> x);
+        return RecordHelper.binarySearch(leaves, time, x -> x);
     }
 
     public static HistoryTimeIndexRootNode addNewLeaf(HistoryTimeIndexRootNode rootNode, long time) {

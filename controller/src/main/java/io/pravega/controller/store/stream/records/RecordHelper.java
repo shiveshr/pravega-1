@@ -29,7 +29,11 @@ import java.util.stream.IntStream;
 import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
 
 public class RecordHelper {
-    public static <T> int binarySearch(final List<T> list, final int lower, final int upper, final long time, Function<T, Long> getTime) {
+    public static <T> int binarySearch(final List<T> list, final long time, Function<T, Long> getTime) {
+        return binarySearch(list, 0, list.size(), time, getTime);
+    }
+
+    private static <T> int binarySearch(final List<T> list, final int lower, final int upper, final long time, Function<T, Long> getTime) {
         if (upper < lower) {
             assert getTime.apply(list.get(0)) > time;
             // return index 0.
