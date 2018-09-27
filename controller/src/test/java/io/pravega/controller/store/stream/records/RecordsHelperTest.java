@@ -139,7 +139,7 @@ public class RecordsHelperTest {
                 new StreamSegmentRecord(1, 0, timestamp, keyRangeChunk, 2 * keyRangeChunk),
                 new StreamSegmentRecord(2, 0, timestamp, 2 * keyRangeChunk, 3 * keyRangeChunk),
                 new StreamSegmentRecord(3, 0, timestamp, 3 * keyRangeChunk, 4 * keyRangeChunk),
-                new StreamSegmentRecord(4, 0, timestamp, 4* keyRangeChunk, 1.0));
+                new StreamSegmentRecord(4, 0, timestamp, 4 * keyRangeChunk, 1.0));
         EpochRecord epochRecord = new EpochRecord(0, 0, list, timestamp);
 
         assertFalse(RecordHelper.canScaleFor(Lists.newArrayList(0L, 1L, 5L), epochRecord));
