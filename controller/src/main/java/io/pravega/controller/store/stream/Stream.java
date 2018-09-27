@@ -440,14 +440,15 @@ interface Stream {
      *
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
-    CompletableFuture<CommittingTransactionsRecord> getCommittingTransactionsRecord();
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getCommittingTransactionsRecord();
 
     /**
      * Method to delete committing transaction record from the store for a given stream.
      *
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
+     * @param version
      */
-    CompletableFuture<Void> resetCommittingTransactionsRecord();
+    CompletableFuture<Void> resetCommittingTransactionsRecord(int version);
 
     /**
      * Method to get all transactions in a given epoch.

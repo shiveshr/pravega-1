@@ -698,14 +698,14 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<CommittingTransactionsRecord> getVersionedCommittingTransactionsRecord(String scope, String stream, OperationContext context,
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getVersionedCommittingTransactionsRecord(String scope, String stream, OperationContext context,
                                                                                                     ScheduledExecutorService executor) {
         return withCompletion(getStream(scope, stream, context).getCommittingTransactionsRecord(), executor);
     }
 
     @Override
-    public CompletableFuture<Void> deleteCommittingTransactionsRecord(String scope, String stream, OperationContext context, ScheduledExecutorService executor) {
-        return withCompletion(getStream(scope, stream, context).resetCommittingTransactionsRecord(), executor);
+    public CompletableFuture<Void> resetCommittingTransactionsRecord(String scope, String stream, int version, OperationContext context, ScheduledExecutorService executor) {
+        return withCompletion(getStream(scope, stream, context).resetCommittingTransactionsRecord(version), executor);
     }
 
     @Override

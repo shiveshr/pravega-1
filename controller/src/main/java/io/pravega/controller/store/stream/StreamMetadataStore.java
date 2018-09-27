@@ -959,8 +959,8 @@ public interface StreamMetadataStore {
      * @param executor executor
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
      */
-    CompletableFuture<Void> deleteCommittingTransactionsRecord(final String scope, final String stream, final OperationContext context,
-                                                               final ScheduledExecutorService executor);
+    CompletableFuture<Void> resetCommittingTransactionsRecord(final String scope, final String stream, final int version,
+                                                              final OperationContext context, final ScheduledExecutorService executor);
 
     /**
      * Method to get all transactions in a given epoch. This method returns a map of transaction id to transaction record.

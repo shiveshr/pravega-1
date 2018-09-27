@@ -1025,7 +1025,7 @@ public abstract class AbstractStream implements Stream {
                 });
     }
 
-    public CompletableFuture<Void> completeTruncation(VersionedMetadata<TruncationRecord> versionedMetadata) {
+    public CompletableFuture<Void> completeTruncationFor(VersionedMetadata<TruncationRecord> versionedMetadata) {
         return checkState(state -> state.equals(State.TRUNCATING))
                 .thenCompose(v -> {
                     TruncationRecord current = versionedMetadata.getObject();

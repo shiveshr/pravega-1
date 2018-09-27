@@ -50,6 +50,10 @@ public class CommittingTransactionsRecord {
      */
     int activeEpoch;
 
+    public CommittingTransactionsRecord(int epoch, List<UUID> transactionsToCommit) {
+        this(epoch, transactionsToCommit, Integer.MIN_VALUE);
+    }
+
     public boolean isRollingTransactions() {
         return activeEpoch != Integer.MIN_VALUE;
     }

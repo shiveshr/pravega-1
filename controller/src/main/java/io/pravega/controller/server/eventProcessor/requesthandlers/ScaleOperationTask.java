@@ -84,7 +84,7 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
     }
 
     @VisibleForTesting
-    public CompletableFuture<Void> runScale(ScaleOpEvent scaleInput, boolean runOnlyIfStarted, OperationContext context, String delegationToken) { // called upon event read from requeststream
+    public CompletableFuture<EpochTransitionRecord> runScale(ScaleOpEvent scaleInput, boolean runOnlyIfStarted, OperationContext context, String delegationToken) { // called upon event read from requeststream
         String scope = scaleInput.getScope();
         String stream = scaleInput.getStream();
         // create epoch transition node (metadatastore.startScale)
@@ -114,8 +114,9 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
                                     .thenCompose(x -> streamMetadataTasks.getSealedSegmentsSize(scope, stream, scaleInput.getSegmentsToSeal(), delegationToken))
                                     .thenCompose(map -> streamMetadataStore.completeScale(scope, stream, map, newSegmentsResponse, context, executor))
                                     .thenCompose(x -> streamMetadataStore.setState(scope, stream, State.ACTIVE, context, executor)
-                                            .thenAccept(y -> {
+                                            .thenApply(y -> {
                                                 log.info("scale processing for {}/{} epoch {} completed.", scope, stream, newSegmentsResponse.getObject().getActiveEpoch());
+                                                return newSegmentsResponse.getObject();
                                             }));
                         })));
     }

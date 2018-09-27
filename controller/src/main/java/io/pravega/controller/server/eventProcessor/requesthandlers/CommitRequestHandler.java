@@ -130,7 +130,8 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                                           final OperationContext context) {
         return streamMetadataStore.getState(scope, stream, true, context, executor)
                 .thenCompose(state -> {
-                    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> commitFuture = createRecordAndGetCommitTxnList(scope, stream, txnEpoch, context)
+                    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> commitFuture =
+                            createRecordAndGetCommitTxnList(scope, stream, txnEpoch, context)
                             .thenCompose(versionedMetadata -> {
                                 if (versionedMetadata.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
                                     // reset state conditionally in case we were left with stale committing state from a previous execution
@@ -185,7 +186,10 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                 });
     }
 
-    private CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> createRecordAndGetCommitTxnList(String scope, String stream, int epoch, OperationContext context) {
+    private CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> createRecordAndGetCommitTxnList(String scope,
+                                                                                                               String stream,
+                                                                                                               int epoch,
+                                                                                                               OperationContext context) {
         return streamMetadataStore.getVersionedCommittingTransactionsRecord(scope, stream, context, executor)
                 .thenCompose(versionedMetadata -> {
                     if (versionedMetadata.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
@@ -360,7 +364,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
     private CompletableFuture<List<HistoryRecord>> getEpochRecords(String scope, String stream, int epoch, OperationContext context) {
         List<CompletableFuture<HistoryRecord>> list = new ArrayList<>();
         list.add(streamMetadataStore.getEpoch(scope, stream, epoch, context, executor));
-        list.add(streamMetadataStore.getActiveEpoch(scope, stream, true, context, executor));
+        list.add(streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor));
         return Futures.allOfWithResults(list);
     }
 

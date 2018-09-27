@@ -1271,26 +1271,22 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<CommittingTransactionsRecord> getCommittingTransactionsRecord() {
-        CompletableFuture<CommittingTransactionsRecord> result = new CompletableFuture<>();
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getCommittingTransactionsRecord() {
+        CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> result = new CompletableFuture<>();
         getCommittingTxnRecord()
                 .whenComplete((r, e) -> {
                     if (e != null) {
-                        if (Exceptions.unwrap(e) instanceof DataNotFoundException) {
-                            result.complete(null);
-                        } else {
                             result.completeExceptionally(e);
-                        }
                     } else {
-                        result.complete(CommittingTransactionsRecord.parse(r.getData()));
+                        result.complete(new VersionedMetadata<>(CommittingTransactionsRecord.parse(r.getData()), r.getVersion()));
                     }
                 });
         return result;
     }
 
     @Override
-    public CompletableFuture<Void> resetCommittingTransactionsRecord() {
-        return deleteCommittingTxnRecord();
+    public CompletableFuture<Void> resetCommittingTransactionsRecord(int version) {
+        return Futures.toVoid(updateCommittingTxnRecord(new Data<>(CommittingTransactionsRecord.EMPTY.toByteArray(), version)));
     }
 
     @Override
