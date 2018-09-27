@@ -105,9 +105,9 @@ public class RecordHelper {
      * @param newRanges      new ranges to create
      * @return true if scale input is valid, false otherwise.
      */
-    public static boolean isScaleInputValid(final List<Long> segmentsToSeal,
-                                            final List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
-                                            final EpochRecord currentEpoch) {
+    public static boolean validateInputRange(final List<Long> segmentsToSeal,
+                                             final List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
+                                             final EpochRecord currentEpoch) {
         boolean newRangesPredicate = newRanges.stream().noneMatch(x -> x.getKey() >= x.getValue() &&
                 x.getKey() >= 0 && x.getValue() > 0);
 
