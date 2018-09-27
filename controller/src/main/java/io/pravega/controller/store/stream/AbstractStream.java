@@ -1085,18 +1085,17 @@ public abstract class AbstractStream implements Stream {
         return Futures.toVoid(updateCommitTxnRecord(new Data<>(CommitTransactionsRecord.EMPTY.toByteArray(), versionedMetadata.getVersion())));
     }
 
-    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch) {
-        return getCommitTxnRecord().thenCompose(committingTxnRecordData -> {
-            CommitTransactionsRecord record = CommitTransactionsRecord.parse(committingTxnRecordData.getData());
-            assert(record.getEpoch() == transactionEpoch);
-            if (activeEpoch == record.getActiveEpoch()) {
-                return CompletableFuture.completedFuture(new VersionedMetadata<>(record, committingTxnRecordData.getVersion()));
-            } else {
-                CommitTransactionsRecord update = record.getRollingTxnRecord(activeEpoch);
-                return updateCommitTxnRecord(new Data<>(update.toByteArray(), committingTxnRecordData.getVersion()))
-                        .thenApply(version -> new VersionedMetadata<>(update, version));
-            }
-        });
+    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch,
+                                                                                          VersionedMetadata<CommitTransactionsRecord> existing) {
+        CommitTransactionsRecord record = existing.getObject();
+        assert(record.getEpoch() == transactionEpoch);
+        if (activeEpoch == record.getActiveEpoch()) {
+            return CompletableFuture.completedFuture(existing);
+        } else {
+            CommitTransactionsRecord update = record.getRollingTxnRecord(activeEpoch);
+            return updateCommitTxnRecord(new Data<>(update.toByteArray(), existing.getVersion()))
+                    .thenApply(version -> new VersionedMetadata<>(update, version));
+        }
     }
 
     public CompletableFuture<Void> rollingTxnCreateNewEpochs(Map<Long, Long> sealedTxnEpochSegments, long time,
