@@ -61,23 +61,24 @@ public class RecordHelper {
      * Perform binary search on index table to find the record corresponding to timestamp.
      * Once we find the segments, compare them to truncationRecord and take the more recent of the two.
      *
+     * @param epochRecord epoch record
      * @param truncationRecord truncation record
      * @return list of active segments.
      */
-    public static Map<StreamSegmentRecord, Long> getActiveSegments(EpochRecord record, final TruncationRecord truncationRecord) {
+    public static Map<StreamSegmentRecord, Long> getActiveSegments(EpochRecord epochRecord, final TruncationRecord truncationRecord) {
 
         Map<StreamSegmentRecord, Long> segmentsWithOffset;
         if (truncationRecord.equals(TruncationRecord.EMPTY)) {
-            segmentsWithOffset = record.getSegments().stream().collect(Collectors.toMap(x -> x, x -> 0L));
+            segmentsWithOffset = epochRecord.getSegments().stream().collect(Collectors.toMap(x -> x, x -> 0L));
         } else {
             // case 1: if record.epoch is before truncation, simply pick the truncation stream cut
-            if (record.getEpoch() < truncationRecord.getTruncationEpochLow()) {
+            if (epochRecord.getEpoch() < truncationRecord.getTruncationEpochLow()) {
                 segmentsWithOffset = truncationRecord.getStreamCut().entrySet().stream()
                         .collect(Collectors.toMap(e -> truncationRecord.getSpan().keySet().stream()
                                 .filter(x -> x.segmentId() == e.getKey()).findAny().get(), Map.Entry::getValue));
-            } else if (record.getEpoch() > truncationRecord.getTruncationEpochHigh()) {
+            } else if (epochRecord.getEpoch() > truncationRecord.getTruncationEpochHigh()) {
                 // case 2: if record.epoch is after truncation, simply use the record epoch
-                segmentsWithOffset = record.getSegments().stream().collect(Collectors.toMap(x -> x,
+                segmentsWithOffset = epochRecord.getSegments().stream().collect(Collectors.toMap(x -> x,
                         x -> truncationRecord.getStreamCut().getOrDefault(x, 0L)));
             } else {
                 // case 3: overlap between requested epoch and stream cut.
@@ -86,7 +87,7 @@ public class RecordHelper {
                 segmentsWithOffset = new HashMap<>();
                 // all segments from stream cut that have epoch >= this epoch
                 List<StreamSegmentRecord> fromStreamCut = truncationRecord.getSpan().entrySet().stream()
-                        .filter(x -> x.getValue() >= record.getEpoch())
+                        .filter(x -> x.getValue() >= epochRecord.getEpoch())
                         .map(Map.Entry::getKey)
                         .collect(Collectors.toList());
 
@@ -95,18 +96,20 @@ public class RecordHelper {
 
                 // put remaining segments as those that dont overlap with ones taken from streamCut.
                 // Note: we will use the head of these segments, basically offset = 0
-                record.getSegments().stream().filter(x -> fromStreamCut.stream().noneMatch(x::overlaps))
+                epochRecord.getSegments().stream().filter(x -> fromStreamCut.stream().noneMatch(x::overlaps))
                         .forEach(x -> segmentsWithOffset.put(x, 0L));
             }
         }
         return segmentsWithOffset;
     }
 
+    // region scale helper methods
     /**
      * Method to validate supplied scale input. It performs a check that new ranges are identical to sealed ranges.
      *
      * @param segmentsToSeal segments to seal
      * @param newRanges      new ranges to create
+     * @param currentEpoch   current epoch record
      * @return true if scale input is valid, false otherwise.
      */
     public static boolean validateInputRange(final List<Long> segmentsToSeal,
@@ -124,6 +127,55 @@ public class RecordHelper {
 
         return newRangesPredicate && reduce(oldRanges).equals(reduce(newRanges));
     }
+
+    /**
+     * Method to check scale operation can be performed with given input.
+     *
+     * @param segmentsToSeal segments to seal
+     * @param currentEpoch current epoch record
+     * @return true if a scale operation can be performed, false otherwise
+     */
+    public static boolean canScaleFor(final List<Long> segmentsToSeal, final EpochRecord currentEpoch) {
+        return segmentsToSeal.stream().allMatch(x -> currentEpoch.getSegments().stream().anyMatch(y -> y.segmentId() == x));
+    }
+
+    public static boolean verifyRecordMatchesInput(List<Long> segmentsToSeal, List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
+                                                   boolean isManualScale, EpochTransitionRecord record) {
+        boolean newRangeMatch = newRanges.stream().allMatch(x ->
+                record.getNewSegmentsWithRange().values().stream()
+                        .anyMatch(y -> y.getKey().equals(x.getKey())
+                                && y.getValue().equals(x.getValue())));
+        boolean segmentsToSealMatch = record.getSegmentsToSeal().stream().allMatch(segmentsToSeal::contains) ||
+                (isManualScale && record.getSegmentsToSeal().stream().map(StreamSegmentNameUtils::getSegmentNumber).collect(Collectors.toSet())
+                        .equals(segmentsToSeal.stream().map(StreamSegmentNameUtils::getSegmentNumber).collect(Collectors.toSet())));
+
+        return newRangeMatch && segmentsToSealMatch;
+    }
+
+    /**
+     * Method to compute epoch transition record. It takes segments to seal and new ranges and all the tables and
+     * computes the next epoch transition record.
+     * @param currentEpoch current epoch record
+     * @param segmentsToSeal segments to seal
+     * @param newRanges new ranges
+     * @param scaleTimestamp scale time
+     * @return new epoch transition record based on supplied input
+     */
+    public static EpochTransitionRecord computeEpochTransition(EpochRecord currentEpoch, List<Long> segmentsToSeal,
+                                                               List<AbstractMap.SimpleEntry<Double, Double>> newRanges, long scaleTimestamp) {
+        Preconditions.checkState(currentEpoch.getSegmentIds().containsAll(segmentsToSeal), "Invalid epoch transition request");
+
+        int newEpoch = currentEpoch.getEpoch() + 1;
+        int nextSegmentNumber = currentEpoch.getSegments().stream().mapToInt(StreamSegmentRecord::getSegmentNumber).max().getAsInt() + 1;
+        Map<Long, AbstractMap.SimpleEntry<Double, Double>> newSegments = new HashMap<>();
+        IntStream.range(0, newRanges.size()).forEach(x -> {
+            newSegments.put(computeSegmentId(nextSegmentNumber + x, newEpoch), newRanges.get(x));
+        });
+        return new EpochTransitionRecord(currentEpoch.getEpoch(), scaleTimestamp, ImmutableSet.copyOf(segmentsToSeal),
+                ImmutableMap.copyOf(newSegments));
+
+    }
+    // endregion
 
     /**
      * Helper method to compute list of continuous ranges. For example, two neighbouring key ranges where,
@@ -164,50 +216,5 @@ public class RecordHelper {
             result.add(new AbstractMap.SimpleEntry<>(low, high));
         }
         return result;
-    }
-
-    /**
-     * Method to check scale operation can be performed with given input.
-     * @param segmentsToSeal segments to seal
-    \     * @return true if a scale operation can be performed, false otherwise
-     */
-    public static boolean canScaleFor(final List<Long> segmentsToSeal, final EpochRecord currentEpoch) {
-        return segmentsToSeal.stream().allMatch(x -> currentEpoch.getSegments().stream().anyMatch(y -> y.segmentId() == x));
-    }
-
-    public static boolean verifyRecordMatchesInput(List<Long> segmentsToSeal, List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
-                                                   boolean isManualScale, EpochTransitionRecord record) {
-        boolean newRangeMatch = newRanges.stream().allMatch(x ->
-                record.getNewSegmentsWithRange().values().stream()
-                        .anyMatch(y -> y.getKey().equals(x.getKey())
-                                && y.getValue().equals(x.getValue())));
-        boolean segmentsToSealMatch = record.getSegmentsToSeal().stream().allMatch(segmentsToSeal::contains) ||
-                (isManualScale && record.getSegmentsToSeal().stream().map(StreamSegmentNameUtils::getSegmentNumber).collect(Collectors.toSet())
-                        .equals(segmentsToSeal.stream().map(StreamSegmentNameUtils::getSegmentNumber).collect(Collectors.toSet())));
-
-        return newRangeMatch && segmentsToSealMatch;
-    }
-
-    /**
-     * Method to compute epoch transition record. It takes segments to seal and new ranges and all the tables and
-     * computes the next epoch transition record.
-     * @param segmentsToSeal segments to seal
-     * @param newRanges new ranges
-     * @param scaleTimestamp scale time
-     * @return new epoch transition record based on supplied input
-     */
-    public static EpochTransitionRecord computeEpochTransition(EpochRecord currentEpoch, List<Long> segmentsToSeal,
-                                                               List<AbstractMap.SimpleEntry<Double, Double>> newRanges, long scaleTimestamp) {
-        Preconditions.checkState(currentEpoch.getSegments().containsAll(segmentsToSeal), "Invalid epoch transition request");
-
-        int newEpoch = currentEpoch.getEpoch() + 1;
-        int nextSegmentNumber = currentEpoch.getSegments().stream().mapToInt(StreamSegmentRecord::getSegmentNumber).max().getAsInt();
-        Map<Long, AbstractMap.SimpleEntry<Double, Double>> newSegments = new HashMap<>();
-        IntStream.range(0, newRanges.size()).forEach(x -> {
-            newSegments.put(computeSegmentId(nextSegmentNumber + x, newEpoch), newRanges.get(x));
-        });
-        return new EpochTransitionRecord(currentEpoch.getEpoch(), scaleTimestamp, ImmutableSet.copyOf(segmentsToSeal),
-                ImmutableMap.copyOf(newSegments));
-
     }
 }
