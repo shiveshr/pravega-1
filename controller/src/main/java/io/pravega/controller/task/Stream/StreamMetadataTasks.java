@@ -162,7 +162,7 @@ public class StreamMetadataTasks extends TaskBase {
         final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
 
         // 1. get configuration
-        return streamMetadataStore.getConfigurationRecord(scope, stream, true, context, executor)
+        return streamMetadataStore.getVersionedConfigurationRecord(scope, stream, true, context, executor)
                 .thenCompose(configProperty -> {
                     // 2. post event to start update workflow
                     if (!configProperty.isUpdating()) {
@@ -193,7 +193,7 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     private CompletableFuture<Boolean> isUpdated(String scope, String stream, StreamConfiguration newConfig, OperationContext context) {
-        return streamMetadataStore.getConfigurationRecord(scope, stream, true, context, executor)
+        return streamMetadataStore.getVersionedConfigurationRecord(scope, stream, true, context, executor)
                 .thenApply(configProperty -> !configProperty.isUpdating() || !configProperty.getStreamConfiguration().equals(newConfig));
     }
 
@@ -340,7 +340,7 @@ public class StreamMetadataTasks extends TaskBase {
     private CompletableFuture<Boolean> startTruncation(String scope, String stream, Map<Long, Long> streamCut, OperationContext contextOpt) {
         final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
 
-        return streamMetadataStore.getTruncationRecord(scope, stream, true, context, executor)
+        return streamMetadataStore.getVersionedTruncationRecord(scope, stream, true, context, executor)
                 .thenCompose(property -> {
                     if (!property.isUpdating()) {
                         // 2. post event with new stream cut if no truncation is ongoing
@@ -360,7 +360,7 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     private CompletableFuture<Boolean> isTruncated(String scope, String stream, Map<Long, Long> streamCut, OperationContext context) {
-        return streamMetadataStore.getTruncationRecord(scope, stream, true, context, executor)
+        return streamMetadataStore.getVersionedTruncationRecord(scope, stream, true, context, executor)
                 .thenApply(truncationProp -> !truncationProp.isUpdating() || !truncationProp.getStreamCut().equals(streamCut));
     }
 

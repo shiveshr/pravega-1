@@ -139,7 +139,7 @@ public class TaskTest {
         streamStore.setState(SCOPE, stream1, State.SCALING, null, executor).get();
         streamStore.scaleCreateNewSegments(SCOPE, stream1, false, null, executor).get();
         streamStore.scaleNewSegmentsCreated(SCOPE, stream1, null, executor).get();
-        streamStore.scaleSegmentsSealed(SCOPE, stream1, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)), null, executor).get();
+        streamStore.completeScale(SCOPE, stream1, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)), null, executor).get();
         streamStore.setState(SCOPE, stream1, State.ACTIVE, null, executor).get();
 
         AbstractMap.SimpleEntry<Double, Double> segment3 = new AbstractMap.SimpleEntry<>(0.0, 0.5);
@@ -150,7 +150,7 @@ public class TaskTest {
         segmentsCreated = response.getNewSegmentsWithRange();
         streamStore.setState(SCOPE, stream2, State.SCALING, null, executor).get();
         streamStore.scaleNewSegmentsCreated(SCOPE, stream2, null, executor).get();
-        streamStore.scaleSegmentsSealed(SCOPE, stream2, sealedSegments1.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        streamStore.completeScale(SCOPE, stream2, sealedSegments1.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).get();
         streamStore.setState(SCOPE, stream1, State.ACTIVE, null, executor).get();
         // endregion

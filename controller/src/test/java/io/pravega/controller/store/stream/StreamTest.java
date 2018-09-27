@@ -175,13 +175,13 @@ public class StreamTest {
         ArrayList<Long> sealedSegments = Lists.newArrayList(0L);
         long one = StreamSegmentNameUtils.computeSegmentId(1, 1);
         long two = StreamSegmentNameUtils.computeSegmentId(2, 1);
-        EpochTransitionRecord response = zkStream.startScale(sealedSegments, newRanges, scale, false).join();
+        EpochTransitionRecord response = zkStream.startScale(sealedSegments, newRanges, scale, false, record).join();
         ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> newSegments = response.getNewSegmentsWithRange();
         zkStream.updateState(State.SCALING).join();
 
         newSegments.entrySet().stream().map(x -> x.getKey()).collect(Collectors.toList());
-        zkStream.scaleCreateNewSegments(false).get();
-        zkStream.scaleNewSegmentsCreated().get();
+        zkStream.scaleCreateNewSegments(false, record).get();
+        zkStream.scaleNewSegmentsCreated(record).get();
         // history table has a partial record at this point.
         // now we could have sealed the segments so get successors could be called.
 
@@ -214,7 +214,7 @@ public class StreamTest {
         doAnswer((Answer<CompletableFuture<Data<Integer>>>) invocation -> historyTable).when(zkStream).getHistoryTable();
         doAnswer((Answer<CompletableFuture<Data<Integer>>>) invocation -> segmentTable).when(zkStream).getSegmentTable();
 
-        zkStream.scaleOldSegmentsSealed(sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L))).get();
+        zkStream.scaleOldSegmentsSealed(sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)), record).get();
         // scale is completed, history table also has completed record now.
         final CompletableFuture<Data<Integer>> segmentTable2 = zkStream.getSegmentTable();
         final CompletableFuture<Data<Integer>> historyTable2 = zkStream.getHistoryTable();

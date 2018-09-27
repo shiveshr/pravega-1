@@ -268,7 +268,7 @@ public class ZkStreamTest {
         store.setState(SCOPE, streamName, State.SCALING, null, executor).join();
         store.scaleCreateNewSegments(SCOPE, streamName, false, context, executor).get();
         store.scaleNewSegmentsCreated(SCOPE, streamName, context, executor).get();
-        store.scaleSegmentsSealed(SCOPE, streamName, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.completeScale(SCOPE, streamName, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 context, executor).get();
         store.setState(SCOPE, streamName, State.ACTIVE, null, executor).join();
         segments = store.getActiveSegments(SCOPE, streamName, context, executor).get();
@@ -292,7 +292,7 @@ public class ZkStreamTest {
         store.setState(SCOPE, streamName, State.SCALING, null, executor).join();
         store.scaleCreateNewSegments(SCOPE, streamName, false, context, executor).get();
         store.scaleNewSegmentsCreated(SCOPE, streamName, context, executor).get();
-        store.scaleSegmentsSealed(SCOPE, streamName, sealedSegments1.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.completeScale(SCOPE, streamName, sealedSegments1.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 context, executor).get();
         store.setState(SCOPE, streamName, State.ACTIVE, null, executor).join();
 
@@ -317,7 +317,7 @@ public class ZkStreamTest {
         store.setState(SCOPE, streamName, State.SCALING, null, executor).join();
         store.scaleCreateNewSegments(SCOPE, streamName, false, context, executor).get();
         store.scaleNewSegmentsCreated(SCOPE, streamName, context, executor).get();
-        store.scaleSegmentsSealed(SCOPE, streamName, sealedSegments2.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.completeScale(SCOPE, streamName, sealedSegments2.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 context, executor).get();
         store.setState(SCOPE, streamName, State.ACTIVE, null, executor).join();
 

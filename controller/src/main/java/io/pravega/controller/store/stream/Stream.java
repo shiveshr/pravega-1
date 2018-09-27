@@ -19,7 +19,6 @@ import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.tables.StreamCutRecord;
 import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
 
-import java.util.AbstractMap;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.List;
 import java.util.Map;
@@ -76,8 +75,9 @@ interface Stream {
      * Completes an ongoing updates configuration of an existing stream.
      *
      * @return future of new StreamConfigWithVersion.
+     * @param existing
      */
-    CompletableFuture<Void> completeUpdateConfiguration();
+    CompletableFuture<Void> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing);
 
     /**
      * Fetches the current stream configuration.
@@ -93,7 +93,7 @@ interface Stream {
      *
      * @return current stream configuration.
      */
-    CompletableFuture<StreamConfigurationRecord> getConfigurationRecord(boolean ignoreCached);
+    CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> getVersionedConfigurationRecord(boolean ignoreCached);
 
     /**
      * Starts truncating an existing stream.
@@ -107,8 +107,9 @@ interface Stream {
      * Completes an ongoing stream truncation.
      *
      * @return future of operation.
+     * @param record
      */
-    CompletableFuture<Void> completeTruncation();
+    CompletableFuture<Void> completeTruncation(VersionedMetadata<StreamTruncationRecord> record);
 
     /**
      * Fetches the current stream cut.
@@ -117,7 +118,7 @@ interface Stream {
      *
      * @return current stream cut.
      */
-    CompletableFuture<StreamTruncationRecord> getTruncationRecord(boolean ignoreCached);
+    CompletableFuture<VersionedMetadata<StreamTruncationRecord>> getVersionedTruncationRecord(boolean ignoreCached);
 
     /**
      * Update the state of the stream.
@@ -201,34 +202,39 @@ interface Stream {
      * @param newRanges      key ranges of new segments to be created
      * @param scaleTimestamp scaling timestamp
      * @param runOnlyIfStarted run only if scale is started
+     * @param record
      * @return sequence of newly created segments
      */
-    CompletableFuture<EpochTransitionRecord> startScale(final List<Long> sealedSegments,
-                                                        final List<AbstractMap.SimpleEntry<Double, Double>> newRanges,
-                                                        final long scaleTimestamp,
-                                                        final boolean runOnlyIfStarted);
+    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> startScale(final List<Long> sealedSegments,
+                                                                           final List<SimpleEntry<Double, Double>> newRanges,
+                                                                           final long scaleTimestamp,
+                                                                           final boolean runOnlyIfStarted, VersionedMetadata<EpochTransitionRecord> record);
     
     /**
      * Called after epochTransition entry is created. Implementation of this method should create new segments that are
      * specified in epochTransition in stream metadata tables.
      *
      * @param isManualScale flag to indicate if epoch transition should be migrated to latest epoch
+     * @param record
      * @return Future, which when completed will indicate that new segments are created in the metadata store or wouldl
      * have failed with appropriate exception.
      */
-    CompletableFuture<Void> scaleCreateNewSegments(boolean isManualScale);
+    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> scaleCreateNewSegments(boolean isManualScale,
+                                                                                       VersionedMetadata<EpochTransitionRecord> record);
 
     /**
      * Called after new segment creation is complete.
+     * @param record
      */
-    CompletableFuture<Void> scaleNewSegmentsCreated();
+    CompletableFuture<Void> scaleNewSegmentsCreated(VersionedMetadata<EpochTransitionRecord> record);
 
     /**
      * Called after sealing old segments is complete.
      *
      * @param sealedSegmentSizes sealed segments with absolute sizes
+     * @param record
      */
-    CompletableFuture<Void> scaleOldSegmentsSealed(Map<Long, Long> sealedSegmentSizes);
+    CompletableFuture<Void> scaleOldSegmentsSealed(Map<Long, Long> sealedSegmentSizes, VersionedMetadata<EpochTransitionRecord> record);
 
     /**
      * This method is called from Rolling transaction workflow after new transactions that are duplicate of active transactions
@@ -441,7 +447,7 @@ interface Stream {
      *
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
      */
-    CompletableFuture<Void> deleteCommittingTransactionsRecord();
+    CompletableFuture<Void> resetCommittingTransactionsRecord();
 
     /**
      * Method to get all transactions in a given epoch.

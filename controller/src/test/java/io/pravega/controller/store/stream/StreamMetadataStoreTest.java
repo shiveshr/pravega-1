@@ -136,7 +136,7 @@ public abstract class StreamMetadataStoreTest {
         store.setState(scope, stream1, State.SCALING, null, executor).join();
         store.scaleCreateNewSegments(scope, stream1, false, null, executor).join();
         store.scaleNewSegmentsCreated(scope, stream1, null, executor).join();
-        store.scaleSegmentsSealed(scope, stream1, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.completeScale(scope, stream1, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).join();
         store.setState(scope, stream1, State.ACTIVE, null, executor).join();
 
@@ -159,7 +159,7 @@ public abstract class StreamMetadataStoreTest {
         store.setState(scope, stream2, State.SCALING, null, executor).join();
         store.scaleCreateNewSegments(scope, stream2, false, null, executor).get();
         store.scaleNewSegmentsCreated(scope, stream2, null, executor).get();
-        store.scaleSegmentsSealed(scope, stream2, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.completeScale(scope, stream2, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).get();
         store.setState(scope, stream2, State.ACTIVE, null, executor).join();
 
@@ -392,7 +392,7 @@ public abstract class StreamMetadataStoreTest {
         store.scaleNewSegmentsCreated(scope, stream, null, executor).join();
 
         // 3. scale segments sealed -- this will complete scale
-        store.scaleSegmentsSealed(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.completeScale(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).join();
         store.setState(scope, stream, State.ACTIVE, null, executor).get();
 
@@ -403,7 +403,7 @@ public abstract class StreamMetadataStoreTest {
 
         // rerun  -- illegal state exception
         AssertExtensions.assertThrows("", () ->
-                        store.scaleSegmentsSealed(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+                        store.completeScale(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                                 null, executor).join(),
                 e -> Exceptions.unwrap(e) instanceof StoreException.IllegalStateException);
 
@@ -436,7 +436,7 @@ public abstract class StreamMetadataStoreTest {
         store.scaleCreateNewSegments(scope, stream, false, null, executor).get();
         store.scaleNewSegmentsCreated(scope, stream, null, executor).get();
 
-        store.scaleSegmentsSealed(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.completeScale(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).get();
 
         store.setState(scope, stream, State.ACTIVE, null, executor).get();
@@ -541,7 +541,7 @@ public abstract class StreamMetadataStoreTest {
                 .thenCompose(x -> store.setState(scope, stream, State.SCALING, null, executor))
                 .thenCompose(x -> store.scaleCreateNewSegments(scope, stream, false, null, executor))
                 .thenCompose(x -> store.scaleNewSegmentsCreated(scope, stream, null, executor))
-                .thenCompose(x -> store.scaleSegmentsSealed(scope, stream,
+                .thenCompose(x -> store.completeScale(scope, stream,
                         segmentsToSeal2.stream().collect(Collectors.toMap(r -> r, r -> 0L)), null, executor))
                 .thenCompose(x -> store.setState(scope, stream, State.ACTIVE, null, executor))
                 .join();
@@ -586,12 +586,12 @@ public abstract class StreamMetadataStoreTest {
 
         final StreamConfiguration configuration2 = StreamConfiguration.builder().scope(scope).streamName(stream).scalingPolicy(policy).build();
 
-        StreamConfigurationRecord configProperty = store.getConfigurationRecord(scope, stream, true, null, executor).join();
+        StreamConfigurationRecord configProperty = store.getVersionedConfigurationRecord(scope, stream, true, null, executor).join();
         assertFalse(configProperty.isUpdating());
         // run update configuration multiple times
         assertTrue(Futures.await(store.startUpdateConfiguration(scope, stream, configuration2, null, executor)));
         store.setState(scope, stream, State.UPDATING, null, executor).join();
-        configProperty = store.getConfigurationRecord(scope, stream, true, null, executor).join();
+        configProperty = store.getVersionedConfigurationRecord(scope, stream, true, null, executor).join();
 
         assertTrue(configProperty.isUpdating());
 
@@ -601,7 +601,7 @@ public abstract class StreamMetadataStoreTest {
 
         assertTrue(Futures.await(store.completeUpdateConfiguration(scope, stream, null, executor)));
 
-        configProperty = store.getConfigurationRecord(scope, stream, true, null, executor).join();
+        configProperty = store.getVersionedConfigurationRecord(scope, stream, true, null, executor).join();
         assertEquals(configuration2, configProperty.getStreamConfiguration());
 
         assertTrue(Futures.await(store.startUpdateConfiguration(scope, stream, configuration3, null, executor)));
@@ -681,7 +681,7 @@ public abstract class StreamMetadataStoreTest {
                 store.commitTransaction(scope, stream, tx2.getId(), null, executor),
             e -> e instanceof StoreException.IllegalStateException);
 
-        store.scaleSegmentsSealed(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.completeScale(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).join();
 
         VersionedTransactionData tx3 = store.createTransaction(scope, stream, txnId,
@@ -746,7 +746,7 @@ public abstract class StreamMetadataStoreTest {
         store.scaleCreateNewSegments(scope, stream, false, null, executor).join();
         store.scaleNewSegmentsCreated(scope, stream, null, executor).join();
 
-        store.scaleSegmentsSealed(scope, stream, Collections.emptyMap(), null, executor).join();
+        store.completeScale(scope, stream, Collections.emptyMap(), null, executor).join();
         store.setState(scope, stream, State.ACTIVE, null, executor).get();
         activeEpoch = store.getActiveEpoch(scope, stream, null, true, executor).join();
         assertEquals(4, activeEpoch.getEpoch());
@@ -793,7 +793,7 @@ public abstract class StreamMetadataStoreTest {
         store.setState(scope, stream, State.SCALING, null, executor).join();
         store.scaleCreateNewSegments(scope, stream, false, null, executor).join();
         store.scaleNewSegmentsCreated(scope, stream, null, executor).join();
-        store.scaleSegmentsSealed(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
+        store.completeScale(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)),
                 null, executor).join();
         store.setState(scope, stream, State.ACTIVE, null, executor).join();
 
@@ -841,7 +841,7 @@ public abstract class StreamMetadataStoreTest {
         truncation.put(1L, 0L);
         assertTrue(Futures.await(store.startTruncation(scope, stream, truncation, null, executor)));
         store.setState(scope, stream, State.TRUNCATING, null, executor).join();
-        StreamTruncationRecord truncationProperty = store.getTruncationRecord(scope, stream, true, null, executor).join();
+        StreamTruncationRecord truncationProperty = store.getVersionedTruncationRecord(scope, stream, true, null, executor).join();
         assertTrue(truncationProperty.isUpdating());
 
         Map<Long, Long> truncation2 = new HashMap<>();
@@ -851,7 +851,7 @@ public abstract class StreamMetadataStoreTest {
         assertFalse(Futures.await(store.startTruncation(scope, stream, truncation2, null, executor)));
         assertTrue(Futures.await(store.completeTruncation(scope, stream, null, executor)));
 
-        truncationProperty = store.getTruncationRecord(scope, stream, true, null, executor).join();
+        truncationProperty = store.getVersionedTruncationRecord(scope, stream, true, null, executor).join();
         assertEquals(truncation, truncationProperty.getStreamCut());
 
         assertTrue(truncationProperty.getCutEpochMap().size() == 2);
@@ -1017,7 +1017,7 @@ public abstract class StreamMetadataStoreTest {
         store.setState(scope, stream, State.SCALING, null, executor).get();
         store.scaleCreateNewSegments(scope, stream, false, null, executor).join();
         store.scaleNewSegmentsCreated(scope, stream, null, executor).join();
-        store.scaleSegmentsSealed(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 40L)),
+        store.completeScale(scope, stream, scale1SealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 40L)),
                 null, executor).join();
         store.setState(scope, stream, State.ACTIVE, null, executor).get();
 
