@@ -758,17 +758,12 @@ public class InMemoryStream extends PersistentStreamBase {
     CompletableFuture<Void> createEpochTransitionDataIfAbsent(byte[] epochTransitionData) {
         Preconditions.checkNotNull(epochTransitionData);
 
-        CompletableFuture<Void> result = new CompletableFuture<>();
-
         synchronized (lock) {
-            if (this.epochTransition != null) {
-                result.completeExceptionally(StoreException.create(StoreException.Type.DATA_EXISTS, "epoch transition exists"));
-            } else {
+            if (this.epochTransition == null) {
                 this.epochTransition = new Data<>(epochTransitionData, 0);
-                result.complete(null);
             }
         }
-        return result;
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override
@@ -848,17 +843,12 @@ public class InMemoryStream extends PersistentStreamBase {
     CompletableFuture<Void> createCommittingTxnRecord(byte[] committingTxns) {
         Preconditions.checkNotNull(committingTxns);
 
-        CompletableFuture<Void> result = new CompletableFuture<>();
-
         synchronized (lock) {
-            if (this.committingTxnRecord != null) {
-                result.completeExceptionally(StoreException.create(StoreException.Type.DATA_EXISTS, "committing transactions record exists"));
-            } else {
+            if (this.committingTxnRecord == null) {
                 this.committingTxnRecord = new Data<>(committingTxns, 0);
-                result.complete(null);
             }
         }
-        return result;
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override
@@ -888,7 +878,7 @@ public class InMemoryStream extends PersistentStreamBase {
                 result.completeExceptionally(StoreException.create(StoreException.Type.WRITE_CONFLICT, "committing txn version mismatch"));
             } else {
                 this.committingTxnRecord = new Data<>(copy, this.committingTxnRecord.getVersion() + 1);
-                result.complete(record.getVersion());
+                result.complete(committingTxnRecord.getVersion());
             }
         }
         return result;

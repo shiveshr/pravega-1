@@ -69,6 +69,11 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
 
     @Override
     public void cleanupTaskStore() throws IOException {
+        try {
+            ((ZKStreamMetadataStore) store).close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
         cli.close();
         zkServer.close();
     }

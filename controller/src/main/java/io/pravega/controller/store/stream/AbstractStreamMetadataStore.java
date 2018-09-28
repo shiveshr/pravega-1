@@ -478,7 +478,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startRollingTxn(String scope, String stream,
                                        int txnEpoch, int activeEpoch, VersionedMetadata<CommittingTransactionsRecord> existing,
                                        OperationContext context, ScheduledExecutorService executor) {
-        return withCompletion(getStream(scope, stream, context).startRollingTxn(activeEpoch, txnEpoch, existing), executor);
+        return withCompletion(getStream(scope, stream, context).startRollingTxn(txnEpoch, activeEpoch, existing), executor);
     }
 
 

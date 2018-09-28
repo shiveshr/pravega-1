@@ -232,8 +232,9 @@ public abstract class PersistentStreamBase implements Stream {
     /**
      * Update configuration at configurationPath.
      *
+     * @param existing versioned record
+     *
      * @return future of operation
-     * @param existing
      */
     @Override
     public CompletableFuture<Void> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing) {
@@ -533,15 +534,10 @@ public abstract class PersistentStreamBase implements Stream {
                                             segmentTable.getData(), segmentsToSeal, newRanges, scaleTimestamp);
 
                                     return updateEpochTransitionNode(new Data<>(epochTransition.toByteArray(), record.getVersion()))
-                                            .handle((r, e) -> {
-                                                if (Exceptions.unwrap(e) instanceof StoreException.DataExistsException) {
-                                                    log.debug("scale conflict, another scale operation is ongoing");
-                                                    throw new EpochTransitionOperationExceptions.ConflictException();
-                                                }
-
+                                            .thenApply(version -> {
                                                 log.info("scale for stream {}/{} accepted. Segments to seal = {}", scope, name,
                                                         epochTransition.getSegmentsToSeal());
-                                                return new VersionedMetadata<>(epochTransition, r);
+                                                return new VersionedMetadata<>(epochTransition, version);
                                             });
                                 });
                     }
@@ -613,10 +609,32 @@ public abstract class PersistentStreamBase implements Stream {
                                                     historyIndex.getData(), historyTable.getData(), segmentIndex, segmentTable,
                                                     epochTransitionRecord.getObject()).thenApply(v -> epochTransitionRecord);
                                         } else {
-                                            return CompletableFuture.completedFuture(epochTransitionRecord);
+                                            return discardInconsistentEpochTransition(historyIndex, historyTable, segmentIndex,
+                                                    segmentTable, epochTransitionRecord);
                                         }
                                     })))));
                 });
+    }
+
+    private CompletableFuture<VersionedMetadata<EpochTransitionRecord>> discardInconsistentEpochTransition(Data<Integer> historyIndex, Data<Integer> historyTable,
+                                                                       Data<Integer> segmentIndex, Data<Integer> segmentTable,
+                                                                       VersionedMetadata<EpochTransitionRecord> epochTransitionRecord) {
+        // verify that epoch transition is consistent with segments in the table.
+        EpochTransitionRecord epochTransition = epochTransitionRecord.getObject();
+        if (TableHelper.isEpochTransitionConsistent(epochTransition, historyIndex.getData(), historyTable.getData(),
+                segmentIndex.getData(), segmentTable.getData())) {
+            log.debug("CreateNewSegments step for stream {}/{} is idempotent, " +
+                    "segments are already present in segment table.", scope, name);
+            return CompletableFuture.completedFuture(epochTransitionRecord);
+        } else {
+            return updateEpochTransitionNode(new Data<>(EpochTransitionRecord.EMPTY.toByteArray(), epochTransitionRecord.getVersion()))
+                    .thenCompose(version -> resetStateConditionally(State.SCALING)
+                    .thenApply(v -> {
+                        log.warn("Scale epoch transition record is inconsistent with data in the table. {}",
+                                epochTransition.getNewEpoch());
+                        throw new IllegalStateException("Epoch transition record is inconsistent.");
+                    }));
+        }
     }
 
     private CompletableFuture<Void> createNewSegments(final byte[] historyIndex,
@@ -1315,16 +1333,8 @@ public abstract class PersistentStreamBase implements Stream {
 
     @Override
     public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getVersionedCommitTransactionsRecord() {
-        CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> result = new CompletableFuture<>();
-        getCommittingTxnRecord()
-                .whenComplete((r, e) -> {
-                    if (e != null) {
-                            result.completeExceptionally(e);
-                    } else {
-                        result.complete(new VersionedMetadata<>(CommittingTransactionsRecord.parse(r.getData()), r.getVersion()));
-                    }
-                });
-        return result;
+        return getCommittingTxnRecord()
+                .thenApply(record -> new VersionedMetadata<>(CommittingTransactionsRecord.parse(record.getData()), record.getVersion()));
     }
 
     @Override

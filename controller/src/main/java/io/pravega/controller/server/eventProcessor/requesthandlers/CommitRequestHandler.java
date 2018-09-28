@@ -198,10 +198,10 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
         }
 
         return future.thenCompose(record -> {
-            if (activeEpoch.getEpoch() < record.getObject().getActiveEpoch()) {
-                return runRollingTxn(scope, stream, txnEpoch, activeEpoch, record, context);
-            } else {
+            if (activeEpoch.getEpoch() > record.getObject().getActiveEpoch()) {
                 return CompletableFuture.completedFuture(record);
+            } else {
+                return runRollingTxn(scope, stream, txnEpoch, activeEpoch, record, context);
             }
         });
     }

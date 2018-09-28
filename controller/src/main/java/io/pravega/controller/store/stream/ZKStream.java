@@ -248,7 +248,7 @@ class ZKStream extends PersistentStreamBase {
 
     @Override
     CompletableFuture<Void> createEpochTransitionDataIfAbsent(byte[] epochTransition) {
-        return store.createZNode(epochTransitionPath, epochTransition)
+        return store.createZNodeIfNotExist(epochTransitionPath, epochTransition)
                 .thenApply(x -> cache.invalidateCache(epochTransitionPath));
     }
 
@@ -632,7 +632,7 @@ class ZKStream extends PersistentStreamBase {
 
     @Override
     CompletableFuture<Void> createCommittingTxnRecord(byte[] committingTxns) {
-        return store.createZNode(committingTxnsPath, committingTxns)
+        return store.createZNodeIfNotExist(committingTxnsPath, committingTxns)
                 .thenApply(x -> cache.invalidateCache(committingTxnsPath));
     }
 

@@ -228,7 +228,7 @@ interface Stream {
 
     /**
      * Called after new segment creation is complete.
-     * @param record TODO: shivesh
+     * @param record  existing versioned record
      */
     CompletableFuture<VersionedMetadata<EpochTransitionRecord>> scaleNewSegmentsCreated(VersionedMetadata<EpochTransitionRecord> record);
 
@@ -451,7 +451,7 @@ interface Stream {
      * Method to delete committing transaction record from the store for a given stream.
      *
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
-     * @param record TODO: shivesh
+     * @param record existing versioned record.
      */
     CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record);
 
