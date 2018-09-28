@@ -16,6 +16,7 @@ import io.pravega.controller.store.stream.records.CommitTransactionsRecord;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Optional;
 
 public class CommitTransactionsRecordSerializer
         extends VersionedSerializer.WithBuilder<CommitTransactionsRecord, CommitTransactionsRecord.CommitTransactionsRecordBuilder> {
@@ -32,8 +33,14 @@ public class CommitTransactionsRecordSerializer
     private void read00(RevisionDataInput revisionDataInput, CommitTransactionsRecord.CommitTransactionsRecordBuilder builder)
             throws IOException {
         builder.epoch(revisionDataInput.readInt())
-                .transactionsToCommit(revisionDataInput.readCollection(RevisionDataInput::readUUID, ArrayList::new))
-                .activeEpoch(revisionDataInput.readInt());
+                .transactionsToCommit(revisionDataInput.readCollection(RevisionDataInput::readUUID, ArrayList::new));
+
+        int read = revisionDataInput.readInt();
+        if (read == Integer.MIN_VALUE) {
+            builder.activeEpoch(Optional.empty());
+        } else {
+            builder.activeEpoch(Optional.of(read));
+        }
     }
 
     private void write00(CommitTransactionsRecord record, RevisionDataOutput revisionDataOutput) throws IOException {

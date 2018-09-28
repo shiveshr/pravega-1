@@ -121,7 +121,7 @@ public abstract class AbstractStream implements Stream {
         return checkScopeExists()
                 .thenCompose((Void v) -> checkStreamExists(configuration, createTimestamp, startingSegmentNumber))
                 .thenCompose(createStreamResponse -> storeCreationTimeIfAbsent(createStreamResponse.getTimestamp())
-                        .thenCompose((Void v)-> createConfigurationIfAbsent(StreamConfigurationRecord.complete(
+                        .thenCompose((Void v) -> createConfigurationIfAbsent(StreamConfigurationRecord.complete(
                                 createStreamResponse.getConfiguration()).toByteArray()))
                         .thenCompose((Void v) -> createEpochTransitionIfAbsent(EpochTransitionRecord.EMPTY.toByteArray()))
                         .thenCompose((Void v) -> createTruncationDataIfAbsent(TruncationRecord.EMPTY.toByteArray()))
@@ -198,6 +198,7 @@ public abstract class AbstractStream implements Stream {
     /**
      * Update configuration at configurationPath.
      *
+     * @param versionedMetadata versioned stream configuration record which has to be completed.
      * @return future of operation
      */
     public CompletableFuture<Void> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> versionedMetadata) {
@@ -262,13 +263,14 @@ public abstract class AbstractStream implements Stream {
     /**
      * Reset state of stream to ACTIVE if it matches the supplied state.
      * @param state stream state to match
+     *
      * @return Future which when completes will have reset the state or failed with appropriate exception.
      */
-    public CompletableFuture<Void> resetStateConditionally(State state, int version) {
-        return Futures.toVoid(getState(true)
+    public CompletableFuture<Void> resetStateConditionally(State state) {
+        return Futures.toVoid(getStateData(true)
                 .thenCompose(currState -> {
-                    if (currState.equals(state)) {
-                        return updateState(State.ACTIVE, version);
+                    if (state.equals(StateRecord.parse(currState.getData()).getState())) {
+                        return updateState(State.ACTIVE, currState.getVersion());
                     } else {
                         return CompletableFuture.completedFuture(null);
                     }
@@ -340,7 +342,7 @@ public abstract class AbstractStream implements Stream {
                                 EpochRecord previousEpochRecord = previousEpochFuture.join();
                                 Optional<StreamSegmentRecord> segmentOpt = previousEpochRecord.getSegments().stream()
                                         .filter(r -> r.segmentId() == segmentId).findAny();
-                                assert (segmentOpt.isPresent());
+                                assert segmentOpt.isPresent();
                                 StreamSegmentRecord segment = segmentOpt.get();
 
                                 List<StreamSegmentRecord> successors = sealedEpochRecord.getSegments().stream()
@@ -359,11 +361,6 @@ public abstract class AbstractStream implements Stream {
         return getCurrentEpochRecord().thenApply(epochRecord -> transform(epochRecord.getSegments()));
     }
 
-    /**
-     *
-     * @param timestamp point in time.
-     * @return : list of active segment numbers at given time stamp
-     */
     public CompletableFuture<Map<Segment, Long>> getSegmentsAtTime(final long timestamp) {
         return getVersionedTruncationRecord()
                 .thenCompose(truncationRecord -> findEpochAtTime(timestamp)
@@ -600,7 +597,8 @@ public abstract class AbstractStream implements Stream {
     /**
      * This method attempts to start a new scale workflow. For this it first computes epoch transition and stores it in the metadastore.
      * This method can be called by manual scale or during the processing of auto-scale event. Which means there could be
-     * concurrent calls to this method.
+     * concurrent calls to this method on different processes. Only one of them will succeed in updating the epoch transition record
+     * and that process will get a successful response for start scale.
      *
      * @param segmentsToSeal segments that will be sealed at the end of this scale operation.
      * @param newRanges      key ranges of new segments to be created
@@ -652,12 +650,6 @@ public abstract class AbstractStream implements Stream {
                 }));
     }
 
-    /**
-     * Remainder of scale metadata update. Also set the state back to active.
-     *
-     * @param sealedSegmentSizes sealed segments with sizes
-     * @return : list of newly created segments
-     */
     public CompletableFuture<Void> completeScaleFor(Map<Long, Long> sealedSegmentSizes, VersionedMetadata<EpochTransitionRecord> versionedMetadata) {
         // update the size of sealed segments
         // update current epoch record
@@ -768,7 +760,7 @@ public abstract class AbstractStream implements Stream {
                                 activeEpoch, duplicateSegmentsToSeal, epochTransition.getNewSegmentsWithRange().values().asList(),
                                 epochTransition.getTime());
                         return updateEpochTransitionNode(new Data<>(updatedRecord.toByteArray(), versionedMetadata.getVersion()))
-                                .thenApply(v -> new VersionedMetadata(updatedRecord, v));
+                                .thenApply(v -> new VersionedMetadata<>(updatedRecord, v));
                     } else {
                         // we should never reach here!! rescue and exit
                         return updateEpochTransitionNode(new Data<>(EpochTransitionRecord.EMPTY.toByteArray(), versionedMetadata.getVersion()))
@@ -1088,7 +1080,7 @@ public abstract class AbstractStream implements Stream {
     public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch, long time, 
                                                                                           VersionedMetadata<CommitTransactionsRecord> existing) {
         CommitTransactionsRecord record = existing.getObject();
-        assert(record.getEpoch() == transactionEpoch);
+        assert record.getEpoch() == transactionEpoch;
         if (activeEpoch == record.getActiveEpoch()) {
             return CompletableFuture.completedFuture(existing);
         } else {
@@ -1544,29 +1536,41 @@ public abstract class AbstractStream implements Stream {
 
     // region history
     abstract CompletableFuture<Void> createHistoryTimeIndexRootIfAbsent(byte[] data);
+
     abstract CompletableFuture<Data<Integer>> getHistoryTimeIndexRootNodeData();
+
     abstract CompletableFuture<Integer> updateHistoryIndexRootData(final Data<Integer> updated);
 
     abstract CompletableFuture<Void> createHistoryTimeIndexLeafDataIfAbsent(int leafChunkNumber, byte[] data);
+
     abstract CompletableFuture<Integer> updateHistoryTimeIndexLeafData(int historyLeaf, Data<Integer> tData);
+
     abstract CompletableFuture<Data<Integer>> getHistoryIndexLeafData(int leaf, boolean ignoreCached);
 
     abstract CompletableFuture<Void> createHistoryTimeSeriesChunkDataIfAbsent(int chunkNumber, byte[] data);
+
     abstract CompletableFuture<Data<Integer>> getHistoryTimeSeriesChunkData(int chunkNumber, boolean ignoreCached);
+
     abstract CompletableFuture<Integer> updateHistoryTimeSeriesChunkData(int historyChunk, Data<Integer> tData);
 
     abstract CompletableFuture<Void> createCurrentEpochRecordDataIfAbsent(byte[] data);
+
     abstract CompletableFuture<Integer> updateCurrentEpochRecordData(Data<Integer> data);
+
     abstract CompletableFuture<Data<Integer>> getCurrentEpochRecordData(boolean ignoreCached);
 
     abstract CompletableFuture<Void> createEpochRecordDataIfAbsent(int epoch, byte[] data);
+
     abstract CompletableFuture<Data<Integer>> getEpochRecordData(int epoch);
 
     abstract CompletableFuture<Void> createSealedSegmentSizesMapShardDataIfAbsent(int shardNumber, byte[] data);
+
     abstract CompletableFuture<Data<Integer>> getSealedSegmentSizesMapShardData(int shard);
+
     abstract CompletableFuture<Integer> updateSealedSegmentSizesMapShardData(int shard, Data<Integer> data);
 
     abstract CompletableFuture<Void> createSegmentSealedEpochRecordData(long segmentToSeal, int epoch);
+
     abstract CompletableFuture<Data<Integer>> getSegmentSealedRecordData(long segmentId);
     // endregion
 

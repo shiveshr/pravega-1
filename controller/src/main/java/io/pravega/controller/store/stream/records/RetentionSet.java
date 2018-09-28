@@ -26,6 +26,9 @@ import java.util.stream.Collectors;
 @Slf4j
 @Builder
 @Data
+/**
+ * Data class to capture a retention set. This contains a sorted (by recording time) list of retention set records.
+ */
 public class RetentionSet {
     public static final RetentionSetSerializer SERIALIZER = new RetentionSetSerializer();
 
@@ -59,6 +62,9 @@ public class RetentionSet {
     }
 
     public RetentionSetRecord getLatest() {
+        if (retentionRecords.isEmpty()) {
+            return null;
+        }
         return retentionRecords.get(retentionRecords.size() - 1);
     }
 
