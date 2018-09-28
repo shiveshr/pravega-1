@@ -36,9 +36,7 @@ import io.pravega.controller.store.stream.Segment;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.TxnStatus;
-import io.pravega.controller.store.stream.VersionedMetadata;
 import io.pravega.controller.store.stream.VersionedTransactionData;
-import io.pravega.controller.store.stream.tables.EpochTransitionRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
 import io.pravega.controller.store.stream.tables.State;
 import io.pravega.controller.store.task.TaskMetadataStore;
@@ -352,10 +350,9 @@ public class ScaleRequestHandlerTest {
         State state = streamStore.getState(scope, stream, false, null, executor).join();
         assertEquals(State.ACTIVE, state);
 
-        VersionedMetadata<EpochTransitionRecord> record = streamStore.getVersionedEpochTransition(scope, stream, null, executor).join();
         // 4. just submit a new scale. don't let it run. this should create an epoch transition. state should still be active
         streamStore.startScale(scope, stream, Lists.newArrayList(1L), Lists.newArrayList(new AbstractMap.SimpleEntry<>(0.5, 0.75), new AbstractMap.SimpleEntry<>(0.75, 1.0)),
-        System.currentTimeMillis(), false, record, null, executor).join();
+        System.currentTimeMillis(), false, null, executor).join();
 
         // 5. commit on old epoch. this should roll over.
         assertTrue(Futures.await(commitRequestHandler.processEvent(new CommitEvent(scope, stream, txnData.getEpoch()))));
@@ -410,10 +407,9 @@ public class ScaleRequestHandlerTest {
         State state = streamStore.getState(scope, stream, false, null, executor).join();
         assertEquals(State.ACTIVE, state);
 
-        VersionedMetadata<EpochTransitionRecord> record = streamStore.getVersionedEpochTransition(scope, stream, null, executor).join();
         // 4. just submit a new scale. don't let it run. this should create an epoch transition. state should still be active
         streamStore.startScale(scope, stream, Lists.newArrayList(1L), Lists.newArrayList(new AbstractMap.SimpleEntry<>(0.5, 0.75), new AbstractMap.SimpleEntry<>(0.75, 1.0)),
-        System.currentTimeMillis(), false, record, null, executor).join();
+        System.currentTimeMillis(), false, null, executor).join();
 
         // 5. commit on old epoch. this should roll over.
         assertTrue(Futures.await(commitRequestHandler.processEvent(new CommitEvent(scope, stream, txnData.getEpoch()))));

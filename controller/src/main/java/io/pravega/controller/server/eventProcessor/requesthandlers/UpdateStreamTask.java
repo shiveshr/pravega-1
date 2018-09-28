@@ -20,7 +20,6 @@ import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.shared.controller.event.UpdateStreamEvent;
 
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -54,7 +53,7 @@ public class UpdateStreamTask implements StreamTask<UpdateStreamEvent> {
         String scope = request.getScope();
         String stream = request.getStream();
 
-        return streamMetadataStore.getVersionedConfigurationRecord(scope, stream, true, context, executor)
+        return streamMetadataStore.getVersionedConfigurationRecord(scope, stream, context, executor)
                 .thenCompose(existing -> {
                     StreamConfigurationRecord configProperty = existing.getObject();
                     if (!configProperty.isUpdating()) {

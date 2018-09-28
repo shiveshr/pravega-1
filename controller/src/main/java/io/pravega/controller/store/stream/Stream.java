@@ -89,11 +89,9 @@ interface Stream {
     /**
      * Fetches the current stream configuration.
      *
-     * @param ignoreCached ignore cached
-     *
      * @return current stream configuration.
      */
-    CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> getVersionedConfigurationRecord(boolean ignoreCached);
+    CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> getVersionedConfigurationRecord();
 
     /**
      * Starts truncating an existing stream.
@@ -197,6 +195,12 @@ interface Stream {
     CompletableFuture<List<Long>> getActiveSegments(int epoch);
 
     /**
+     *
+     * @return
+     */
+    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> getVersionedEpochTransition();
+
+    /**
      * Called to start metadata updates to stream store wrt new scale event.
      *
      * @param newRanges      key ranges of new segments to be created
@@ -208,7 +212,7 @@ interface Stream {
     CompletableFuture<VersionedMetadata<EpochTransitionRecord>> startScale(final List<Long> sealedSegments,
                                                                            final List<SimpleEntry<Double, Double>> newRanges,
                                                                            final long scaleTimestamp,
-                                                                           final boolean runOnlyIfStarted, VersionedMetadata<EpochTransitionRecord> record);
+                                                                           final boolean runOnlyIfStarted);
     
     /**
      * Called after epochTransition entry is created. Implementation of this method should create new segments that are
@@ -224,9 +228,9 @@ interface Stream {
 
     /**
      * Called after new segment creation is complete.
-     * @param record
+     * @param record TODO: shivesh
      */
-    CompletableFuture<Void> scaleNewSegmentsCreated(VersionedMetadata<EpochTransitionRecord> record);
+    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> scaleNewSegmentsCreated(VersionedMetadata<EpochTransitionRecord> record);
 
     /**
      * Called after sealing old segments is complete.
@@ -430,11 +434,9 @@ interface Stream {
      * it returns null.
      *
      * @param epoch epoch
-     * @param txnsToCommit transactions to commit within the epoch
-     * @param previousVersion
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
-    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(final int epoch, final List<UUID> txnsToCommit, int previousVersion);
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(final int epoch);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.
@@ -443,15 +445,15 @@ interface Stream {
      *
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
-    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getCommittingTransactionsRecord();
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getVersionedCommitTransactionsRecord();
 
     /**
      * Method to delete committing transaction record from the store for a given stream.
      *
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
-     * @param version
+     * @param record TODO: shivesh
      */
-    CompletableFuture<Void> completeCommittingTransactions(int version);
+    CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record);
 
     /**
      * Method to get all transactions in a given epoch.

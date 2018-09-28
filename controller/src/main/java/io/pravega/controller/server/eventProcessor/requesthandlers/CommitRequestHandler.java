@@ -17,7 +17,6 @@ import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
-import io.pravega.controller.store.stream.TxnStatus;
 import io.pravega.controller.store.stream.VersionedMetadata;
 import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.tables.HistoryRecord;
@@ -29,7 +28,6 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -128,16 +126,24 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                                           final String stream,
                                                           final int txnEpoch,
                                                           final OperationContext context) {
+        streamMetadataStore.getVersionedCommittingTransactionsRecord(scope, stream, context, executor)
+                .thenCompose(versionedMetadata -> {
+                    if (versionedMetadata.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
+                        // reset state conditionally in case we were left with stale committing state from a previous execution
+                        // that died just before updating the state back to ACTIVE but after having completed all the work.
+                        return streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING_TXN, context, executor);
+                    } else {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                });
         return streamMetadataStore.getState(scope, stream, true, context, executor)
                 .thenCompose(state -> {
                     CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> commitFuture =
-                            createRecordAndGetCommitTxnList(scope, stream, txnEpoch, context)
+                            streamMetadataStore.startCommitTransactions(scope, stream, txnEpoch, context, executor)
                             .thenCompose(versionedMetadata -> {
                                 if (versionedMetadata.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
-                                    // reset state conditionally in case we were left with stale committing state from a previous execution
-                                    // that died just before updating the state back to ACTIVE but after having completed all the work.
-                                    return streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING_TXN, context, executor)
-                                            .thenApply(v -> versionedMetadata);
+                                    // there are no transactions found to commit.
+                                    return CompletableFuture.completedFuture(versionedMetadata);
                                 } else {
                                     List<UUID> txnList = versionedMetadata.getObject().getTransactionsToCommit();
                                     // Once state is set to committing, we are guaranteed that this will be the only processing that can happen on the stream
@@ -170,56 +176,15 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                                 } else {
                                                     return rollTransactions(scope, stream, txnEpochRecord, activeEpochRecord, versionedMetadata, context);
                                                 }
-                                            }))
-                                            .thenCompose(versionedRecord -> markCommitted(scope, stream, txnList, context)
-                                                    .thenApply(x -> versionedRecord));
+                                            }));
                                 }
                             });
 
                     // once all commits are done, reset the committing txn record.
                     // reset state to ACTIVE if it was COMMITTING_TXN
                     return Futures.toVoid(commitFuture
-                            .thenCompose(versionedMetadata -> streamMetadataStore.completeCommitTransactions(scope, stream, versionedMetadata.getVersion(), context, executor))
+                            .thenCompose(versionedMetadata -> streamMetadataStore.completeCommitTransactions(scope, stream, versionedMetadata, context, executor))
                             .thenCompose(v -> streamMetadataStore.resetStateConditionally(scope, stream, State.COMMITTING_TXN, context, executor)));
-                });
-    }
-
-    private CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> createRecordAndGetCommitTxnList(String scope,
-                                                                                                       String stream,
-                                                                                                       int epoch,
-                                                                                                       OperationContext context) {
-        return streamMetadataStore.getVersionedCommittingTransactionsRecord(scope, stream, context, executor)
-                .thenCompose(versionedMetadata -> {
-                    if (versionedMetadata.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
-                        // no ongoing list transactions already chosen for commit.
-                        return getTxnCommitList(scope, stream, epoch, versionedMetadata, context, executor)
-                                .thenCompose(transactions -> {
-                                    if (!transactions.isEmpty()) {
-                                        return streamMetadataStore.startCommitTransactions(scope, stream, epoch, transactions,
-                                                versionedMetadata.getVersion(), context, executor)
-                                                .thenApply(x -> {
-                                                    log.debug("Transactions {} added to commit list for epoch {} stream {}/{}",
-                                                            transactions, epoch, scope, stream);
-                                                    return x;
-                                                });
-                                    } else {
-                                        return CompletableFuture.completedFuture(versionedMetadata);
-                                    }
-                                });
-
-                    } else {
-                        // check if the epoch in record matches current epoch. if not throw OperationNotAllowed
-                        if (versionedMetadata.getObject().getEpoch() == epoch) {
-                            // Note: If there are transactions that are not included in the commitList but have committing state,
-                            // we can be sure they will be completed through another event for this epoch.
-                            return CompletableFuture.completedFuture(versionedMetadata);
-                        } else {
-                            log.debug("Postponing commit on epoch {} as transactions on different epoch {} are being committed for stream {}/{}",
-                                    epoch, versionedMetadata.getObject().getEpoch(), scope, stream);
-                            throw StoreException.create(StoreException.Type.OPERATION_NOT_ALLOWED,
-                                    "Transactions on different epoch are being committed");
-                        }
-                    }
                 });
     }
 
@@ -308,7 +273,6 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-
         for (UUID txnId : transactionsToCommit) {
             log.debug("Committing transaction {} on stream {}/{}", txnId, scope, stream);
             // commit transaction in segment store
@@ -320,41 +284,6 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                     .thenCompose(v -> streamMetadataTasks.notifyTxnCommit(scope, stream, segments, txnId));
         }
         return future;
-    }
-
-    /**
-     * This method loops over each transaction in the list, and marks transaction metadata as COMMITTED.
-     * At the end of this method's execution, all transactions in the list would have committed.
-     */
-    private CompletableFuture<Void> markCommitted(String scope, String stream, List<UUID> transactionsToCommit, OperationContext context) {
-        // Chain all transaction commit futures one after the other. This will ensure that order of commit
-        // if honoured and is based on the order in the list.
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
-        for (UUID txnId : transactionsToCommit) {
-            log.debug("Committing transaction {} on stream {}/{}", txnId, scope, stream);
-            // commit transaction in segment store
-            future = future
-                    // mark transaction as committed in metadata store.
-                    .thenCompose(x -> streamMetadataStore.commitTransaction(scope, stream, txnId, context, executor)
-                            .thenAccept(done -> {
-                                log.debug("transaction {} on stream {}/{} committed successfully", txnId, scope, stream);
-                            }));
-        }
-        return future;
-    }
-
-    /**
-     * Get transactions in epoch. If no transactions exist return null.
-     * If transactions exist, create a new Committing transactions record in the store.
-     * Note, before calling this method, we check if committingTxnList exists or not so we can never get DataExistsException.
-     */
-    private CompletableFuture<List<UUID>> getTxnCommitList(String scope, String stream, int epoch,
-                                                           VersionedMetadata<CommittingTransactionsRecord> versionedMetadata,
-                                                           OperationContext context, ScheduledExecutorService executor) {
-        return streamMetadataStore.getTransactionsInEpoch(scope, stream, epoch, context, executor)
-                .thenApply(transactions -> transactions.entrySet().stream()
-                        .filter(entry -> entry.getValue().getTxnStatus().equals(TxnStatus.COMMITTING))
-                        .map(Map.Entry::getKey).collect(Collectors.toList()));
     }
 
     /**

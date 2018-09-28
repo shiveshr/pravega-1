@@ -407,7 +407,7 @@ class ZKStreamMetadataStore extends AbstractStreamMetadataStore {
                     if (data == null) {
                         return storeHelper.createZNodeIfNotExist(retentionPath, serialize);
                     } else {
-                        return storeHelper.setData(retentionPath, new Data<>(serialize, data.getVersion()));
+                        return Futures.toVoid(storeHelper.setData(retentionPath, new Data<>(serialize, data.getVersion())));
                     }
                 });
     }
@@ -451,7 +451,7 @@ class ZKStreamMetadataStore extends AbstractStreamMetadataStore {
                                   Preconditions.checkArgument(lastActiveSegment >= oldLastActiveSegment,
                                           "Old last active segment ({}) for {}/{} is higher than current one {}.",
                                           oldLastActiveSegment, scope, stream, lastActiveSegment);
-                                  return storeHelper.setData(deletePath, new Data<>(maxSegmentNumberBytes, data.getVersion()));
+                                  return Futures.toVoid(storeHelper.setData(deletePath, new Data<>(maxSegmentNumberBytes, data.getVersion())));
                               }
                           });
     }
