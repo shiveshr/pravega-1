@@ -559,15 +559,11 @@ public abstract class StreamMetadataStoreTest {
 
         latch.complete(null);
 
-        // first startScale should also complete with epoch transition record that matches first scale request
-        assertTrue(Futures.await(response));
+        // first scale should fail in attempting to update epoch transition record.
+        AssertExtensions.assertThrows("WriteConflict in start scale", () -> response, e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException);
         VersionedMetadata<EpochTransitionRecord> versioned = streamObj.getVersionedEpochTransition().join();
         EpochTransitionRecord epochTransitionRecord = versioned.getObject();
-        assertEquals(0, epochTransitionRecord.getActiveEpoch());
-        assertEquals(1, epochTransitionRecord.getNewEpoch());
-        assertTrue(epochTransitionRecord.getSegmentsToSeal().size() == 2 &&
-                epochTransitionRecord.getSegmentsToSeal().contains(0L) &&
-                epochTransitionRecord.getSegmentsToSeal().contains(1L));
+        assertEquals(EpochTransitionRecord.EMPTY, epochTransitionRecord);
         // now that start scale succeeded, we should set the state to scaling.
         store.setState(scope, stream, State.SCALING, null, executor).join();
         // now call first step of scaling -- createNewSegments. this should throw exception
@@ -576,10 +572,6 @@ public abstract class StreamMetadataStoreTest {
                 e -> Exceptions.unwrap(e) instanceof IllegalStateException);
         // verify that state is reset to ACTIVE
         assertEquals(State.ACTIVE, store.getState(scope, stream, true, null, executor).join());
-        // verify that epoch transition is cleaned up
-        AssertExtensions.assertThrows("epoch transition was supposed to be invalid",
-                streamObj.getEpochTransitionNode(),
-                e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException);
         // endregion
     }
 
