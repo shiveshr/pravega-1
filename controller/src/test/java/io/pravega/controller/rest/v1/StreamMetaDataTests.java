@@ -724,7 +724,7 @@ public class StreamMetaDataTests {
         scaleMetadataList.add(scaleMetadata2);
         scaleMetadataList.add(scaleMetadata1);
 
-        when(mockControllerService.getScaleRecords(scope1, stream1)).
+        when(mockControllerService.getScaleRecords(scope1, stream1, 0, System.currentTimeMillis())).
                 thenReturn(CompletableFuture.completedFuture(scaleMetadataList));
         Response response = addAuthHeaders(client.target(resourceURI).queryParam("from", fromDateTime).
                 queryParam("to", toDateTime).request()).buildGet().invoke();
@@ -744,7 +744,7 @@ public class StreamMetaDataTests {
         // Test for large number of scaling events.
         scaleMetadataList.clear();
         scaleMetadataList.addAll(Collections.nCopies(50000, scaleMetadata3));
-        when(mockControllerService.getScaleRecords(scope1, stream1)).
+        when(mockControllerService.getScaleRecords(scope1, stream1, 0, System.currentTimeMillis())).
                 thenReturn(CompletableFuture.completedFuture(scaleMetadataList));
         response = addAuthHeaders(client.target(resourceURI).queryParam("from", fromDateTime).
                 queryParam("to", toDateTime).request()).buildGet().invoke();
@@ -757,14 +757,14 @@ public class StreamMetaDataTests {
         // Test for getScalingEvents for invalid scope/stream.
         final CompletableFuture<List<ScaleMetadata>> completableFuture1 = new CompletableFuture<>();
         completableFuture1.completeExceptionally(StoreException.create(StoreException.Type.DATA_NOT_FOUND, "stream1"));
-        when(mockControllerService.getScaleRecords("scope1", "stream1")).thenReturn(completableFuture1);
+        when(mockControllerService.getScaleRecords("scope1", "stream1", 0, System.currentTimeMillis())).thenReturn(completableFuture1);
         response = addAuthHeaders(client.target(resourceURI).queryParam("from", fromDateTime).
                 queryParam("to", toDateTime).request()).buildGet().invoke();
         assertEquals("Get Scaling Events response code", 404, response.getStatus());
 
         // Test for getScalingEvents for bad request.
         // from > to is tested here
-        when(mockControllerService.getScaleRecords("scope1", "stream1")).
+        when(mockControllerService.getScaleRecords("scope1", "stream1", 0, System.currentTimeMillis())).
                 thenReturn(CompletableFuture.completedFuture(scaleMetadataList));
         response = addAuthHeaders(client.target(resourceURI).queryParam("from", fromDateTime * 2).
                 queryParam("to", fromDateTime).request()).buildGet().invoke();
@@ -773,7 +773,7 @@ public class StreamMetaDataTests {
         // Test for getScalingEvents failure.
         final CompletableFuture<List<ScaleMetadata>> completableFuture = new CompletableFuture<>();
         completableFuture.completeExceptionally(new Exception());
-        when(mockControllerService.getScaleRecords("scope1", "stream1")).thenReturn(completableFuture);
+        when(mockControllerService.getScaleRecords("scope1", "stream1", 0, System.currentTimeMillis())).thenReturn(completableFuture);
         response = addAuthHeaders(client.target(resourceURI).request()).buildGet().invoke();
         assertEquals("Get Scaling Events response code", 500, response.getStatus());
     }

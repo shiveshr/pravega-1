@@ -32,7 +32,7 @@ import java.util.Map;
 @Data
 @Builder
 @Slf4j
-public class RetentionStreamCutRecord {
+public class StreamCutRecord {
     public static final RetentionStreamCutRecordSerializer SERIALIZER = new RetentionStreamCutRecordSerializer();
 
     /**
@@ -46,24 +46,24 @@ public class RetentionStreamCutRecord {
     /**
      * Actual Stream cut.
      */
-    final Map<StreamSegmentRecord, Long> streamCut;
+    final Map<Long, Long> streamCut;
 
-    public RetentionStreamCutRecord(long recordingTime, long recordingSize, Map<StreamSegmentRecord, Long> streamCut) {
+    public StreamCutRecord(long recordingTime, long recordingSize, Map<Long, Long> streamCut) {
         this.recordingTime = recordingTime;
         this.recordingSize = recordingSize;
         this.streamCut = ImmutableMap.copyOf(streamCut);
     }
 
-    public StreamCutReferenceRecord getRetentionRecord() {
+    public StreamCutReferenceRecord getReferenceRecord() {
         return new StreamCutReferenceRecord(recordingTime, recordingSize);
     }
 
-    public static class RetentionStreamCutRecordBuilder implements ObjectBuilder<RetentionStreamCutRecord> {
+    public static class StreamCutRecordBuilder implements ObjectBuilder<StreamCutRecord> {
 
     }
 
     @SneakyThrows(IOException.class)
-    public static RetentionStreamCutRecord fromBytes(final byte[] data) {
+    public static StreamCutRecord fromBytes(final byte[] data) {
         return SERIALIZER.deserialize(data);
     }
 
@@ -73,7 +73,7 @@ public class RetentionStreamCutRecord {
     }
 
     private static class RetentionStreamCutRecordSerializer
-            extends VersionedSerializer.WithBuilder<RetentionStreamCutRecord, RetentionStreamCutRecordBuilder> {
+            extends VersionedSerializer.WithBuilder<StreamCutRecord, StreamCutRecordBuilder> {
         @Override
         protected byte getWriteVersion() {
             return 0;
@@ -84,22 +84,22 @@ public class RetentionStreamCutRecord {
             version(0).revision(0, this::write00, this::read00);
         }
 
-        private void read00(RevisionDataInput revisionDataInput, RetentionStreamCutRecordBuilder streamCutRecordBuilder)
+        private void read00(RevisionDataInput revisionDataInput, StreamCutRecordBuilder streamCutRecordBuilder)
                 throws IOException {
             streamCutRecordBuilder.recordingTime(revisionDataInput.readLong())
                                   .recordingSize(revisionDataInput.readLong())
-                                  .streamCut(revisionDataInput.readMap(StreamSegmentRecord.SERIALIZER::deserialize, DataInput::readLong));
+                                  .streamCut(revisionDataInput.readMap(DataInput::readLong, DataInput::readLong));
         }
 
-        private void write00(RetentionStreamCutRecord streamCutRecord, RevisionDataOutput revisionDataOutput) throws IOException {
+        private void write00(StreamCutRecord streamCutRecord, RevisionDataOutput revisionDataOutput) throws IOException {
             revisionDataOutput.writeLong(streamCutRecord.getRecordingTime());
             revisionDataOutput.writeLong(streamCutRecord.getRecordingSize());
-            revisionDataOutput.writeMap(streamCutRecord.getStreamCut(), StreamSegmentRecord.SERIALIZER::serialize, DataOutput::writeLong);
+            revisionDataOutput.writeMap(streamCutRecord.getStreamCut(), DataOutput::writeLong, DataOutput::writeLong);
         }
 
         @Override
-        protected RetentionStreamCutRecordBuilder newBuilder() {
-            return RetentionStreamCutRecord.builder();
+        protected StreamCutRecordBuilder newBuilder() {
+            return StreamCutRecord.builder();
         }
     }
 

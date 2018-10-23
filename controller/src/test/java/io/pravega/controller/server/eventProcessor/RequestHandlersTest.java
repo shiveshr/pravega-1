@@ -32,10 +32,10 @@ import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.VersionedMetadata;
 import io.pravega.controller.store.stream.VersionedTransactionData;
-import io.pravega.controller.store.stream.tables.CommittingTransactionsRecord;
-import io.pravega.controller.store.stream.tables.State;
-import io.pravega.controller.store.stream.tables.StreamConfigurationRecord;
-import io.pravega.controller.store.stream.tables.StreamTruncationRecord;
+import io.pravega.controller.store.stream.State;
+import io.pravega.controller.store.stream.records.CommittingTransactionsRecord;
+import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
+import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.task.TaskMetadataStore;
 import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
@@ -319,7 +319,7 @@ public class RequestHandlersTest {
             verify(streamStore1Spied, times(invocationCount.get("rollingTxnCreateDuplicateEpochs")))
                     .rollingTxnCreateDuplicateEpochs(anyString(), anyString(), any(), anyLong(), any(), any(), any());
             verify(streamStore1Spied, times(invocationCount.get("completeRollingTxn")))
-                    .completeRollingTxn(anyString(), anyString(), any(), anyLong(), any(), any(), any());
+                    .completeRollingTxn(anyString(), anyString(), any(), any(), any(), any());
             verify(streamStore1Spied, times(invocationCount.get("completeCommitTransactions")))
                     .completeCommitTransactions(anyString(), anyString(), any(), any(), any());
             verify(streamStore1Spied, times(invocationCount.get("updateVersionedState")))
@@ -376,8 +376,8 @@ public class RequestHandlersTest {
                     waitOn.join();
                     return store.completeRollingTxn(x.getArgument(0), x.getArgument(1),
                             x.getArgument(2), x.getArgument(3), x.getArgument(4),
-                            x.getArgument(5), x.getArgument(6));
-                }).when(spied).completeRollingTxn(anyString(), anyString(), any(), anyLong(), any(), any(), any());
+                            x.getArgument(5));
+                }).when(spied).completeRollingTxn(anyString(), anyString(), any(), any(), any(), any());
                 break;
             case "updateVersionedState":
                 doAnswer(x -> {
