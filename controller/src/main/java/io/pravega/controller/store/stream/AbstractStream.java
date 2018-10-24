@@ -927,9 +927,15 @@ public abstract class AbstractStream implements Stream {
         CompletableFuture<Map<StreamSegmentRecord, Integer>> spanToFuture = to.isEmpty() ?
                 getActiveEpochRecord(false).thenApply(epoch -> epoch.getSegments().stream().collect(Collectors.toMap(x -> x, x -> epoch.getEpoch())))
                 : computeStreamCutSpan(to);
-        // TODO: shivesh check if from is before to
+        
         return CompletableFuture.allOf(spanFromFuture, spanToFuture)
-                                .thenCompose(x -> segmentsBetweenStreamCutSpans(spanFromFuture.join(), spanToFuture.join()));
+                                .thenCompose(x -> {
+                                    if (!from.isEmpty() && !to.isEmpty()) {
+                                        Preconditions.checkArgument(RecordHelper.streamCutComparator(to, spanToFuture.join(),
+                                                from, spanFromFuture.join()));
+                                    }
+                                    return segmentsBetweenStreamCutSpans(spanFromFuture.join(), spanToFuture.join());
+                                });
     }
     
     private CompletableFuture<Set<StreamSegmentRecord>> segmentsBetweenStreamCutSpans(Map<StreamSegmentRecord, Integer> spanFrom,

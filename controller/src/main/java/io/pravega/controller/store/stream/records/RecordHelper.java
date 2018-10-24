@@ -210,4 +210,24 @@ public class RecordHelper {
         }
         return result;
     }
+
+    /**
+     * Method to compare two stream cuts given their spans.  
+     * 
+     * @param streamCut1 stream cut 1
+     * @param span1 snap for stream cut 1
+     * @param streamCut2 stream cut 2
+     * @param span2 span for stream cut 2
+     * @return returns true if streamcut 1 is strictly ahead of streamcut 2, false otherwise.
+     */
+    public static boolean streamCutComparator(Map<Long, Long> streamCut1, Map<StreamSegmentRecord, Integer> span1,
+                                              Map<Long, Long> streamCut2, Map<StreamSegmentRecord, Integer> span2) {
+            // find overlapping segments in map2 for all segments in map1
+            // compare epochs. map1 should have epochs gt or eq its overlapping segments in map2
+            return span1.entrySet().stream().allMatch(e1 ->
+                    span2.entrySet().stream().noneMatch(e2 ->
+                            (e2.getKey().segmentId() == e1.getKey().segmentId() &&
+                                    streamCut1.get(e1.getKey().segmentId()) < streamCut2.get(e2.getKey().segmentId()))
+                                    || (e2.getKey().overlaps(e1.getKey()) && e1.getValue() < e2.getValue())));
+    }
 }
