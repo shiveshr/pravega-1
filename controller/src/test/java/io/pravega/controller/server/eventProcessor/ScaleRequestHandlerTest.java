@@ -78,6 +78,7 @@ import org.apache.curator.test.TestingServer;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.reflections.Store;
 
 import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
 import static org.junit.Assert.assertEquals;
@@ -436,7 +437,6 @@ public class ScaleRequestHandlerTest {
         Map<String, Integer> map = new HashMap<>();
         map.put("startScale", 0);
         map.put("scaleCreateNewEpochs", 0);
-        map.put("scaleNewSegmentsCreated", 0);
         map.put("scaleSegmentsSealed", 0);
         map.put("completeScale", 0);
         map.put("updateVersionedState", 1);
@@ -449,15 +449,11 @@ public class ScaleRequestHandlerTest {
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, e -> false, map);
 
         map.put("scaleCreateNewEpochs", 1);
-        map.put("scaleNewSegmentsCreated", 1);
         map.put("scaleSegmentsSealed", 1);
         map.put("completeScale", 1);
-        concurrentIdenticalScaleRun("stream2", "scaleCreateNewSegments", true,
+        concurrentIdenticalScaleRun("stream2", "scaleCreateNewEpochs", true,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, e -> false, map);
-
-        concurrentIdenticalScaleRun("stream3", "scaleNewSegmentsCreated", true,
-                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, e -> false, map);
-
+        
         concurrentIdenticalScaleRun("stream4", "scaleSegmentsSealed", true,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, e -> false, map);
 
@@ -472,34 +468,42 @@ public class ScaleRequestHandlerTest {
         Map<String, Integer> map = new HashMap<>();
         map.put("startScale", 0);
         map.put("scaleCreateNewEpochs", 0);
-        map.put("scaleNewSegmentsCreated", 0);
         map.put("scaleSegmentsSealed", 0);
         map.put("completeScale", 0);
         map.put("updateVersionedState", 1);
 
+        // second scale should complete scale.
+        // when first scale resumes it should fail with write conflict in its attempt to update state.
         concurrentIdenticalScaleRun("autostream0", "updateVersionedState", false,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, e -> false, map);
 
         map.put("startScale", 1);
-        map.put("scaleCreateNewEpochs", 1);
-        map.put("scaleNewSegmentsCreated", 1);
-        map.put("scaleSegmentsSealed", 1);
-        map.put("completeScale", 1);
+        // second scale should complete scale.
+        // when first scale resumes start scale should attempt to discard epoch transition and in its attempt fail and 
+        // throw write conflict
         concurrentIdenticalScaleRun("autostream1", "startScale", false,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, e -> false, map);
 
-        concurrentIdenticalScaleRun("autostream2", "scaleCreateNewSegments", false,
+        map.put("scaleCreateNewEpochs", 1);
+        map.put("scaleSegmentsSealed", 1);
+        map.put("completeScale", 1);
+        // second scale should complete scale.
+        // when first scale resumes both scaleCreateNewEpochs and scalesealedSegments should succeed (idempotent with no changes)
+        // and complete scale should fail with write conflict
+        concurrentIdenticalScaleRun("autostream2", "scaleCreateNewEpochs", false,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, e -> false, map);
 
-        concurrentIdenticalScaleRun("autostream3", "scaleNewSegmentsCreated", false,
-                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, e -> false, map);
-
+        // second scale should complete scale.
+        // when first scale resumes scalesealedSegments should succeed (idempotent with no changes)
+        // and complete scale should fail with write conflict
         concurrentIdenticalScaleRun("autostream4", "scaleSegmentsSealed", false,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, e -> false, map);
 
+        // second scale should find epoch transition to be inconsistent and reset it.
+        // when first scale resumes it should attempt to update epoch transition and fail with write conflict
         concurrentIdenticalScaleRun("autostream5", "completeScale", false,
-                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, false, 
-                e -> false, map);
+                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, true, 
+                e -> Exceptions.unwrap(e) instanceof IllegalStateException, map);
     }
     
     private void concurrentIdenticalScaleRun(String stream, String func, boolean isManual,
@@ -611,7 +615,6 @@ public class ScaleRequestHandlerTest {
         Map<String, Integer> map = new HashMap<>();
         map.put("startScale", 0);
         map.put("scaleCreateNewEpochs", 0);
-        map.put("scaleNewSegmentsCreated", 0);
         map.put("scaleSegmentsSealed", 0);
         map.put("completeScale", 0);
         map.put("updateVersionedState", 1);
@@ -624,15 +627,11 @@ public class ScaleRequestHandlerTest {
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map);
 
         map.put("scaleCreateNewEpochs", 1);
-        map.put("scaleNewSegmentsCreated", 1);
         map.put("scaleSegmentsSealed", 1);
         map.put("completeScale", 1);
-        concurrentDistinctScaleRun("stream2", "scaleCreateNewSegments", true,
+        concurrentDistinctScaleRun("stream2", "scaleCreateNewEpochs", true,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map);
-
-        concurrentDistinctScaleRun("stream3", "scaleNewSegmentsCreated", true,
-                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map);
-
+        
         concurrentDistinctScaleRun("stream4", "scaleSegmentsSealed", true,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map);
     }
@@ -643,7 +642,6 @@ public class ScaleRequestHandlerTest {
         Map<String, Integer> map = new HashMap<>();
         map.put("startScale", 0);
         map.put("scaleCreateNewEpochs", 0);
-        map.put("scaleNewSegmentsCreated", 0);
         map.put("scaleSegmentsSealed", 0);
         map.put("completeScale", 0);
         map.put("updateVersionedState", 1);
@@ -656,13 +654,9 @@ public class ScaleRequestHandlerTest {
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map);
 
         map.put("scaleCreateNewEpochs", 1);
-        map.put("scaleNewSegmentsCreated", 1);
         map.put("scaleSegmentsSealed", 1);
         map.put("completeScale", 1);
-        concurrentDistinctScaleRun("autostream2", "scaleCreateNewSegments", false,
-                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map);
-
-        concurrentDistinctScaleRun("autostream3", "scaleNewSegmentsCreated", false,
+        concurrentDistinctScaleRun("autostream2", "scaleCreateNewEpochs", false,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map);
 
         concurrentDistinctScaleRun("autostream4", "scaleSegmentsSealed", false,

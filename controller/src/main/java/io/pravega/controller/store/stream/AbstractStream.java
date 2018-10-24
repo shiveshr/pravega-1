@@ -289,6 +289,10 @@ public abstract class AbstractStream implements Stream {
         // fetch segment sealed record.
         return getSegmentSealedEpoch(segmentId)
                 .thenCompose(sealedEpoch -> {
+                    if (sealedEpoch < 0) {
+                        return CompletableFuture.completedFuture(Collections.emptyMap());
+                    }
+                    
                     // if sealed record exists. fetch its sealing epoch.
                     // Note: sealed record is created even before the segment is sealed. So if client is requesting for successor,
                     // we should find it.
@@ -309,10 +313,12 @@ public abstract class AbstractStream implements Stream {
                                                 List<StreamSegmentRecord> successors = sealedEpochRecord.getSegments().stream()
                                                                                                         .filter(r -> r.overlaps(segment)).collect(Collectors.toList());
 
-                                                return successors.stream()
-                                                                 .collect(Collectors.toMap(this::transform, z -> previousEpochRecord.getSegments()
-                                                                                                                                    .stream().filter(predecessor -> predecessor.overlaps(z))
-                                                                                                                                    .map(StreamSegmentRecord::segmentId).collect(Collectors.toList())));
+                                                return successors
+                                                        .stream().collect(Collectors.toMap(this::transform,
+                                                                z -> previousEpochRecord
+                                                                        .getSegments()
+                                                                        .stream().filter(predecessor -> predecessor.overlaps(z))
+                                                                        .map(StreamSegmentRecord::segmentId).collect(Collectors.toList())));
                                             });
                 });
     }
@@ -503,7 +509,16 @@ public abstract class AbstractStream implements Stream {
     }
 
     private CompletableFuture<Integer> getSegmentSealedEpoch(long segmentId) {
-        return getSegmentSealedRecordData(segmentId).thenApply(x -> BitConverter.readInt(x.getData(), 0));
+        return getSegmentSealedRecordData(segmentId).handle((x, e) -> {
+            if (e != null) {
+                if (Exceptions.unwrap(e) instanceof DataNotFoundException) {
+                    return -1;
+                } else {
+                    throw new CompletionException(e); 
+                }
+            }
+            return BitConverter.readInt(x.getData(), 0);
+        });
     }
 
     private CompletableFuture<EpochRecord> getActiveEpochRecord(boolean ignoreCached) {
@@ -912,7 +927,7 @@ public abstract class AbstractStream implements Stream {
         CompletableFuture<Map<StreamSegmentRecord, Integer>> spanToFuture = to.isEmpty() ?
                 getActiveEpochRecord(false).thenApply(epoch -> epoch.getSegments().stream().collect(Collectors.toMap(x -> x, x -> epoch.getEpoch())))
                 : computeStreamCutSpan(to);
-
+        // TODO: shivesh check if from is before to
         return CompletableFuture.allOf(spanFromFuture, spanToFuture)
                                 .thenCompose(x -> segmentsBetweenStreamCutSpans(spanFromFuture.join(), spanToFuture.join()));
     }

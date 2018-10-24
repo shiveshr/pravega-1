@@ -790,12 +790,10 @@ public class InMemoryStream extends AbstractStream {
         CompletableFuture<Void> result = new CompletableFuture<>();
 
         synchronized (lock) {
-            if (this.committingTxnRecord != null) {
-                result.completeExceptionally(StoreException.create(StoreException.Type.DATA_EXISTS, "committing transactions record exists"));
-            } else {
+            if (this.committingTxnRecord == null) {
                 this.committingTxnRecord = new Data(Arrays.copyOf(committingTxns, committingTxns.length), new Version.IntVersion(0));
-                result.complete(null);
             }
+            result.complete(null);
         }
         return result;
     }
