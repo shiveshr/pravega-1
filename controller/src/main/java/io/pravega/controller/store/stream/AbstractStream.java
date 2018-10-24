@@ -43,6 +43,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -211,13 +212,8 @@ public abstract class AbstractStream implements Stream {
     public CompletableFuture<Void> updateState(final State state) {
         return getStateData(true)
                 .thenCompose(currState -> {
-                    if (State.isTransitionAllowed(StateRecord.fromBytes(currState.getData()).getState(), state)) {
-                        return Futures.toVoid(setStateData(new Data(StateRecord.builder().state(state).build().toBytes(), currState.getVersion())));
-                    } else {
-                        return Futures.failedFuture(StoreException.create(
-                                StoreException.Type.OPERATION_NOT_ALLOWED,
-                                "Stream: " + getName() + " State: " + state.name() + " current state = " + StateRecord.fromBytes(currState.getData()).getState()));
-                    }
+                    VersionedMetadata<State> currentState = new VersionedMetadata<State>(StateRecord.fromBytes(currState.getData()).getState(), currState.getVersion());
+                    return Futures.toVoid(updateVersionedState(currentState, state));
                 });
     }
 
@@ -371,6 +367,10 @@ public abstract class AbstractStream implements Stream {
     private List<Segment> transform(List<StreamSegmentRecord> segmentRecords) {
         return segmentRecords.stream().map(this::transform).collect(Collectors.toList());
     }
+
+    private Set<Segment> transform(Set<StreamSegmentRecord> segmentRecords) {
+        return segmentRecords.stream().map(this::transform).collect(Collectors.toSet());
+    }
     
     private CompletionStage<Void> createHistoryChunk(EpochRecord epoch0) {
         HistoryTimeSeriesRecord record = HistoryTimeSeriesRecord.builder().epoch(0).referenceEpoch(0)
@@ -453,7 +453,7 @@ public abstract class AbstractStream implements Stream {
         return getActiveEpochRecord()
                 .thenApply(currentEpoch -> currentEpoch.getEpoch() / HISTORY_CHUNK_SIZE)
                 .thenCompose(latestChunkNumber -> Futures.allOfWithResults(
-                        IntStream.range(fromEpoch / HISTORY_CHUNK_SIZE, toEpoch / HISTORY_CHUNK_SIZE)
+                        IntStream.range(fromEpoch / HISTORY_CHUNK_SIZE, toEpoch / HISTORY_CHUNK_SIZE + 1)
                                  .mapToObj(i -> {
                                      int firstEpoch = i * HISTORY_CHUNK_SIZE > fromEpoch ? i * HISTORY_CHUNK_SIZE : fromEpoch;
                                      return getEpochRecord(firstEpoch)
@@ -467,7 +467,9 @@ public abstract class AbstractStream implements Stream {
                                                                              s.getEpoch(), s.getReferenceEpoch(), s.getSegmentsCreated(),
                                                                              s.getSegmentsSealed().stream().map(StreamSegmentRecord::segmentId)
                                                                               .collect(Collectors.toList()), s.getScaleTime());
-                                                                     return Lists.newArrayList(next);
+                                                                     ArrayList<EpochRecord> list = new ArrayList<>(r);
+                                                                     list.add(next);
+                                                                     return list;
                                                                  }, (r, s) -> {
                                                                      ArrayList<EpochRecord> list = new ArrayList<>(r);
                                                                      list.addAll(s);
@@ -645,12 +647,9 @@ public abstract class AbstractStream implements Stream {
     @Override
     public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> scaleCreateNewEpoch(
                                                             VersionedMetadata<EpochTransitionRecord> versionedMetadata) {
-        // check if epoch transition needs to be migrated for manual scale (in case rolling txn happened after the scale was submitted).
-        // add new epoch record
         return getActiveEpochRecord()
                 .thenCompose(currentEpoch -> {
-                    // apply epoch transition on current epoch and compute new epoch
-                    // use scale time in epoch transition record
+                    // only perform idempotent update. If update is already completed, do nothing. 
                     if (currentEpoch.getEpoch() < versionedMetadata.getObject().getNewEpoch()) {
                         EpochTransitionRecord epochTransition = versionedMetadata.getObject();
                         List<StreamSegmentRecord> newSegments =
@@ -660,8 +659,8 @@ public abstract class AbstractStream implements Stream {
                         List<StreamSegmentRecord> sealedSegments = 
                                 epochTransition.getSegmentsToSeal().stream().map(currentEpoch::getSegment).collect(Collectors.toList());
                         Long time = Math.max(epochTransition.getTime(), currentEpoch.getCreationTime() + 1);
-                        EpochRecord epochRecord = generateNewEpochRecord(currentEpoch, epochTransition.getNewEpoch(), epochTransition.getActiveEpoch(),
-                                newSegments, epochTransition.getSegmentsToSeal(), time);
+                        EpochRecord epochRecord = generateNewEpochRecord(currentEpoch, epochTransition.getNewEpoch(), 
+                                epochTransition.getNewEpoch(), newSegments, epochTransition.getSegmentsToSeal(), time);
                         
                         HistoryTimeSeriesRecord timeSeriesRecord = HistoryTimeSeriesRecord.builder().
                                 epoch(epochTransition.getNewEpoch()).referenceEpoch(epochTransition.getNewEpoch())
@@ -841,7 +840,7 @@ public abstract class AbstractStream implements Stream {
     //region streamcut
     @Override
     public CompletableFuture<List<Segment>> getSegmentsBetweenStreamCuts(Map<Long, Long> from, Map<Long, Long> to) {
-        return segmentsBetweenStreamCuts(from, to).thenApply(this::transform);
+        return segmentsBetweenStreamCuts(from, to).thenApply(x -> new LinkedList<>(transform(x)));
     }
 
     @Override
@@ -872,7 +871,7 @@ public abstract class AbstractStream implements Stream {
                     .thenApply(sizeBetween -> sizeBetween + reference.map(StreamCutRecord::getRecordingSize).orElse(0L)));
     }
 
-    private CompletableFuture<List<StreamSegmentRecord>> segmentsBetweenStreamCuts(Map<Long, Long> from, Map<Long, Long> to) {
+    private CompletableFuture<Set<StreamSegmentRecord>> segmentsBetweenStreamCuts(Map<Long, Long> from, Map<Long, Long> to) {
         // compute stream cut span for `from` till `to`
         // if from is empty we need to start from epoch 0.
         // if to is empty we need to go on till current epoch.
@@ -887,13 +886,13 @@ public abstract class AbstractStream implements Stream {
                                 .thenCompose(x -> segmentsBetweenStreamCutSpans(spanFromFuture.join(), spanToFuture.join()));
     }
     
-    private CompletableFuture<List<StreamSegmentRecord>> segmentsBetweenStreamCutSpans(Map<StreamSegmentRecord, Integer> spanFrom,
+    private CompletableFuture<Set<StreamSegmentRecord>> segmentsBetweenStreamCutSpans(Map<StreamSegmentRecord, Integer> spanFrom,
                                                                                    Map<StreamSegmentRecord, Integer> spanTo) {
-        int toLow = Collections.min(spanFrom.values());
-        int toHigh = Collections.max(spanFrom.values());
-        int fromLow = Collections.min(spanTo.values());
-        int fromHigh = Collections.max(spanTo.values());
-        List<StreamSegmentRecord> segments = new LinkedList<>();
+        int toLow = Collections.min(spanTo.values());
+        int toHigh = Collections.max(spanTo.values());
+        int fromLow = Collections.min(spanFrom.values());
+        int fromHigh = Collections.max(spanFrom.values());
+        Set<StreamSegmentRecord> segments = new HashSet<>();
 
         return fetchEpochs(fromLow, toHigh)
                 .thenAccept(epochs -> {
@@ -920,17 +919,27 @@ public abstract class AbstractStream implements Stream {
     }
 
     private CompletableFuture<Long> sizeBetweenStreamCuts(Map<Long, Long> streamCutFrom, Map<Long, Long> streamCutTo,
-                                                        List<StreamSegmentRecord> segmentsInBetween) {
+                                                        Set<StreamSegmentRecord> segmentsInBetween) {
         Map<Integer, List<StreamSegmentRecord>> shards =
                 segmentsInBetween.stream().collect(Collectors.groupingBy(x -> x.getSegmentNumber() / SHARD_SIZE));
         return Futures.allOfWithResults(
                 shards.entrySet().stream()
                       .map(entry -> getSealedSegmentSizeMapShard(entry.getKey())
-                              .thenApply(shardMap -> entry.getValue().stream().collect(Collectors.toMap(x -> x,
-                                      x -> shardMap.getSize(x.segmentId())))))
+                              .thenApply(shardMap -> {
+                                  return entry.getValue().stream()
+                                       .collect(Collectors.toMap(x -> x, x -> {
+                                           if (shardMap.getSize(x.segmentId()) == null) {
+                                               return Long.MIN_VALUE;
+                                           } else {
+                                               return shardMap.getSize(x.segmentId());
+                                           }
+                                       } ));
+                              }))
                       .collect(Collectors.toList()))
-                      .thenApply(listOfMap -> listOfMap.stream().flatMap(s -> s.entrySet().stream())
-                                                       .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)))
+                      .thenApply(listOfMap -> {
+                          return listOfMap.stream().flatMap(s -> s.entrySet().stream())
+                                   .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                      })
                       .thenApply(sizes -> {
                           AtomicLong sizeTill = new AtomicLong(0L);
                           sizes.forEach((segment, value) -> {
@@ -941,9 +950,11 @@ public abstract class AbstractStream implements Stream {
                                   // segments only in streamcut: take their offsets in streamcut
                                   sizeTill.addAndGet(streamCutTo.get(segment.segmentId()));
                               } else if (streamCutFrom.containsKey(segment.segmentId())) {
-                                  // segments only in reference: take their total size - offset in reference
+                                  // segments only in from: take their total size - offset in from
+                                  assert value >= 0;
                                   sizeTill.addAndGet(value - streamCutFrom.get(segment.segmentId()));
                               } else {
+                                  assert value >= 0;
                                   sizeTill.addAndGet(value);
                               }
                           });
@@ -960,7 +971,7 @@ public abstract class AbstractStream implements Stream {
         return fetchEpochs(epochLow, epochHigh).thenApply(epochs ->  {
             List<Long> toFind = new ArrayList<>(streamCut.keySet());
             Map<StreamSegmentRecord, Integer> resultSet = new HashMap<>();
-            for (int i = epochHigh - epochLow - 1; i >= 0; i--) {
+            for (int i = epochHigh - epochLow; i >= 0; i--) {
                 if (toFind.isEmpty()) {
                     break;
                 }
@@ -1039,7 +1050,7 @@ public abstract class AbstractStream implements Stream {
                 : CompletableFuture.completedFuture(previous.getSpan());
 
         return previousSpanFuture.thenCompose(spanFrom -> segmentsBetweenStreamCutSpans(spanFrom, span))
-                          .thenCompose(segmentsBetween -> sizeBetweenStreamCuts(Collections.emptyMap(), streamCut, segmentsBetween)
+                          .thenCompose(segmentsBetween -> sizeBetweenStreamCuts(previous.getStreamCut(), streamCut, segmentsBetween)
                                   .thenApply(sizeBetween -> {
                                       Set<Long> toDelete = segmentsBetween.stream().map(StreamSegmentRecord::segmentId)
                                                                           .filter(x -> !streamCut.containsKey(x))
@@ -1117,14 +1128,13 @@ public abstract class AbstractStream implements Stream {
     }
     
     @Override
-    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startRollingTxn(int transactionEpoch, int activeEpoch,
-                                                                                              VersionedMetadata<CommittingTransactionsRecord> existing) {
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startRollingTxn(int activeEpoch,
+                                                   VersionedMetadata<CommittingTransactionsRecord> existing) {
         CommittingTransactionsRecord record = existing.getObject();
-        assert record.getEpoch() == transactionEpoch;
         if (record.isRollingTxnRecord()) {
             return CompletableFuture.completedFuture(existing);
         } else {
-            CommittingTransactionsRecord update = record.getRollingTxnRecord(activeEpoch);
+            CommittingTransactionsRecord update = record.createRollingTxnRecord(activeEpoch);
             return updateCommittingTxnRecord(new Data(update.toBytes(), existing.getVersion()))
                     .thenApply(version -> new VersionedMetadata<>(update, version));
         }
@@ -1134,32 +1144,34 @@ public abstract class AbstractStream implements Stream {
     public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> rollingTxnCreateDuplicateEpochs(
             Map<Long, Long> sealedTxnEpochSegments, long time, VersionedMetadata<CommittingTransactionsRecord> record) {
         Preconditions.checkArgument(record.getObject().isRollingTxnRecord());
-        CommittingTransactionsRecord committingTransactionsRecord = record.getObject();
+        CommittingTransactionsRecord committingTxnRecord = record.getObject();
         return getActiveEpoch(true)
-                .thenCompose(activeEpochRecord -> getEpochRecord(committingTransactionsRecord.getEpoch())
+                .thenCompose(activeEpochRecord -> getEpochRecord(committingTxnRecord.getEpoch())
                         .thenCompose(transactionEpochRecord -> {
-                            if (activeEpochRecord.getEpoch() > committingTransactionsRecord.getActiveEpoch().get()) {
-                                log.debug("Duplicate Epochs {} already created. Ignore.", committingTransactionsRecord.getActiveEpoch().get() + 2);
+                            if (activeEpochRecord.getEpoch() > committingTxnRecord.getCurrentEpoch()) {
+                                log.debug("Duplicate Epochs {} already created. Ignore.", committingTxnRecord.getNewActiveEpoch());
                                 return CompletableFuture.completedFuture(null);
                             }
                             long timeStamp = Math.max(activeEpochRecord.getCreationTime() + 1, time); 
                             List<StreamSegmentRecord> duplicateTxnSegments =
                                     transactionEpochRecord.getSegments().stream()
                                                           .map(x -> newSegmentRecord(computeSegmentId(getSegmentNumber(x.segmentId()),
-                                                                  activeEpochRecord.getEpoch() + 1), timeStamp, x.getKeyStart(), x.getKeyEnd()))
+                                                                  committingTxnRecord.getNewTxnEpoch()), 
+                                                                  timeStamp, x.getKeyStart(), x.getKeyEnd()))
                                                           .collect(Collectors.toList());
                             List<StreamSegmentRecord> duplicateActiveSegments =
                                     transactionEpochRecord.getSegments().stream()
                                                           .map(x -> newSegmentRecord(computeSegmentId(getSegmentNumber(x.segmentId()),
-                                                                  activeEpochRecord.getEpoch() + 1), timeStamp, x.getKeyStart(), x.getKeyEnd()))
+                                                                  committingTxnRecord.getNewActiveEpoch()), 
+                                                                  timeStamp, x.getKeyStart(), x.getKeyEnd()))
                                                           .collect(Collectors.toList());
 
-                            EpochRecord duplicateTxnEpoch = EpochRecord.builder().epoch(activeEpochRecord.getEpoch() + 1)
+                            EpochRecord duplicateTxnEpoch = EpochRecord.builder().epoch(committingTxnRecord.getNewTxnEpoch())
                                                                        .referenceEpoch(transactionEpochRecord.getReferenceEpoch())
                                                                        .segments(duplicateTxnSegments)
                                                                        .creationTime(timeStamp).build();
 
-                            EpochRecord duplicateActiveEpoch = EpochRecord.builder().epoch(activeEpochRecord.getEpoch() + 2)
+                            EpochRecord duplicateActiveEpoch = EpochRecord.builder().epoch(committingTxnRecord.getNewActiveEpoch())
                                                                           .referenceEpoch(activeEpochRecord.getReferenceEpoch())
                                                                           .segments(duplicateActiveSegments)
                                                                           .creationTime(timeStamp).build();
@@ -1192,11 +1204,11 @@ public abstract class AbstractStream implements Stream {
         return getActiveEpoch(true)
                         .thenCompose(activeEpochRecord -> {
                             CommittingTransactionsRecord committingTxnRecord = versionedMetadata.getObject();
-                            int activeEpoch = committingTxnRecord.getActiveEpoch().get();
+                            int activeEpoch = committingTxnRecord.getCurrentEpoch();
                             if (activeEpochRecord.getEpoch() == activeEpoch) {
                                 return updateSealedSegmentSizes(sealedActiveEpochSegments)
                                         .thenCompose(x -> clearMarkers(sealedActiveEpochSegments.keySet()))
-                                        .thenCompose(x -> updateCurrentEpochRecord(activeEpoch + 2))
+                                        .thenCompose(x -> updateCurrentEpochRecord(committingTxnRecord.getNewActiveEpoch()))
                                         .thenApply(x -> versionedMetadata);
                             } else {
                                 return CompletableFuture.completedFuture(versionedMetadata);

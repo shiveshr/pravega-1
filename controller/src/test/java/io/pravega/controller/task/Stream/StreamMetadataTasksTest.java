@@ -342,7 +342,7 @@ public class StreamMetadataTasksTest {
 
         AtomicBoolean loop = new AtomicBoolean(false);
         Futures.loop(() -> !loop.get(),
-                () -> streamStorePartialMock.getTruncationRecord(SCOPE, "test", null, executor)
+                () -> Futures.delayedFuture(() -> streamStorePartialMock.getTruncationRecord(SCOPE, "test", null, executor), 1000, executor)
                         .thenApply(x -> x.getObject().isUpdating())
                         .thenAccept(loop::set), executor).join();
 
@@ -1101,8 +1101,9 @@ public class StreamMetadataTasksTest {
         VersionedMetadata<State> versionedState = streamStorePartialMock.getVersionedState(SCOPE, "test", context, executor).get();
         assertEquals(versionedState.getObject(), State.ACTIVE);
 
-        AssertExtensions.assertThrows("", () -> streamStorePartialMock.scaleCreateNewEpochs(SCOPE, "test",
-                response, context, executor).get(), ex -> Exceptions.unwrap(ex) instanceof StoreException.IllegalStateException);
+        // if we call start scale without scale being set to SCALING, this should throw illegal argument exception
+        AssertExtensions.assertThrows("", () -> streamStorePartialMock.startScale(SCOPE, "test", true,
+                response, versionedState, context, executor).get(), ex -> Exceptions.unwrap(ex) instanceof IllegalArgumentException);
 
         ScaleOperationTask task = new ScaleOperationTask(streamMetadataTasks, streamStorePartialMock, executor);
         task.runScale((ScaleOpEvent) requestEventWriter.getEventQueue().take(), true, context, "").get();

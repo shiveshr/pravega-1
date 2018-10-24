@@ -15,8 +15,10 @@ import io.pravega.common.ObjectBuilder;
 import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
+import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Data;
+import lombok.Getter;
 import lombok.SneakyThrows;
 
 import java.io.IOException;
@@ -50,6 +52,7 @@ public class CommittingTransactionsRecord {
     /**
      * Set only for rolling transactions and identify the active epoch that is being rolled over.
      */
+    @Getter(AccessLevel.PRIVATE)
     private Optional<Integer> activeEpoch;
 
     CommittingTransactionsRecord(int epoch, List<UUID> transactionsToCommit) {
@@ -80,13 +83,28 @@ public class CommittingTransactionsRecord {
         return SERIALIZER.serialize(this).getCopy();
     }
 
-    public CommittingTransactionsRecord getRollingTxnRecord(int activeEpoch) {
+    public CommittingTransactionsRecord createRollingTxnRecord(int activeEpoch) {
         Preconditions.checkState(!this.activeEpoch.isPresent());
         return new CommittingTransactionsRecord(this.epoch, this.transactionsToCommit, activeEpoch);
     }
 
     public boolean isRollingTxnRecord() {
         return activeEpoch.isPresent();
+    }
+    
+    public int getCurrentEpoch() {
+        Preconditions.checkState(activeEpoch.isPresent());
+        return activeEpoch.get();
+    }
+    
+    public int getNewTxnEpoch() {
+        Preconditions.checkState(activeEpoch.isPresent());
+        return activeEpoch.get() + 1;
+    }
+
+    public int getNewActiveEpoch() {
+        Preconditions.checkState(activeEpoch.isPresent());
+        return activeEpoch.get() + 2;
     }
     
     private static class CommitTransactionsRecordSerializer

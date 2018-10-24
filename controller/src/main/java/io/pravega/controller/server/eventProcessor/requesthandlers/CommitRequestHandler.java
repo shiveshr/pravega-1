@@ -188,12 +188,12 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
         CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> future = CompletableFuture.completedFuture(existing);
         if (!existing.getObject().isRollingTxnRecord()) {
             future = future.thenCompose(
-                    x -> streamMetadataStore.startRollingTxn(scope, stream, txnEpoch.getEpoch(), activeEpoch.getEpoch(),
+                    x -> streamMetadataStore.startRollingTxn(scope, stream, activeEpoch.getEpoch(),
                             existing, context, executor));
         }
 
         return future.thenCompose(record -> {
-            if (activeEpoch.getEpoch() > record.getObject().getActiveEpoch().get()) {
+            if (activeEpoch.getEpoch() > record.getObject().getCurrentEpoch()) {
                 return CompletableFuture.completedFuture(record);
             } else {
                 return runRollingTxn(scope, stream, txnEpoch, activeEpoch, record, context);
@@ -206,8 +206,8 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
         String delegationToken = streamMetadataTasks.retrieveDelegationToken();
         long timestamp = System.currentTimeMillis();
 
-        int newTxnEpoch = existing.getObject().getActiveEpoch().get() + 1;
-        int newActiveEpoch = newTxnEpoch + 1;
+        int newTxnEpoch = existing.getObject().getNewTxnEpoch();
+        int newActiveEpoch = existing.getObject().getNewActiveEpoch();
 
         List<Long> txnEpochDuplicate = txnEpoch.getSegments().stream().map(segment ->
                 computeSegmentId(segment.getSegmentNumber(), newTxnEpoch)).collect(Collectors.toList());

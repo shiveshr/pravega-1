@@ -37,7 +37,7 @@ public class ControllerMetadataRecordSerializerTest {
         List<UUID> list = Lists.newArrayList(UUID.randomUUID(), UUID.randomUUID());
         CommittingTransactionsRecord committingTransactionsRecord = CommittingTransactionsRecord.builder().epoch(0).transactionsToCommit(list).build();
         assertEquals(CommittingTransactionsRecord.fromBytes(committingTransactionsRecord.toBytes()), committingTransactionsRecord);
-        CommittingTransactionsRecord updated = committingTransactionsRecord.getRollingTxnRecord(10);
+        CommittingTransactionsRecord updated = committingTransactionsRecord.createRollingTxnRecord(10);
         assertNotEquals(CommittingTransactionsRecord.fromBytes(updated.toBytes()), committingTransactionsRecord);
         assertEquals(CommittingTransactionsRecord.fromBytes(updated.toBytes()), updated);
     }

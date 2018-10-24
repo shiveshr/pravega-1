@@ -330,10 +330,7 @@ class ZKStream extends AbstractStream {
     @Override
     CompletableFuture<Version> updateEpochTransitionNode(Data epochTransition) {
         return store.setData(epochTransitionPath, epochTransition)
-                    .thenApply(x -> {
-                        cache.invalidateCache(epochTransitionPath);
-                        return new Version.IntVersion(x);
-                    });
+                    .thenApply(Version.IntVersion::new);
     }
 
     @Override
@@ -346,20 +343,17 @@ class ZKStream extends AbstractStream {
         byte[] b = new byte[Long.BYTES];
         BitConverter.writeLong(b, 0, creationTime);
 
-        return store.createZNodeIfNotExist(creationPath, b)
-                    .thenApply(x -> cache.invalidateCache(creationPath));
+        return Futures.toVoid(store.createZNodeIfNotExist(creationPath, b));
     }
 
     @Override
     public CompletableFuture<Void> createConfigurationIfAbsent(final byte[] configuration) {
-        return store.createZNodeIfNotExist(configurationPath, configuration)
-                    .thenApply(x -> cache.invalidateCache(configurationPath));
+        return Futures.toVoid(store.createZNodeIfNotExist(configurationPath, configuration));
     }
 
     @Override
     public CompletableFuture<Void> createStateIfAbsent(final byte[] state) {
-        return store.createZNodeIfNotExist(statePath, state)
-                    .thenApply(x -> cache.invalidateCache(statePath));
+        return Futures.toVoid(store.createZNodeIfNotExist(statePath, state));
     }
 
     @Override
@@ -453,18 +447,14 @@ class ZKStream extends AbstractStream {
     CompletableFuture<Version> updateActiveTx(final int epoch, final UUID txId, final Data data) {
         final String activeTxPath = getActiveTxPath(epoch, txId.toString());
         return store.setData(activeTxPath, data)
-                    .thenApply(x -> {
-                        cache.invalidateCache(activeTxPath);
-                        return new Version.IntVersion(x);
-                    });
+                    .thenApply(Version.IntVersion::new);
     }
 
     @Override
     CompletableFuture<Void> removeActiveTxEntry(final int epoch, final UUID txId) {
         final String activePath = getActiveTxPath(epoch, txId.toString());
         // attempt to delete empty epoch nodes by sending deleteEmptyContainer flag as true.
-        return store.deletePath(activePath, true)
-                    .whenComplete((r, e) -> cache.invalidateCache(activePath));
+        return store.deletePath(activePath, true);
     }
 
     @Override
@@ -507,8 +497,7 @@ class ZKStream extends AbstractStream {
 
     @Override
     public CompletableFuture<Void> createTruncationDataIfAbsent(final byte[] truncationRecord) {
-        return store.createZNodeIfNotExist(truncationPath, truncationRecord)
-                    .thenApply(x -> cache.invalidateCache(truncationPath));
+        return Futures.toVoid(store.createZNodeIfNotExist(truncationPath, truncationRecord));
     }
 
     @Override
@@ -572,28 +561,23 @@ class ZKStream extends AbstractStream {
 
     @Override
     CompletableFuture<Data> getCommitTxnRecord() {
-        cache.invalidateCache(committingTxnsPath);
-        return cache.getCachedData(committingTxnsPath);
+        return store.getData(committingTxnsPath);
     }
 
     @Override
     CompletableFuture<Version> updateCommittingTxnRecord(Data update) {
         return store.setData(committingTxnsPath, update)
-                    .thenApply(x -> {
-                        cache.invalidateCache(committingTxnsPath);
-                        return new Version.IntVersion(x);
-                    });
+                    .thenApply(Version.IntVersion::new);
     }
 
     @Override
     CompletableFuture<Void> createWaitingRequestNodeIfAbsent(byte[] waitingRequestProcessor) {
-        return store.createZNodeIfNotExist(waitingRequestProcessorPath, waitingRequestProcessor)
-                    .thenApply(x -> cache.invalidateCache(waitingRequestProcessorPath));
+        return Futures.toVoid(store.createZNodeIfNotExist(waitingRequestProcessorPath, waitingRequestProcessor));
     }
 
     @Override
     CompletableFuture<Data> getWaitingRequestNode() {
-        return cache.getCachedData(waitingRequestProcessorPath);
+        return store.getData(waitingRequestProcessorPath);
     }
 
     @Override

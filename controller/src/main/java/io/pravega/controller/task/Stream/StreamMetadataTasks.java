@@ -229,9 +229,10 @@ public class StreamMetadataTasks extends TaskBase {
     private CompletableFuture<StreamCutRecord> checkGenerateStreamCut(String scope, String stream, 
                                                                       StreamCutReferenceRecord previous, long recordingTime, 
                                                                       OperationContext context, String delegationToken) {
-        if (recordingTime - previous.getRecordingTime() > RETENTION_FREQUENCY_IN_MINUTES) {
+        if (previous == null || recordingTime - previous.getRecordingTime() > RETENTION_FREQUENCY_IN_MINUTES) {
             return Futures.exceptionallyComposeExpecting(
-                    streamMetadataStore.getStreamCutRecord(scope, stream, previous, context, executor),
+                    previous == null ? CompletableFuture.completedFuture(null) :
+                            streamMetadataStore.getStreamCutRecord(scope, stream, previous, context, executor),
                     e -> e instanceof StoreException.DataNotFoundException, () -> null)
                           .thenCompose(previousRecord -> generateStreamCut(scope, stream, previousRecord, context, delegationToken)
                                   .thenCompose(newRecord -> streamMetadataStore.addStreamCutToRetentionSet(scope, stream, newRecord, context, executor)
@@ -302,7 +303,9 @@ public class StreamMetadataTasks extends TaskBase {
         final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
 
         return streamMetadataStore.getActiveSegments(scope, stream, context, executor)
-                .thenCompose(activeSegments -> Futures.allOfWithResults(activeSegments.stream()
+                .thenCompose(activeSegments -> Futures.allOfWithResults(activeSegments
+                        .stream()
+                        .parallel()
                         .collect(Collectors.toMap(x -> x, x -> getSegmentOffset(scope, stream, x.segmentId(), delegationToken)))))
                 .thenCompose(map -> {
                     final long generationTime = System.currentTimeMillis();

@@ -50,7 +50,7 @@ public class RecordHelperTest {
         assertEquals(10, shard);
 
         mapshards.get(shard).addSealedSegmentSize(segmentId, 100L);
-        assertEquals(100L, mapshards.get(shard).getSize(segmentId));
+        assertEquals(100L, mapshards.get(shard).getSize(segmentId).longValue());
     }
 
     @Test
