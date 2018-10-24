@@ -125,9 +125,9 @@ public class TaskTest {
         streamStore.createScope(SCOPE).join();
         long start = System.currentTimeMillis();
         streamStore.createStream(SCOPE, stream1, configuration1, start, null, executor).join();
-        streamStore.updateState(SCOPE, stream1, State.ACTIVE, null, executor).join();
+        streamStore.setState(SCOPE, stream1, State.ACTIVE, null, executor).join();
         streamStore.createStream(SCOPE, stream2, configuration2, start, null, executor).join();
-        streamStore.updateState(SCOPE, stream2, State.ACTIVE, null, executor).join();
+        streamStore.setState(SCOPE, stream2, State.ACTIVE, null, executor).join();
         // endregion
 
         // region scaleSegments
@@ -135,7 +135,7 @@ public class TaskTest {
         AbstractMap.SimpleEntry<Double, Double> segment1 = new AbstractMap.SimpleEntry<>(0.5, 0.75);
         AbstractMap.SimpleEntry<Double, Double> segment2 = new AbstractMap.SimpleEntry<>(0.75, 1.0);
         List<Long> sealedSegments = Collections.singletonList(1L);
-        VersionedMetadata<EpochTransitionRecord> versioned = streamStore.submitScale(SCOPE, stream1, sealedSegments, Arrays.asList(segment1, segment2), start + 20, null, executor).get();
+        VersionedMetadata<EpochTransitionRecord> versioned = streamStore.submitScale(SCOPE, stream1, sealedSegments, Arrays.asList(segment1, segment2), start + 20, null, null, executor).get();
         EpochTransitionRecord response = versioned.getObject();
         segmentsCreated = response.getNewSegmentsWithRange();
         VersionedMetadata<State> state = streamStore.getVersionedState(SCOPE, stream1, null, executor).join();
@@ -144,13 +144,13 @@ public class TaskTest {
         streamStore.scaleCreateNewEpochs(SCOPE, stream1, versioned, null, executor).get();
         streamStore.scaleSegmentsSealed(SCOPE, stream1, sealedSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)), versioned, null, executor).get();
         streamStore.completeScale(SCOPE, stream1, versioned, null, executor).join();
-        streamStore.updateState(SCOPE, stream1, State.ACTIVE, null, executor).get();
+        streamStore.setState(SCOPE, stream1, State.ACTIVE, null, executor).get();
 
         AbstractMap.SimpleEntry<Double, Double> segment3 = new AbstractMap.SimpleEntry<>(0.0, 0.5);
         AbstractMap.SimpleEntry<Double, Double> segment4 = new AbstractMap.SimpleEntry<>(0.5, 0.75);
         AbstractMap.SimpleEntry<Double, Double> segment5 = new AbstractMap.SimpleEntry<>(0.75, 1.0);
         List<Long> sealedSegments1 = Arrays.asList(0L, 1L, 2L);
-        versioned = streamStore.submitScale(SCOPE, stream2, sealedSegments1, Arrays.asList(segment3, segment4, segment5), start + 20, null, executor).get();
+        versioned = streamStore.submitScale(SCOPE, stream2, sealedSegments1, Arrays.asList(segment3, segment4, segment5), start + 20, null, null, executor).get();
         response = versioned.getObject();
         segmentsCreated = response.getNewSegmentsWithRange();
         state = streamStore.getVersionedState(SCOPE, stream2, null, executor).join();
@@ -160,7 +160,7 @@ public class TaskTest {
         streamStore.scaleSegmentsSealed(SCOPE, stream2, sealedSegments1.stream().collect(Collectors.toMap(x -> x, x -> 0L)), versioned,
                 null, executor).get();
         streamStore.completeScale(SCOPE, stream2, versioned, null, executor).join();
-        streamStore.updateState(SCOPE, stream1, State.ACTIVE, null, executor).get();
+        streamStore.setState(SCOPE, stream1, State.ACTIVE, null, executor).get();
         // endregion
     }
 
@@ -176,7 +176,7 @@ public class TaskTest {
     @Test
     public void testMethods() throws InterruptedException, ExecutionException {
         CreateStreamStatus.Status status = streamMetadataTasks.createStream(SCOPE, stream1, configuration1, System.currentTimeMillis()).join();
-        assertTrue(status.equals(CreateStreamStatus.Status.STREAM_EXISTS));
+        assertEquals(CreateStreamStatus.Status.STREAM_EXISTS, status);
         streamStore.createScope(SCOPE);
         CreateStreamStatus.Status result = streamMetadataTasks.createStream(SCOPE, "dummy", configuration1,
                 System.currentTimeMillis()).join();

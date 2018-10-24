@@ -156,14 +156,14 @@ public class RequestHandlersTest {
         map.put("completeRollingTxn", 0);
         map.put("startCommitTransactions", 1);
         map.put("completeCommitTransactions", 1);
-        map.put("updateVersionedState", 1);
         concurrentTxnCommit("commit1", "startCommitTransactions", false,
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map, 3);
+        map.put("updateVersionedState", 1);
 
         map.put("startCommitTransactions", 1);
         map.put("completeCommitTransactions", 1);
         concurrentTxnCommit("commit2", "completeCommitTransactions", true,
-                e -> Exceptions.unwrap(e) instanceof StoreException.IllegalStateException, map, 2);
+                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map, 2);
     }
 
     private void concurrentTxnCommit(String stream, String func,
@@ -175,7 +175,7 @@ public class RequestHandlersTest {
         StreamConfiguration config = StreamConfiguration.builder().scope(scope).streamName(stream).scalingPolicy(
                 ScalingPolicy.byEventRate(1, 2, 1)).build();
         streamStore1.createStream(scope, stream, config, System.currentTimeMillis(), null, executor).join();
-        streamStore1.updateState(scope, stream, State.ACTIVE, null, executor).join();
+        streamStore1.setState(scope, stream, State.ACTIVE, null, executor).join();
 
         StreamMetadataStore streamStore2 = StreamStoreFactory.createZKStore(zkClient, executor);
 
@@ -251,17 +251,16 @@ public class RequestHandlersTest {
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map, 3);
 
         map.put("rollingTxnCreateDuplicateEpochs", 1);
-        concurrentRollingTxnCommit("stream3", "rollingTxnCreateDuplicateEpochs", true,
-                e -> Exceptions.unwrap(e) instanceof StoreException.IllegalStateException, map, 3);
-
         map.put("completeRollingTxn", 1);
-        concurrentRollingTxnCommit("stream4", "completeRollingTxn", true,
-                e -> Exceptions.unwrap(e) instanceof StoreException.IllegalStateException, map, 3);
-
-        map.put("startCommitTransactions", 1);
         map.put("completeCommitTransactions", 1);
+        concurrentRollingTxnCommit("stream3", "rollingTxnCreateDuplicateEpochs", true,
+                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map, 3);
+
+        concurrentRollingTxnCommit("stream4", "completeRollingTxn", true,
+                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map, 3);
+
         concurrentRollingTxnCommit("stream5", "completeCommitTransactions", true,
-                e -> Exceptions.unwrap(e) instanceof StoreException.IllegalStateException, map, 3);
+                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, map, 3);
     }
 
     private void concurrentRollingTxnCommit(String stream, String func,
@@ -273,7 +272,7 @@ public class RequestHandlersTest {
         StreamConfiguration config = StreamConfiguration.builder().scope(scope).streamName(stream).scalingPolicy(
                 ScalingPolicy.byEventRate(1, 2, 1)).build();
         streamStore1.createStream(scope, stream, config, System.currentTimeMillis(), null, executor).join();
-        streamStore1.updateState(scope, stream, State.ACTIVE, null, executor).join();
+        streamStore1.setState(scope, stream, State.ACTIVE, null, executor).join();
 
         StreamMetadataStore streamStore2 = StreamStoreFactory.createZKStore(zkClient, executor);
 
@@ -341,7 +340,9 @@ public class RequestHandlersTest {
             case "startCommitTransactions":
                 doAnswer(x -> {
                     signal.complete(null);
+
                     waitOn.join();
+
                     return store.startCommitTransactions(x.getArgument(0), x.getArgument(1),
                             x.getArgument(2), x.getArgument(3), x.getArgument(4));
                 }).when(spied).startCommitTransactions(anyString(), anyString(), anyInt(), any(), any());
@@ -402,7 +403,7 @@ public class RequestHandlersTest {
         StreamConfiguration config = StreamConfiguration.builder().scope(scope).streamName(stream).scalingPolicy(
                 ScalingPolicy.byEventRate(1, 2, 1)).build();
         streamStore1.createStream(scope, stream, config, System.currentTimeMillis(), null, executor).join();
-        streamStore1.updateState(scope, stream, State.ACTIVE, null, executor).join();
+        streamStore1.setState(scope, stream, State.ACTIVE, null, executor).join();
 
         StreamMetadataStore streamStore2 = StreamStoreFactory.createZKStore(zkClient, executor);
 
@@ -429,7 +430,7 @@ public class RequestHandlersTest {
         wait.complete(null);
 
         AssertExtensions.assertThrows("first update job should fail", () -> future1,
-                e -> Exceptions.unwrap(e) instanceof StoreException.IllegalStateException);
+                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException);
 
         // validate rolling txn done
         VersionedMetadata<StreamConfigurationRecord> versioned = streamStore1.getConfigurationRecord(scope, stream, null, executor).join();
@@ -448,7 +449,7 @@ public class RequestHandlersTest {
         StreamConfiguration config = StreamConfiguration.builder().scope(scope).streamName(stream).scalingPolicy(
                 ScalingPolicy.byEventRate(1, 2, 1)).build();
         streamStore1.createStream(scope, stream, config, System.currentTimeMillis(), null, executor).join();
-        streamStore1.updateState(scope, stream, State.ACTIVE, null, executor).join();
+        streamStore1.setState(scope, stream, State.ACTIVE, null, executor).join();
 
         StreamMetadataStore streamStore2 = StreamStoreFactory.createZKStore(zkClient, executor);
 
@@ -478,7 +479,7 @@ public class RequestHandlersTest {
         wait.complete(null);
 
         AssertExtensions.assertThrows("first truncate job should fail", () -> future1,
-                e -> Exceptions.unwrap(e) instanceof StoreException.IllegalStateException);
+                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException);
 
         // validate rolling txn done
         VersionedMetadata<StreamTruncationRecord> versioned = streamStore1.getTruncationRecord(scope, stream, null, executor).join();

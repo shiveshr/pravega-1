@@ -324,7 +324,7 @@ class ZKStream extends AbstractStream {
 
     @Override
     CompletableFuture<Void> createEpochTransitionIfAbsent(byte[] epochTransition) {
-        return Futures.toVoid(store.createZNode(epochTransitionPath, epochTransition));
+        return Futures.toVoid(store.createZNodeIfNotExist(epochTransitionPath, epochTransition));
     }
 
     @Override
@@ -420,7 +420,7 @@ class ZKStream extends AbstractStream {
         return Futures.exceptionallyExpecting(store.getChildren(getEpochPath(epoch)),
                 e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, Collections.emptyList())
                       .thenCompose(txIds -> Futures.allOfWithResults(txIds.stream().collect(
-                              Collectors.toMap(txId -> txId, txId -> Futures.exceptionallyExpecting(cache.getCachedData(getActiveTxPath(epoch, txId)),
+                              Collectors.toMap(txId -> txId, txId -> Futures.exceptionallyExpecting(store.getData(getActiveTxPath(epoch, txId)),
                                       e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, EMPTY_DATA)))
                               ).thenApply(txnMap -> txnMap.entrySet().stream().filter(x -> !x.getValue().equals(EMPTY_DATA))
                                                           .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)))
@@ -556,7 +556,7 @@ class ZKStream extends AbstractStream {
 
     @Override
     CompletableFuture<Void> createCommitTxnRecordIfAbsent(byte[] committingTxns) {
-        return Futures.toVoid(store.createZNode(committingTxnsPath, committingTxns));
+        return Futures.toVoid(store.createZNodeIfNotExist(committingTxnsPath, committingTxns));
     }
 
     @Override
@@ -587,7 +587,14 @@ class ZKStream extends AbstractStream {
 
     @Override
     public void refresh() {
-
+        // refresh all mutable records
+        cache.invalidateCache(statePath);
+        cache.invalidateCache(configurationPath);
+        cache.invalidateCache(truncationPath);
+        cache.invalidateCache(epochRecordPathFormat);
+        cache.invalidateCache(committingTxnsPath);
+        cache.invalidateCache(currentEpochRecordPath);
+        cache.invalidateCache(currentEpochRecordPath);
     }
     // endregion
 

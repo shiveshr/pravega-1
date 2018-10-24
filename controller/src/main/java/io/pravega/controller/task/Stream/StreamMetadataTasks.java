@@ -390,17 +390,17 @@ public class StreamMetadataTasks extends TaskBase {
         SealStreamEvent event = new SealStreamEvent(scope, stream);
         return writeEvent(event)
                 // 2. set state to sealing
-                .thenCompose(x -> streamMetadataStore.getState(scope, stream, false, context, executor))
+                .thenCompose(x -> streamMetadataStore.getVersionedState(scope, stream, context, executor))
                 .thenCompose(state -> {
-                    if (state.equals(State.SEALED)) {
-                        return CompletableFuture.completedFuture(true);
+                    if (state.getObject().equals(State.SEALED)) {
+                        return CompletableFuture.completedFuture(state);
                     } else {
-                        return streamMetadataStore.updateState(scope, stream, State.SEALING, context, executor).thenApply(x -> true);
+                        return streamMetadataStore.updateVersionedState(scope, stream, State.SEALING, state, context, executor);
                     }
                 })
                 // 3. return with seal initiated.
                 .thenCompose(result -> {
-                    if (result) {
+                    if (result.getObject().equals(State.SEALED) || result.getObject().equals(State.SEALING)) {
                         return checkDone(() -> isSealed(scope, stream, context))
                                 .thenApply(x -> UpdateStreamStatus.Status.SUCCESS);
                     } else {
@@ -477,7 +477,7 @@ public class StreamMetadataTasks extends TaskBase {
         ScaleOpEvent event = new ScaleOpEvent(scope, stream, segmentsToSeal, newRanges, true, scaleTimestamp);
         return writeEvent(event)
                 .thenCompose(x -> streamMetadataStore.submitScale(scope, stream, segmentsToSeal, new ArrayList<>(newRanges),
-                        scaleTimestamp, context, executor)
+                        scaleTimestamp, null, context, executor)
                         .handle((startScaleResponse, e) -> {
                             ScaleResponse.Builder response = ScaleResponse.newBuilder();
 
@@ -612,8 +612,15 @@ public class StreamMetadataTasks extends TaskBase {
                                             future = CompletableFuture.completedFuture(null);
                                         }
                                         return future
-                                                .thenCompose(v ->  streamMetadataStore.updateState(scope, stream, State.ACTIVE,
-                                                        context, executor));
+                                                .thenCompose(v -> streamMetadataStore.getVersionedState(scope, stream, context, executor)
+                                                .thenCompose(state -> {
+                                                    if (state.getObject().equals(State.CREATING)) {
+                                                        return streamMetadataStore.updateVersionedState(scope, stream, State.ACTIVE,
+                                                                state, context, executor);
+                                                    } else {
+                                                        return CompletableFuture.completedFuture(state);
+                                                    }
+                                                }));
                                     }, executor)
                                             .thenApply(z -> status);
                                 });

@@ -12,6 +12,8 @@ package io.pravega.controller.store.stream;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.lang.Int96;
+import io.pravega.controller.store.stream.records.CommittingTransactionsRecord;
+import io.pravega.controller.store.stream.records.EpochRecord;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.test.common.TestingServerStarter;
@@ -26,9 +28,10 @@ import org.junit.Test;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.AbstractMap.SimpleEntry;
-import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -36,9 +39,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static io.pravega.controller.store.stream.ZKStreamMetadataStore.COUNTER_PATH;
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -175,7 +176,7 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         // list stream in scope
         store.createScope("Scope").get();
         store.createStream("Scope", stream1, configuration1, System.currentTimeMillis(), null, executor).get();
-        store.updateState("Scope", stream1, State.ACTIVE, null, executor).get();
+        store.setState("Scope", stream1, State.ACTIVE, null, executor).get();
 
         store.createStream("Scope", stream2, configuration2, System.currentTimeMillis(), null, executor).get();
 
@@ -190,7 +191,7 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         // Test operation when stream is not in active state
         store.createScope(scope).get();
         store.createStream(scope, stream1, configuration1, System.currentTimeMillis(), null, executor).get();
-        store.updateState(scope, stream1, State.CREATING, null, executor).get();
+        store.setState(scope, stream1, State.CREATING, null, executor).get();
 
         AssertExtensions.assertThrows("Should throw IllegalStateException",
                 store.getActiveSegments(scope, stream1, null, executor),
@@ -234,25 +235,25 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         StreamConfiguration configuration = StreamConfiguration.builder().scope(scope).streamName(stream).scalingPolicy(policy).build();
         SimpleEntry<Double, Double> segment1 = new SimpleEntry<>(0.0, 0.5);
         SimpleEntry<Double, Double> segment2 = new SimpleEntry<>(0.5, 1.0);
-        List<SimpleEntry<Double, Double>> newRanges = Arrays.asList(segment1, segment2);
+        List<Map.Entry<Double, Double>> newRanges = Arrays.asList(segment1, segment2);
 
         store.createScope(scope).get();
         store.createStream(scope, stream, configuration, System.currentTimeMillis(), null, executor).get();
-        store.updateState(scope, stream, State.ACTIVE, null, executor).get();
+        store.setState(scope, stream, State.ACTIVE, null, executor).get();
 
-        List<ScaleMetadata> scaleIncidents = store.getScaleMetadata(scope, stream, 0, System.currentTimeMillis(), null, executor).get();
+        List<ScaleMetadata> scaleIncidents = store.getScaleMetadata(scope, stream, 0, Long.MAX_VALUE, null, executor).get();
         assertTrue(scaleIncidents.size() == 1);
         assertTrue(scaleIncidents.get(0).getSegments().size() == 3);
         // scale
         scale(scope, stream, scaleIncidents.get(0).getSegments(), newRanges);
-        scaleIncidents = store.getScaleMetadata(scope, stream, 0, System.currentTimeMillis(), null, executor).get();
+        scaleIncidents = store.getScaleMetadata(scope, stream, 0, Long.MAX_VALUE, null, executor).get();
         assertTrue(scaleIncidents.size() == 2);
         assertTrue(scaleIncidents.get(0).getSegments().size() == 3);
         assertTrue(scaleIncidents.get(1).getSegments().size() == 2);
 
         // scale again
         scale(scope, stream, scaleIncidents.get(1).getSegments(), newRanges);
-        scaleIncidents = store.getScaleMetadata(scope, stream, 0, System.currentTimeMillis(), null, executor).get();
+        scaleIncidents = store.getScaleMetadata(scope, stream, 0, Long.MAX_VALUE, null, executor).get();
         assertTrue(scaleIncidents.size() == 3);
         assertTrue(scaleIncidents.get(0).getSegments().size() == 3);
         assertTrue(scaleIncidents.get(1).getSegments().size() == 2);
@@ -260,7 +261,7 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
 
         // scale again
         scale(scope, stream, scaleIncidents.get(2).getSegments(), newRanges);
-        scaleIncidents = store.getScaleMetadata(scope, stream, 0, System.currentTimeMillis(), null, executor).get();
+        scaleIncidents = store.getScaleMetadata(scope, stream, 0, Long.MAX_VALUE, null, executor).get();
         assertTrue(scaleIncidents.size() == 4);
         assertTrue(scaleIncidents.get(0).getSegments().size() == 3);
         assertTrue(scaleIncidents.get(1).getSegments().size() == 2);
@@ -278,11 +279,11 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
 
         store.createScope(scope).get();
         store.createStream(scope, stream, configuration, System.currentTimeMillis(), null, executor).get();
-        store.updateState(scope, stream, State.ACTIVE, null, executor).get();
+        store.setState(scope, stream, State.ACTIVE, null, executor).get();
 
         // Case: Initial state, splits = 0, merges = 0
         // time t0, total segments 2, S0 {0.0 - 0.5} S1 {0.5 - 1.0}
-        List<ScaleMetadata> scaleRecords = store.getScaleMetadata(scope, stream, 0, System.currentTimeMillis(), null, executor).get();
+        List<ScaleMetadata> scaleRecords = store.getScaleMetadata(scope, stream, 0, Long.MAX_VALUE, null, executor).get();
         assertTrue(scaleRecords.size() == 1);
         assertTrue(scaleRecords.get(0).getSegments().size() == 2);
         assertTrue(scaleRecords.get(0).getSplits() == 0L);
@@ -301,9 +302,9 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         SimpleEntry<Double, Double> segment4 = new SimpleEntry<>(0.4, 0.5);
         SimpleEntry<Double, Double> segment5 = new SimpleEntry<>(0.5, 0.7);
         SimpleEntry<Double, Double> segment6 = new SimpleEntry<>(0.7, 1.0);
-        List<SimpleEntry<Double, Double>> newRanges1 = Arrays.asList(segment2, segment3, segment4, segment5, segment6);
+        List<Map.Entry<Double, Double>> newRanges1 = Arrays.asList(segment2, segment3, segment4, segment5, segment6);
         scale(scope, stream, scaleRecords.get(0).getSegments(), newRanges1);
-        scaleRecords = store.getScaleMetadata(scope, stream, 0, System.currentTimeMillis(), null, executor).get();
+        scaleRecords = store.getScaleMetadata(scope, stream, 0, Long.MAX_VALUE, null, executor).get();
         assertEquals(scaleRecords.size(), 2);
         assertEquals(scaleRecords.get(1).getSegments().size(), 5);
         assertEquals(scaleRecords.get(1).getSplits(), 2L);
@@ -320,9 +321,9 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         SimpleEntry<Double, Double> segment8 = new SimpleEntry<>(0.4, 0.7);
         SimpleEntry<Double, Double> segment9 = new SimpleEntry<>(0.7, 0.8);
         SimpleEntry<Double, Double> segment10 = new SimpleEntry<>(0.8, 1.0);
-        List<SimpleEntry<Double, Double>> newRanges2 = Arrays.asList(segment7, segment8, segment9, segment10);
+        List<Map.Entry<Double, Double>> newRanges2 = Arrays.asList(segment7, segment8, segment9, segment10);
         scale(scope, stream, scaleRecords.get(1).getSegments(), newRanges2);
-        scaleRecords = store.getScaleMetadata(scope, stream, 0, System.currentTimeMillis(), null, executor).get();
+        scaleRecords = store.getScaleMetadata(scope, stream, 0, Long.MAX_VALUE, null, executor).get();
         assertEquals(scaleRecords.size(), 3);
         assertEquals(scaleRecords.get(2).getSegments().size(), 4);
         assertEquals(scaleRecords.get(2).getSplits(), 1L);
@@ -337,9 +338,9 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         // time t3, total segments 2, S11 {0.0, 0.7}, S12 {0.7, 1.0}
         SimpleEntry<Double, Double> segment11 = new SimpleEntry<>(0.0, 0.7);
         SimpleEntry<Double, Double> segment12 = new SimpleEntry<>(0.7, 1.0);
-        List<SimpleEntry<Double, Double>> newRanges3 = Arrays.asList(segment11, segment12);
+        List<Map.Entry<Double, Double>> newRanges3 = Arrays.asList(segment11, segment12);
         scale(scope, stream, scaleRecords.get(2).getSegments(), newRanges3);
-        scaleRecords = store.getScaleMetadata(scope, stream, 0, System.currentTimeMillis(), null, executor).get();
+        scaleRecords = store.getScaleMetadata(scope, stream, 0, Long.MAX_VALUE, null, executor).get();
         assertEquals(scaleRecords.size(), 4);
         assertEquals(scaleRecords.get(3).getSegments().size(), 2);
         assertEquals(scaleRecords.get(3).getSplits(), 0L);
@@ -358,7 +359,7 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         StreamConfiguration config = StreamConfiguration.builder().scope(scope).streamName(stream).scalingPolicy(ScalingPolicy.fixed(1))
                                                         .build();
         store.createStream(scope, stream, config, System.currentTimeMillis(), null, executor).join();
-        store.updateState(scope, stream, State.ACTIVE, null, executor).join();
+        store.setState(scope, stream, State.ACTIVE, null, executor).join();
 
         ZKStreamMetadataStore zkStore = (ZKStreamMetadataStore) store;
         ZKStoreHelper storeHelper = zkStore.getStoreHelper();
@@ -415,28 +416,27 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         assertTrue(batches.contains(secondBatch));
         assertTrue(batches.contains(thirdBatch));
     }
-
+    
     private CompletableFuture<TxnStatus> createAndCommitTxn(UUID txnId, String scope, String stream) {
         return store.createTransaction(scope, stream, txnId, 100, 100, null, executor)
-             .thenCompose(x -> store.updateState(scope, stream, State.COMMITTING_TXN, null, executor))
+             .thenCompose(x -> store.setState(scope, stream, State.COMMITTING_TXN, null, executor))
              .thenCompose(x -> store.sealTransaction(scope, stream, txnId, true, Optional.empty(), null, executor))
              .thenCompose(x -> store.commitTransaction(scope, stream, txnId, null, executor));
     }
 
     private SimpleEntry<Long, Long> findSplitsAndMerges(String scope, String stream) throws InterruptedException, java.util.concurrent.ExecutionException {
-        return store.getScaleMetadata(scope, stream, 0, System.currentTimeMillis(), null, executor).get()
+        return store.getScaleMetadata(scope, stream, 0, Long.MAX_VALUE, null, executor).get()
                 .stream().reduce(new SimpleEntry<>(0L, 0L),
                         (x, y) -> new SimpleEntry<>(x.getKey() + y.getSplits(), x.getValue() + y.getMerges()),
                         (x, y) -> new SimpleEntry<>(x.getKey() + y.getKey(), x.getValue() + y.getValue()));
     }
 
-    private void scale(String scope, String stream, List<Segment> segments,
-                       List<SimpleEntry<Double, Double>> newRanges) {
+    private void scale(String scope, String stream, List<Segment> segments, List<Map.Entry<Double, Double>> newRanges) {
 
         long scaleTimestamp = System.currentTimeMillis();
         List<Long> existingSegments = segments.stream().map(Segment::segmentId).collect(Collectors.toList());
-        VersionedMetadata<EpochTransitionRecord> versioned = store.submitScale(scope, stream, existingSegments, new ArrayList<>(newRanges),
-                scaleTimestamp, null, executor).join();
+        VersionedMetadata<EpochTransitionRecord> versioned = store.submitScale(scope, stream, existingSegments, newRanges,
+                scaleTimestamp, null, null, executor).join();
         VersionedMetadata<State> state = store.getVersionedState(scope, stream, null, executor).join();
         state = store.updateVersionedState(scope, stream, State.SCALING, state, null, executor).join();
         store.startScale(scope, stream, false, versioned, state, null, executor).join();
@@ -444,6 +444,6 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         store.scaleSegmentsSealed(scope, stream, existingSegments.stream().collect(Collectors.toMap(x -> x, x -> 0L)), versioned,
                 null, executor).join();
         store.completeScale(scope, stream, versioned, null, executor).join();
-        store.updateState(scope, stream, State.ACTIVE, null, executor).join();
+        store.setState(scope, stream, State.ACTIVE, null, executor).join();
     }
 }

@@ -107,7 +107,7 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
                                     throw new TaskExceptions.StartException("Scale Stream not started yet.");
                                 } else {
                                     future = streamMetadataStore.submitScale(scope, stream, scaleInput.getSegmentsToSeal(),
-                                            new ArrayList<>(scaleInput.getNewRanges()), scaleInput.getScaleTime(), context, executor);
+                                            new ArrayList<>(scaleInput.getNewRanges()), scaleInput.getScaleTime(), record, context, executor);
                                 }
                             }
                         } 

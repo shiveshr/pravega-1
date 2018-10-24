@@ -157,7 +157,7 @@ public class StreamTest {
                 .build();
 
         store.createStream(scopeName, streamName, streamConfig, System.currentTimeMillis(), null, executor).get();
-        store.updateState(scopeName, streamName, State.ACTIVE, null, executor).get();
+        store.setState(scopeName, streamName, State.ACTIVE, null, executor).get();
 
         ZKStream zkStream = spy(new ZKStream("test", "test", zkStoreHelper));
 
@@ -169,7 +169,7 @@ public class StreamTest {
         ArrayList<Long> sealedSegments = Lists.newArrayList(0L);
         long one = StreamSegmentNameUtils.computeSegmentId(1, 1);
         long two = StreamSegmentNameUtils.computeSegmentId(2, 1);
-        VersionedMetadata<EpochTransitionRecord> response = zkStream.submitScale(sealedSegments, newRanges, scale).join();
+        VersionedMetadata<EpochTransitionRecord> response = zkStream.submitScale(sealedSegments, newRanges, scale, null).join();
         Map<Long, Map.Entry<Double, Double>> newSegments = response.getObject().getNewSegmentsWithRange();
         VersionedMetadata<State> state = zkStream.getVersionedState().join();
         state = zkStream.updateVersionedState(state, State.SCALING).join();
