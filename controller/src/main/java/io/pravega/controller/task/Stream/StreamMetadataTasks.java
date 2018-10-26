@@ -83,8 +83,6 @@ import java.util.stream.IntStream;
 import org.apache.commons.lang3.NotImplementedException;
 import org.slf4j.LoggerFactory;
 
-import javax.ws.rs.HEAD;
-
 import static io.pravega.controller.task.Stream.TaskStepsRetryHelper.withRetries;
 import static io.pravega.shared.MetricsNames.RETENTION_FREQUENCY;
 import static io.pravega.shared.MetricsNames.nameFromStream;

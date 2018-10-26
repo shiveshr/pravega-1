@@ -28,8 +28,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 import org.slf4j.LoggerFactory;
 
-import javax.ws.rs.HEAD;
-
 import static io.pravega.shared.MetricsNames.TRUNCATED_SIZE;
 import static io.pravega.shared.MetricsNames.nameFromStream;
 

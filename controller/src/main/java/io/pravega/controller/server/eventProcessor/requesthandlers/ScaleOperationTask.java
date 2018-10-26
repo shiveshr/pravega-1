@@ -30,8 +30,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.LoggerFactory;
 
-import javax.ws.rs.HEAD;
-
 /**
  * Request handler for performing scale operations received from requeststream.
  */
@@ -118,8 +116,8 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
                                     throw new TaskExceptions.StartException("Scale Stream not started yet.");
                                 });
                             } else {
-                                future = streamMetadataStore.submitScale(scope, stream, scaleInput.getSegmentsToSeal(),
-                                        new ArrayList<>(scaleInput.getNewRanges()), scaleInput.getScaleTime(), record, context, executor);
+                                future = future.thenCompose(r ->streamMetadataStore.submitScale(scope, stream, scaleInput.getSegmentsToSeal(),
+                                        new ArrayList<>(scaleInput.getNewRanges()), scaleInput.getScaleTime(), record, context, executor));
                             }
                         } 
                         
