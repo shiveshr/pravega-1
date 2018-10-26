@@ -323,6 +323,19 @@ public interface StreamMetadataStore {
     CompletableFuture<Segment> getSegment(final String scope, final String name, final long number, final OperationContext context, final Executor executor);
 
     /**
+     * Api to get all segments in the stream. 
+     *
+     * @param scope    stream scope
+     * @param name     stream name.
+     * @param context  operation context
+     * @param executor callers executor
+     *                 
+     * @return Future, which when complete will contain a list of all segments in the stream. 
+     */
+    CompletableFuture<Set<Long>> getAllSegmentIds(final String scope, final String name, final OperationContext context, 
+                                                   final Executor executor);
+
+    /**
      * Get active segments.
      *
      * @param scope    stream scope

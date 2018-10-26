@@ -284,6 +284,29 @@ public abstract class AbstractStream implements Stream {
     }
 
     @Override
+    public CompletableFuture<Set<Long>> getAllSegmentIds() {
+        CompletableFuture<Map<StreamSegmentRecord, Integer>> fromSpanFuture = getTruncationRecord()
+                .thenCompose(truncationRecord -> {
+                    if (truncationRecord.getObject().equals(StreamTruncationRecord.EMPTY)) {
+                        return getEpochRecord(0)
+                                .thenApply(this::convertToSpan);
+                    } else {
+                        return CompletableFuture.completedFuture(truncationRecord.getObject().getSpan());
+                    }
+                });
+        CompletableFuture<Map<StreamSegmentRecord, Integer>> toSpanFuture = getActiveEpoch(true)
+                .thenApply(this::convertToSpan);
+        
+        return CompletableFuture.allOf(fromSpanFuture, toSpanFuture)
+                         .thenCompose(v -> {
+                             Map<StreamSegmentRecord, Integer> fromSpan = fromSpanFuture.join();
+                             Map<StreamSegmentRecord, Integer> toSpan = toSpanFuture.join();
+                             return segmentsBetweenStreamCutSpans(fromSpan, toSpan)
+                                     .thenApply(x -> x.stream().map(StreamSegmentRecord::segmentId).collect(Collectors.toSet()));
+                         });
+    }
+
+    @Override
     public CompletableFuture<Map<Segment, List<Long>>> getSuccessorsWithPredecessors(final long segmentId) {
         // get segment sealed record.
         // fetch segment sealed record.
@@ -376,7 +399,12 @@ public abstract class AbstractStream implements Stream {
     private Set<Segment> transform(Set<StreamSegmentRecord> segmentRecords) {
         return segmentRecords.stream().map(this::transform).collect(Collectors.toSet());
     }
-    
+
+    private Map<StreamSegmentRecord, Integer> convertToSpan(EpochRecord epochRecord) {
+        return epochRecord.getSegments().stream()
+                          .collect(Collectors.toMap(x -> x, x -> epochRecord.getEpoch()));
+    }
+
     private CompletionStage<Void> createHistoryChunk(EpochRecord epoch0) {
         HistoryTimeSeriesRecord record = HistoryTimeSeriesRecord.builder().epoch(0).referenceEpoch(0)
                                                                 .segmentsCreated(epoch0.getSegments()).segmentsSealed(Collections.emptyList())
@@ -922,10 +950,10 @@ public abstract class AbstractStream implements Stream {
         // if from is empty we need to start from epoch 0.
         // if to is empty we need to go on till current epoch.
         CompletableFuture<Map<StreamSegmentRecord, Integer>> spanFromFuture = from.isEmpty() ?
-                getEpochRecord(0).thenApply(epoch -> epoch.getSegments().stream().collect(Collectors.toMap(x -> x, x -> epoch.getEpoch())))
+                getEpochRecord(0).thenApply(this::convertToSpan)
                 : computeStreamCutSpan(from);
         CompletableFuture<Map<StreamSegmentRecord, Integer>> spanToFuture = to.isEmpty() ?
-                getActiveEpochRecord(false).thenApply(epoch -> epoch.getSegments().stream().collect(Collectors.toMap(x -> x, x -> epoch.getEpoch())))
+                getActiveEpochRecord(false).thenApply(this::convertToSpan)
                 : computeStreamCutSpan(to);
         
         return CompletableFuture.allOf(spanFromFuture, spanToFuture)
@@ -1094,8 +1122,7 @@ public abstract class AbstractStream implements Stream {
         // find segments between "previous" stream cut and current stream cut. these are segments to delete.
         // Note: exclude segments in current streamcut
         CompletableFuture<Map<StreamSegmentRecord, Integer>> previousSpanFuture = previous.getSpan().isEmpty() ?
-                getEpochRecord(0).thenApply(epoch -> epoch.getSegments().stream()
-                                                          .collect(Collectors.toMap(x -> x, x -> epoch.getEpoch())))
+                getEpochRecord(0).thenApply(epoch -> convertToSpan(epoch))
                 : CompletableFuture.completedFuture(previous.getSpan());
 
         return previousSpanFuture.thenCompose(spanFrom -> segmentsBetweenStreamCutSpans(spanFrom, span))

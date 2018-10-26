@@ -347,6 +347,11 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     public CompletableFuture<Segment> getSegment(final String scope, final String name, final long segmentId, final OperationContext context, final Executor executor) {
         return withCompletion(getStream(scope, name, context).getSegment(segmentId), executor);
     }
+    
+    @Override
+    public CompletableFuture<Set<Long>> getAllSegmentIds(final String scope, final String name, final OperationContext context, final Executor executor) {
+        return withCompletion(getStream(scope, name, context).getAllSegmentIds(), executor);
+    }
 
     @Override
     public CompletableFuture<Map<Segment, Long>> getStartingSegments(final String scope, final String name, final OperationContext context, final Executor executor) {

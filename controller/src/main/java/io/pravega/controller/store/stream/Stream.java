@@ -24,6 +24,7 @@ import java.util.AbstractMap.SimpleEntry;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -155,6 +156,20 @@ interface Stream {
      */
     CompletableFuture<Segment> getSegment(final long segmentId);
 
+    /**
+     * Fetches all segments in the stream.
+     *
+     * @return Future which when completed contains a list of all segments in the stream.
+     */
+    CompletableFuture<Set<Long>> getAllSegmentIds();
+
+    /**
+     * Api to get all scale metadata records between given time ranges. 
+     * @param from from time
+     * @param to to time
+     * @return Future which when completed contains a list of scale metadata records corresponding to all scale operations 
+     * between given time ranges. 
+     */
     CompletableFuture<List<ScaleMetadata>> getScaleMetadata(long from, long to);
 
     /**

@@ -78,11 +78,9 @@ public class DeleteStreamTask implements StreamTask<DeleteStreamEvent> {
 
     private CompletableFuture<Void> notifyAndDelete(OperationContext context, String scope, String stream, long requestId) {
         log.info(requestId, "{}/{} deleting segments", scope, stream);
-        return streamMetadataStore.getScaleMetadata(scope, stream, 0L, Long.MAX_VALUE, context, executor)
-                .thenComposeAsync(scaleMetadata -> {
-                    Set<Long> toDelete = new HashSet<>();
-                    scaleMetadata.forEach(x -> toDelete.addAll(x.getSegments().stream().map(Segment::segmentId).collect(Collectors.toList())));
-                    return streamMetadataTasks.notifyDeleteSegments(scope, stream, toDelete, streamMetadataTasks.retrieveDelegationToken(), requestId)
+        return streamMetadataStore.getAllSegmentIds(scope, stream, context, executor)
+                .thenComposeAsync(allSegments -> {
+                    return streamMetadataTasks.notifyDeleteSegments(scope, stream, allSegments, streamMetadataTasks.retrieveDelegationToken(), requestId)
                             .thenComposeAsync(x -> streamMetadataStore.removeStreamFromAutoStreamCut(scope, stream, context,
                                     executor), executor)
                             .thenComposeAsync(x -> streamMetadataStore.deleteStream(scope, stream, context,
