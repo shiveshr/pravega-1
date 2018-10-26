@@ -15,6 +15,7 @@ import io.pravega.client.netty.impl.ConnectionFactoryImpl;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.concurrent.ExecutorServiceHelpers;
+import io.pravega.common.tracing.RequestTracker;
 import io.pravega.controller.mocks.SegmentHelperMock;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.rpc.auth.AuthHelper;
@@ -93,7 +94,12 @@ public class TaskTest {
     private final StreamMetadataTasks streamMetadataTasks;
     private final SegmentHelper segmentHelperMock;
     private final CuratorFramework cli;
+<<<<<<< HEAD
     private Map<Long, Map.Entry<Double, Double>> segmentsCreated;
+=======
+    private ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> segmentsCreated;
+    private final RequestTracker requestTracker = new RequestTracker(true);
+>>>>>>> ceb4d0a4a28d7deb9d04bfb53ac7b0b3d9a96f1a
 
     public TaskTest() throws Exception {
         zkServer = new TestingServerStarter().start();
@@ -110,7 +116,7 @@ public class TaskTest {
                 executor, HOSTNAME, new ConnectionFactoryImpl(ClientConfig.builder()
                                                                           .controllerURI(URI.create("tcp://localhost"))
                                                                           .build()),
-                AuthHelper.getDisabledAuthHelper());
+                AuthHelper.getDisabledAuthHelper(), requestTracker);
     }
 
     @Before
@@ -236,8 +242,8 @@ public class TaskTest {
 
         // Create objects.
         @Cleanup
-        StreamMetadataTasks mockStreamTasks = new StreamMetadataTasks(streamStore, hostStore, taskMetadataStore,
-                segmentHelperMock, executor, deadHost, Mockito.mock(ConnectionFactory.class),  AuthHelper.getDisabledAuthHelper());
+        StreamMetadataTasks mockStreamTasks = new StreamMetadataTasks(streamStore, hostStore, taskMetadataStore, segmentHelperMock,
+                executor, deadHost, Mockito.mock(ConnectionFactory.class),  AuthHelper.getDisabledAuthHelper(), requestTracker);
         mockStreamTasks.setCreateIndexOnlyMode();
         TaskSweeper sweeper = new TaskSweeper(taskMetadataStore, HOSTNAME, executor, streamMetadataTasks);
 
