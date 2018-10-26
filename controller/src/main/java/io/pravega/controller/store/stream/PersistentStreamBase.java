@@ -67,12 +67,12 @@ import static io.pravega.shared.segment.StreamSegmentNameUtils.getSegmentNumber;
 import static java.util.stream.Collectors.toMap;
 
 @Slf4j
-public abstract class AbstractStream implements Stream {
+public abstract class PersistentStreamBase implements Stream {
 
     private final String scope;
     private final String name;
 
-    AbstractStream(final String scope, final String name) {
+    PersistentStreamBase(final String scope, final String name) {
         this.scope = scope;
         this.name = name;
     }

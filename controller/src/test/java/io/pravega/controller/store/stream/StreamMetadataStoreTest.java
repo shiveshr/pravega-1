@@ -450,8 +450,8 @@ public abstract class StreamMetadataStoreTest {
         long scaleTs3 = System.currentTimeMillis();
 
         @SuppressWarnings("unchecked")
-        AbstractStream streamObj = (AbstractStream) ((AbstractStreamMetadataStore) store).getStream(scope, stream, null);
-        AbstractStream streamObjSpied = spy(streamObj);
+        PersistentStreamBase streamObj = (PersistentStreamBase) ((AbstractStreamMetadataStore) store).getStream(scope, stream, null);
+        PersistentStreamBase streamObjSpied = spy(streamObj);
 
         CompletableFuture<Void> latch = new CompletableFuture<>();
         CompletableFuture<Void> updateEpochTransitionCalled = new CompletableFuture<>();
@@ -497,9 +497,9 @@ public abstract class StreamMetadataStoreTest {
         long scaleTs = System.currentTimeMillis();
 
         @SuppressWarnings("unchecked")
-        AbstractStream streamObj = (AbstractStream) ((AbstractStreamMetadataStore) store)
+        PersistentStreamBase streamObj = (PersistentStreamBase) ((AbstractStreamMetadataStore) store)
                 .getStream(scope, stream, null);
-        AbstractStream streamObjSpied = spy(streamObj);
+        PersistentStreamBase streamObjSpied = spy(streamObj);
 
         CompletableFuture<Void> latch = new CompletableFuture<>();
         CompletableFuture<Void> updateEpochTransitionCalled = new CompletableFuture<>();

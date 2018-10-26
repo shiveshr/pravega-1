@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
  * This shall reduce store round trips for answering queries, thus making them efficient.
  */
 @Slf4j
-class ZKStream extends AbstractStream {
+class ZKStream extends PersistentStreamBase {
     private static final String SCOPE_PATH = "/store/%s";
     private static final String STREAM_PATH = SCOPE_PATH + "/%s";
     private static final String CREATION_TIME_PATH = STREAM_PATH + "/creationTime";
