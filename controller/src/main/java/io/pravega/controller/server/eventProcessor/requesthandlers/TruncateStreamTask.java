@@ -16,6 +16,7 @@ import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.VersionedMetadata;
 import io.pravega.controller.store.stream.State;
+import io.pravega.controller.store.stream.records.TruncationRecord;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.shared.controller.event.TruncateStreamEvent;
 import io.pravega.shared.metrics.DynamicLogger;
@@ -77,10 +78,10 @@ public class TruncateStreamTask implements StreamTask<TruncateStreamEvent> {
                         }));
     }
 
-    private CompletableFuture<Void> processTruncate(String scope, String stream, VersionedMetadata<StreamTruncationRecord> versionedTruncationRecord,
+    private CompletableFuture<Void> processTruncate(String scope, String stream, VersionedMetadata<TruncationRecord> versionedTruncationRecord,
                                                     VersionedMetadata<State> versionedState, OperationContext context, long requestId) {
         String delegationToken = this.streamMetadataTasks.retrieveDelegationToken();
-        StreamTruncationRecord truncationRecord = versionedTruncationRecord.getObject();
+        TruncationRecord truncationRecord = versionedTruncationRecord.getObject();
         log.info(requestId, "Truncating stream {}/{} at stream cut: {}", scope, stream, truncationRecord.getStreamCut());
         return Futures.toVoid(streamMetadataStore.updateVersionedState(scope, stream, State.TRUNCATING, versionedState, context, executor)
                 .thenCompose(update -> notifyTruncateSegments(scope, stream, truncationRecord.getStreamCut(), delegationToken, requestId)

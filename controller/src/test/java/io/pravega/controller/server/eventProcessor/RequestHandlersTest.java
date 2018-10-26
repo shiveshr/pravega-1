@@ -34,7 +34,7 @@ import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.VersionedMetadata;
 import io.pravega.controller.store.stream.VersionedTransactionData;
 import io.pravega.controller.store.stream.State;
-import io.pravega.controller.store.stream.records.CommittingTransactionsRecord;
+import io.pravega.controller.store.stream.records.CommitTransactionsRecord;
 import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.task.TaskMetadataStore;
 import io.pravega.controller.store.task.TaskStoreFactory;
@@ -227,8 +227,8 @@ public class RequestHandlersTest {
             future1.join();
         }
 
-        VersionedMetadata<CommittingTransactionsRecord> versioned = streamStore1.getVersionedCommittingTransactionsRecord(scope, stream, null, executor).join();
-        assertEquals(CommittingTransactionsRecord.EMPTY, versioned.getObject());
+        VersionedMetadata<CommitTransactionsRecord> versioned = streamStore1.getVersionedCommittingTransactionsRecord(scope, stream, null, executor).join();
+        assertEquals(CommitTransactionsRecord.EMPTY, versioned.getObject());
         assertEquals(expectedVersion, versioned.getVersion().asIntVersion().getIntValue().intValue());
         assertEquals(State.ACTIVE, streamStore1.getState(scope, stream, true, null, executor).join());
     }
@@ -330,8 +330,8 @@ public class RequestHandlersTest {
             future1Rolling.join();
         }
         // validate rolling txn done
-        VersionedMetadata<CommittingTransactionsRecord> versioned = streamStore1.getVersionedCommittingTransactionsRecord(scope, stream, null, executor).join();
-        assertEquals(CommittingTransactionsRecord.EMPTY, versioned.getObject());
+        VersionedMetadata<CommitTransactionsRecord> versioned = streamStore1.getVersionedCommittingTransactionsRecord(scope, stream, null, executor).join();
+        assertEquals(CommitTransactionsRecord.EMPTY, versioned.getObject());
         assertEquals(expectedVersion, versioned.getVersion().asIntVersion().getIntValue().intValue());
         assertEquals(3, streamStore1.getActiveEpoch(scope, stream, null, true, executor).join().getEpoch());
         assertEquals(State.ACTIVE, streamStore1.getState(scope, stream, true, null, executor).join());

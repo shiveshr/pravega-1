@@ -34,10 +34,10 @@ import java.util.Set;
  */
 @Data
 @Slf4j
-public class StreamTruncationRecord {
+public class TruncationRecord {
     public static final TruncationRecordSerializer SERIALIZER = new TruncationRecordSerializer();
 
-    public static final StreamTruncationRecord EMPTY = new StreamTruncationRecord(ImmutableMap.of(),
+    public static final TruncationRecord EMPTY = new TruncationRecord(ImmutableMap.of(),
             ImmutableMap.of(), ImmutableSet.of(), ImmutableSet.of(), 0L, false);
 
     /**
@@ -81,8 +81,8 @@ public class StreamTruncationRecord {
     private final boolean updating;
 
     @Builder
-    public StreamTruncationRecord(Map<Long, Long> streamCut, Map<StreamSegmentRecord, Integer> span,
-                                  Set<Long> deletedSegments, Set<Long> toDelete, long sizeTill, boolean updating) {
+    public TruncationRecord(Map<Long, Long> streamCut, Map<StreamSegmentRecord, Integer> span,
+                            Set<Long> deletedSegments, Set<Long> toDelete, long sizeTill, boolean updating) {
         this.streamCut = ImmutableMap.copyOf(streamCut);
         this.span = ImmutableMap.copyOf(span);
         this.deletedSegments = ImmutableSet.copyOf(deletedSegments);
@@ -98,27 +98,27 @@ public class StreamTruncationRecord {
      * @param toComplete record to complete
      * @return new record that has the updating flag set to false
      */
-    public static StreamTruncationRecord complete(StreamTruncationRecord toComplete) {
+    public static TruncationRecord complete(TruncationRecord toComplete) {
         Preconditions.checkState(toComplete.updating);
         Set<Long> deleted = new HashSet<>(toComplete.deletedSegments);
         deleted.addAll(toComplete.toDelete);
 
-        return StreamTruncationRecord.builder()
-                                     .updating(false)
-                                     .span(toComplete.span)
-                                     .streamCut(toComplete.streamCut)
-                                     .deletedSegments(deleted)
-                                     .toDelete(ImmutableSet.of())
-                                     .sizeTill(toComplete.sizeTill)
-                                     .build();
+        return TruncationRecord.builder()
+                               .updating(false)
+                               .span(toComplete.span)
+                               .streamCut(toComplete.streamCut)
+                               .deletedSegments(deleted)
+                               .toDelete(ImmutableSet.of())
+                               .sizeTill(toComplete.sizeTill)
+                               .build();
     }
 
-    public static class StreamTruncationRecordBuilder implements ObjectBuilder<StreamTruncationRecord> {
+    public static class TruncationRecordBuilder implements ObjectBuilder<TruncationRecord> {
 
     }
 
     @SneakyThrows(IOException.class)
-    public static StreamTruncationRecord fromBytes(final byte[] data) {
+    public static TruncationRecord fromBytes(final byte[] data) {
         return SERIALIZER.deserialize(data);
     }
 
@@ -128,7 +128,7 @@ public class StreamTruncationRecord {
     }
     
     private static class TruncationRecordSerializer
-            extends VersionedSerializer.WithBuilder<StreamTruncationRecord, StreamTruncationRecordBuilder> {
+            extends VersionedSerializer.WithBuilder<TruncationRecord, TruncationRecordBuilder> {
         @Override
         protected byte getWriteVersion() {
             return 0;
@@ -140,9 +140,9 @@ public class StreamTruncationRecord {
         }
 
         private void read00(RevisionDataInput revisionDataInput,
-                            StreamTruncationRecordBuilder streamTruncationRecordBuilder)
+                            TruncationRecordBuilder truncationRecordBuilder)
                 throws IOException {
-            streamTruncationRecordBuilder
+            truncationRecordBuilder
                     .streamCut(revisionDataInput.readMap(DataInput::readLong, DataInput::readLong))
                     .span(revisionDataInput.readMap(StreamSegmentRecord.SERIALIZER::deserialize, DataInput::readInt))
                     .deletedSegments(new HashSet<>(revisionDataInput.readCollection(DataInput::readLong)))
@@ -150,18 +150,18 @@ public class StreamTruncationRecord {
                     .updating(revisionDataInput.readBoolean());
         }
 
-        private void write00(StreamTruncationRecord streamStreamTruncationRecord, RevisionDataOutput revisionDataOutput)
+        private void write00(TruncationRecord streamTruncationRecord, RevisionDataOutput revisionDataOutput)
                 throws IOException {
-            revisionDataOutput.writeMap(streamStreamTruncationRecord.getStreamCut(), DataOutput::writeLong, DataOutput::writeLong);
-            revisionDataOutput.writeMap(streamStreamTruncationRecord.getSpan(), StreamSegmentRecord.SERIALIZER::serialize, DataOutput::writeInt);
-            revisionDataOutput.writeCollection(streamStreamTruncationRecord.getDeletedSegments(), DataOutput::writeLong);
-            revisionDataOutput.writeCollection(streamStreamTruncationRecord.getToDelete(), DataOutput::writeLong);
-            revisionDataOutput.writeBoolean(streamStreamTruncationRecord.isUpdating());
+            revisionDataOutput.writeMap(streamTruncationRecord.getStreamCut(), DataOutput::writeLong, DataOutput::writeLong);
+            revisionDataOutput.writeMap(streamTruncationRecord.getSpan(), StreamSegmentRecord.SERIALIZER::serialize, DataOutput::writeInt);
+            revisionDataOutput.writeCollection(streamTruncationRecord.getDeletedSegments(), DataOutput::writeLong);
+            revisionDataOutput.writeCollection(streamTruncationRecord.getToDelete(), DataOutput::writeLong);
+            revisionDataOutput.writeBoolean(streamTruncationRecord.isUpdating());
         }
 
         @Override
-        protected StreamTruncationRecordBuilder newBuilder() {
-            return StreamTruncationRecord.builder();
+        protected TruncationRecordBuilder newBuilder() {
+            return TruncationRecord.builder();
         }
     }
 }

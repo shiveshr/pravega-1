@@ -19,7 +19,7 @@ import io.pravega.common.util.BitConverter;
 import io.pravega.common.util.CollectionHelpers;
 import io.pravega.controller.store.stream.StoreException.DataNotFoundException;
 import io.pravega.controller.store.stream.records.ActiveTxnRecord;
-import io.pravega.controller.store.stream.records.CommittingTransactionsRecord;
+import io.pravega.controller.store.stream.records.CommitTransactionsRecord;
 import io.pravega.controller.store.stream.records.CompletedTxnRecord;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
 import io.pravega.controller.store.stream.records.RecordHelper;
@@ -33,7 +33,7 @@ import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.records.StreamCutRecord;
 import io.pravega.controller.store.stream.records.StreamCutReferenceRecord;
 import io.pravega.controller.store.stream.records.StreamSegmentRecord;
-import io.pravega.controller.store.stream.records.StreamTruncationRecord;
+import io.pravega.controller.store.stream.records.TruncationRecord;
 import io.pravega.shared.segment.StreamSegmentNameUtils;
 import lombok.Lombok;
 import lombok.SneakyThrows;
@@ -116,8 +116,8 @@ public abstract class AbstractStream implements Stream {
                         .thenCompose((Void v) -> createConfigurationIfAbsent(StreamConfigurationRecord.complete(
                                 createStreamResponse.getConfiguration()).toBytes()))
                         .thenCompose((Void v) -> createEpochTransitionIfAbsent(EpochTransitionRecord.EMPTY.toBytes()))
-                        .thenCompose((Void v) -> createTruncationDataIfAbsent(StreamTruncationRecord.EMPTY.toBytes()))
-                        .thenCompose((Void v) -> createCommitTxnRecordIfAbsent(CommittingTransactionsRecord.EMPTY.toBytes()))
+                        .thenCompose((Void v) -> createTruncationDataIfAbsent(TruncationRecord.EMPTY.toBytes()))
+                        .thenCompose((Void v) -> createCommitTxnRecordIfAbsent(CommitTransactionsRecord.EMPTY.toBytes()))
                         .thenCompose((Void v) -> createStateIfAbsent(StateRecord.builder().state(State.CREATING).build().toBytes()))
                         .thenCompose((Void v) -> createHistoryRecords(startingSegmentNumber, createStreamResponse))
                         .thenApply((Void v) -> createStreamResponse));
@@ -287,7 +287,7 @@ public abstract class AbstractStream implements Stream {
     public CompletableFuture<Set<Long>> getAllSegmentIds() {
         CompletableFuture<Map<StreamSegmentRecord, Integer>> fromSpanFuture = getTruncationRecord()
                 .thenCompose(truncationRecord -> {
-                    if (truncationRecord.getObject().equals(StreamTruncationRecord.EMPTY)) {
+                    if (truncationRecord.getObject().equals(TruncationRecord.EMPTY)) {
                         return getEpochRecord(0)
                                 .thenApply(this::convertToSpan);
                     } else {
@@ -358,7 +358,7 @@ public abstract class AbstractStream implements Stream {
         // read current epoch record
         return getTruncationRecord()
                 .thenCompose(truncationRecord -> {
-                    if (truncationRecord.getObject().equals(StreamTruncationRecord.EMPTY)) {
+                    if (truncationRecord.getObject().equals(TruncationRecord.EMPTY)) {
                         return getSegmentsInEpoch(0)
                                 .thenApply(segments -> segments.stream().collect(Collectors.toMap(x -> x, x ->  0L)));
                     } else {
@@ -1078,7 +1078,7 @@ public abstract class AbstractStream implements Stream {
                 Preconditions.checkArgument(!existing.getObject().isUpdating());
                 return computeStreamCutSpan(streamCut)
                         .thenCompose(span -> {
-                            StreamTruncationRecord previous = existing.getObject();
+                            TruncationRecord previous = existing.getObject();
                             // check greater than
                             Exceptions.checkArgument(span.keySet().stream().allMatch(x ->
                                             previous.getSpan().keySet().stream().noneMatch(y -> y.overlaps(x) && y.segmentId() > x.segmentId())),
@@ -1092,19 +1092,19 @@ public abstract class AbstractStream implements Stream {
     }
 
     @Override
-    public CompletableFuture<VersionedMetadata<StreamTruncationRecord>> getTruncationRecord() {
+    public CompletableFuture<VersionedMetadata<TruncationRecord>> getTruncationRecord() {
         return getTruncationData(true)
                 .thenApply(data -> {
-                    StreamTruncationRecord truncationRecord = StreamTruncationRecord.fromBytes(data.getData());
+                    TruncationRecord truncationRecord = TruncationRecord.fromBytes(data.getData());
                     return new VersionedMetadata<>(truncationRecord, data.getVersion());
                 });
     }
 
     @Override
-    public CompletableFuture<Void> completeTruncation(VersionedMetadata<StreamTruncationRecord> versionedMetadata) {
-        StreamTruncationRecord current = versionedMetadata.getObject();
+    public CompletableFuture<Void> completeTruncation(VersionedMetadata<TruncationRecord> versionedMetadata) {
+        TruncationRecord current = versionedMetadata.getObject();
         if (current.isUpdating()) {
-            StreamTruncationRecord completedProp = StreamTruncationRecord.complete(current);
+            TruncationRecord completedProp = TruncationRecord.complete(current);
 
             return Futures.toVoid(setTruncationData(new Data(completedProp.toBytes(), versionedMetadata.getVersion())));
         } else {
@@ -1113,7 +1113,7 @@ public abstract class AbstractStream implements Stream {
         }
     }
 
-    private CompletableFuture<StreamTruncationRecord> computeTruncationRecord(StreamTruncationRecord previous,
+    private CompletableFuture<TruncationRecord> computeTruncationRecord(TruncationRecord previous,
                                                                         Map<Long, Long> streamCut,
                                                                         Map<StreamSegmentRecord, Integer> span) {
         log.debug("computing truncation for stream {}/{}", scope, name);
@@ -1132,7 +1132,7 @@ public abstract class AbstractStream implements Stream {
                                                                           .filter(x -> !streamCut.containsKey(x))
                                                                           .collect(Collectors.toSet());
 
-                                      return new StreamTruncationRecord(streamCut, span, previous.getDeletedSegments(), toDelete,
+                                      return new TruncationRecord(streamCut, span, previous.getDeletedSegments(), toDelete,
                                               previous.getSizeTill() + sizeBetween, true);
                                   }));
     }
@@ -1140,17 +1140,17 @@ public abstract class AbstractStream implements Stream {
 
     //region rolling transactions + transaction commit workflow
     @Override
-    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(final int epoch) {
+    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startCommittingTransactions(final int epoch) {
         return getVersionedCommitTransactionsRecord()
                 .thenCompose(versioned -> {
-                    if (versioned.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
+                    if (versioned.getObject().equals(CommitTransactionsRecord.EMPTY)) {
                         return getTxnCommitList(epoch)
                                 .thenCompose(list -> {
                                     if (list.isEmpty()) {
                                         return CompletableFuture.completedFuture(versioned);
                                     } else {
-                                        CommittingTransactionsRecord record = CommittingTransactionsRecord.builder()
-                                                                                                          .epoch(epoch).transactionsToCommit(list).build();
+                                        CommitTransactionsRecord record = CommitTransactionsRecord.builder()
+                                                                                                  .epoch(epoch).transactionsToCommit(list).build();
                                         return updateCommittingTxnRecord(new Data(record.toBytes(), versioned.getVersion()))
                                                 .thenApply(version -> new VersionedMetadata<>(record, version));
                                     }
@@ -1178,13 +1178,13 @@ public abstract class AbstractStream implements Stream {
     }
     
     @Override
-    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getVersionedCommitTransactionsRecord() {
+    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> getVersionedCommitTransactionsRecord() {
         return getCommitTxnRecord()
-                .thenApply(r -> new VersionedMetadata<>(CommittingTransactionsRecord.fromBytes(r.getData()), r.getVersion()));
+                .thenApply(r -> new VersionedMetadata<>(CommitTransactionsRecord.fromBytes(r.getData()), r.getVersion()));
     }
 
     @Override
-    public CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record) {
+    public CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommitTransactionsRecord> record) {
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
@@ -1199,18 +1199,18 @@ public abstract class AbstractStream implements Stream {
                             }));
         }
         return future
-                .thenCompose(x -> Futures.toVoid(updateCommittingTxnRecord(new Data(CommittingTransactionsRecord.EMPTY.toBytes(),
+                .thenCompose(x -> Futures.toVoid(updateCommittingTxnRecord(new Data(CommitTransactionsRecord.EMPTY.toBytes(),
                         record.getVersion()))));
     }
     
     @Override
-    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startRollingTxn(int activeEpoch,
-                                                   VersionedMetadata<CommittingTransactionsRecord> existing) {
-        CommittingTransactionsRecord record = existing.getObject();
+    public CompletableFuture<VersionedMetadata<CommitTransactionsRecord>> startRollingTxn(int activeEpoch,
+                                                                                          VersionedMetadata<CommitTransactionsRecord> existing) {
+        CommitTransactionsRecord record = existing.getObject();
         if (record.isRollingTxnRecord()) {
             return CompletableFuture.completedFuture(existing);
         } else {
-            CommittingTransactionsRecord update = record.createRollingTxnRecord(activeEpoch);
+            CommitTransactionsRecord update = record.createRollingTxnRecord(activeEpoch);
             return updateCommittingTxnRecord(new Data(update.toBytes(), existing.getVersion()))
                     .thenApply(version -> new VersionedMetadata<>(update, version));
         }
@@ -1218,9 +1218,9 @@ public abstract class AbstractStream implements Stream {
     
     @Override
     public CompletableFuture<Void> rollingTxnCreateDuplicateEpochs(
-            Map<Long, Long> sealedTxnEpochSegments, long time, VersionedMetadata<CommittingTransactionsRecord> record) {
+            Map<Long, Long> sealedTxnEpochSegments, long time, VersionedMetadata<CommitTransactionsRecord> record) {
         Preconditions.checkArgument(record.getObject().isRollingTxnRecord());
-        CommittingTransactionsRecord committingTxnRecord = record.getObject();
+        CommitTransactionsRecord committingTxnRecord = record.getObject();
         return getActiveEpoch(true)
                 .thenCompose(activeEpochRecord -> getEpochRecord(committingTxnRecord.getEpoch())
                         .thenCompose(transactionEpochRecord -> {
@@ -1275,10 +1275,10 @@ public abstract class AbstractStream implements Stream {
 
     @Override
     public CompletableFuture<Void> completeRollingTxn(Map<Long, Long> sealedActiveEpochSegments,
-                                                      VersionedMetadata<CommittingTransactionsRecord> versionedMetadata) {
+                                                      VersionedMetadata<CommitTransactionsRecord> versionedMetadata) {
         return getActiveEpoch(true)
                         .thenCompose(activeEpochRecord -> {
-                            CommittingTransactionsRecord committingTxnRecord = versionedMetadata.getObject();
+                            CommitTransactionsRecord committingTxnRecord = versionedMetadata.getObject();
                             int activeEpoch = committingTxnRecord.getCurrentEpoch();
                             if (activeEpochRecord.getEpoch() == activeEpoch) {
                                 return updateSealedSegmentSizes(sealedActiveEpochSegments)
