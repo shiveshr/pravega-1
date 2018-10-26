@@ -208,7 +208,7 @@ public class StreamConfigurationRecord {
                                       .scalingPolicy(StreamConfigurationRecord.ScalingPolicyRecord.SERIALIZER.deserialize(revisionDataInput).getScalingPolicy())
                                       .retentionPolicy(StreamConfigurationRecord.RetentionPolicyRecord.SERIALIZER.deserialize(revisionDataInput).getRetentionPolicy());
             configurationRecordBuilder.streamConfiguration(streamConfigurationBuilder.build())
-                                            .updating(revisionDataInput.readBoolean());
+                                      .updating(revisionDataInput.readBoolean());
         }
 
         private void write00(StreamConfigurationRecord streamConfigurationRecord, RevisionDataOutput revisionDataOutput)
