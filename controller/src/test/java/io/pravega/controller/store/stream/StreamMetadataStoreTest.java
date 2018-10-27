@@ -23,6 +23,7 @@ import io.pravega.controller.store.stream.records.EpochTransitionRecord;
 import io.pravega.controller.store.stream.records.RecordHelper;
 import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.records.StreamCutRecord;
+import io.pravega.controller.store.stream.records.TruncationRecord;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteScopeStatus;
 import io.pravega.test.common.AssertExtensions;
@@ -854,7 +855,7 @@ public abstract class StreamMetadataStoreTest {
         truncation.put(1L, 0L);
         assertTrue(Futures.await(store.startTruncation(scope, stream, truncation, null, executor)));
         store.setState(scope, stream, State.TRUNCATING, null, executor).join();
-        StreamTruncationRecord truncationProperty = store.getTruncationRecord(scope, stream, null, executor).join().getObject();
+        TruncationRecord truncationProperty = store.getTruncationRecord(scope, stream, null, executor).join().getObject();
         assertTrue(truncationProperty.isUpdating());
 
         Map<Long, Long> truncation2 = new HashMap<>();
@@ -862,7 +863,7 @@ public abstract class StreamMetadataStoreTest {
         truncation2.put(1L, 1L);
 
         assertFalse(Futures.await(store.startTruncation(scope, stream, truncation2, null, executor)));
-        VersionedMetadata<StreamTruncationRecord> record = store.getTruncationRecord(scope, stream, null, executor).join();
+        VersionedMetadata<TruncationRecord> record = store.getTruncationRecord(scope, stream, null, executor).join();
         assertTrue(Futures.await(store.completeTruncation(scope, stream, record, null, executor)));
 
         truncationProperty = store.getTruncationRecord(scope, stream, null, executor).join().getObject();

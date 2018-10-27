@@ -94,12 +94,8 @@ public class TaskTest {
     private final StreamMetadataTasks streamMetadataTasks;
     private final SegmentHelper segmentHelperMock;
     private final CuratorFramework cli;
-<<<<<<< HEAD
     private Map<Long, Map.Entry<Double, Double>> segmentsCreated;
-=======
-    private ImmutableMap<Long, AbstractMap.SimpleEntry<Double, Double>> segmentsCreated;
     private final RequestTracker requestTracker = new RequestTracker(true);
->>>>>>> ceb4d0a4a28d7deb9d04bfb53ac7b0b3d9a96f1a
 
     public TaskTest() throws Exception {
         zkServer = new TestingServerStarter().start();

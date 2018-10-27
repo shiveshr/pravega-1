@@ -36,6 +36,7 @@ import io.pravega.controller.store.stream.VersionedTransactionData;
 import io.pravega.controller.store.stream.State;
 import io.pravega.controller.store.stream.records.CommitTransactionsRecord;
 import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
+import io.pravega.controller.store.stream.records.TruncationRecord;
 import io.pravega.controller.store.task.TaskMetadataStore;
 import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
@@ -485,7 +486,7 @@ public class RequestHandlersTest {
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException);
 
         // validate rolling txn done
-        VersionedMetadata<StreamTruncationRecord> versioned = streamStore1.getTruncationRecord(scope, stream, null, executor).join();
+        VersionedMetadata<TruncationRecord> versioned = streamStore1.getTruncationRecord(scope, stream, null, executor).join();
         assertFalse(versioned.getObject().isUpdating());
         assertEquals(2, versioned.getVersion().asIntVersion().getIntValue().intValue());
         assertEquals(State.ACTIVE, streamStore1.getState(scope, stream, true, null, executor).join());

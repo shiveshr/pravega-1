@@ -166,8 +166,7 @@ public abstract class PersistentStreamBase implements Stream {
                 });
     }
 
-    private CompletableFuture<TruncationRecord> computeTruncationRecord(TruncationRecord previous,
-                                                                        Map<Long, Long> streamCut,
+    private CompletableFuture<TruncationRecord> computeTruncationRecord(TruncationRecord previous, Map<Long, Long> streamCut,
                                                                         Map<StreamSegmentRecord, Integer> span) {
         log.debug("computing truncation for stream {}/{}", scope, name);
         // compute segments to delete between previous and streamcut.
@@ -191,12 +190,12 @@ public abstract class PersistentStreamBase implements Stream {
     }
     
     @Override
-    public CompletableFuture<Void> completeTruncation(VersionedMetadata<TruncationRecord> versionedMetadata) {
-        TruncationRecord current = versionedMetadata.getObject();
+    public CompletableFuture<Void> completeTruncation(VersionedMetadata<TruncationRecord> record) {
+        TruncationRecord current = record.getObject();
         if (current.isUpdating()) {
             TruncationRecord completedProp = TruncationRecord.complete(current);
 
-            return Futures.toVoid(setTruncationData(new Data(completedProp.toBytes(), versionedMetadata.getVersion())));
+            return Futures.toVoid(setTruncationData(new Data(completedProp.toBytes(), record.getVersion())));
         } else {
             // idempotent
             return CompletableFuture.completedFuture(null);
@@ -234,13 +233,13 @@ public abstract class PersistentStreamBase implements Stream {
      * @return future of operation
      */
     @Override
-    public CompletableFuture<Void> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> versionedMetadata) {
-        StreamConfigurationRecord current = versionedMetadata.getObject();
+    public CompletableFuture<Void> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing) {
+        StreamConfigurationRecord current = existing.getObject();
         Preconditions.checkNotNull(current);
         if (current.isUpdating()) {
             StreamConfigurationRecord newProperty = StreamConfigurationRecord.complete(current.getStreamConfiguration());
             log.debug("Completing update configuration for stream {}/{}", scope, name);
-            return Futures.toVoid(setConfigurationData(new Data(newProperty.toBytes(), versionedMetadata.getVersion())));
+            return Futures.toVoid(setConfigurationData(new Data(newProperty.toBytes(), existing.getVersion())));
         } else {
             // idempotent
             return CompletableFuture.completedFuture(null);
@@ -318,30 +317,7 @@ public abstract class PersistentStreamBase implements Stream {
                                     "segment not found in epoch")));
                 });
     }
-
-    @Override
-    public CompletableFuture<Set<Long>> getAllSegmentIds() {
-        CompletableFuture<Map<StreamSegmentRecord, Integer>> fromSpanFuture = getTruncationRecord()
-                .thenCompose(truncationRecord -> {
-                    if (truncationRecord.getObject().equals(TruncationRecord.EMPTY)) {
-                        return getEpochRecord(0)
-                                .thenApply(this::convertToSpan);
-                    } else {
-                        return CompletableFuture.completedFuture(truncationRecord.getObject().getSpan());
-                    }
-                });
-        CompletableFuture<Map<StreamSegmentRecord, Integer>> toSpanFuture = getActiveEpoch(true)
-                .thenApply(this::convertToSpan);
-
-        return CompletableFuture.allOf(fromSpanFuture, toSpanFuture)
-                                .thenCompose(v -> {
-                                    Map<StreamSegmentRecord, Integer> fromSpan = fromSpanFuture.join();
-                                    Map<StreamSegmentRecord, Integer> toSpan = toSpanFuture.join();
-                                    return segmentsBetweenStreamCutSpans(fromSpan, toSpan)
-                                            .thenApply(x -> x.stream().map(StreamSegmentRecord::segmentId).collect(Collectors.toSet()));
-                                });
-    }
-
+    
     @Override
     public CompletableFuture<List<ScaleMetadata>> getScaleMetadata(final long from, final long to) {
         // fetch history index and find epochs corresponding to "from" and "to"
@@ -374,7 +350,7 @@ public abstract class PersistentStreamBase implements Stream {
                                return new ScaleMetadata(record.getCreationTime(), transform(segments), splits, merges);
                            }).collect(Collectors.toList());
     }
-
+    
     /**
      * Method to calculate number of splits and merges.
      *
@@ -402,6 +378,29 @@ public abstract class PersistentStreamBase implements Stream {
             }
             return BitConverter.readInt(x.getData(), 0);
         });
+    }
+
+    @Override
+    public CompletableFuture<Set<Long>> getAllSegmentIds() {
+        CompletableFuture<Map<StreamSegmentRecord, Integer>> fromSpanFuture = getTruncationRecord()
+                .thenCompose(truncationRecord -> {
+                    if (truncationRecord.getObject().equals(TruncationRecord.EMPTY)) {
+                        return getEpochRecord(0)
+                                .thenApply(this::convertToSpan);
+                    } else {
+                        return CompletableFuture.completedFuture(truncationRecord.getObject().getSpan());
+                    }
+                });
+        CompletableFuture<Map<StreamSegmentRecord, Integer>> toSpanFuture = getActiveEpoch(true)
+                .thenApply(this::convertToSpan);
+
+        return CompletableFuture.allOf(fromSpanFuture, toSpanFuture)
+                                .thenCompose(v -> {
+                                    Map<StreamSegmentRecord, Integer> fromSpan = fromSpanFuture.join();
+                                    Map<StreamSegmentRecord, Integer> toSpan = toSpanFuture.join();
+                                    return segmentsBetweenStreamCutSpans(fromSpan, toSpan)
+                                            .thenApply(x -> x.stream().map(StreamSegmentRecord::segmentId).collect(Collectors.toSet()));
+                                });
     }
 
     @Override
@@ -1696,6 +1695,6 @@ public abstract class PersistentStreamBase implements Stream {
     abstract CompletableFuture<Data> getWaitingRequestNode();
 
     abstract CompletableFuture<Void> deleteWaitingRequestNode();
-// endregion
-// endregion
+    // endregion
+    // endregion
 }
