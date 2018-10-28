@@ -23,7 +23,6 @@ import org.apache.curator.retry.RetryOneTime;
 import org.apache.curator.test.TestingServer;
 import org.junit.Test;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Arrays;
@@ -62,12 +61,7 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
     }
 
     @Override
-    public void cleanupTaskStore() throws IOException {
-        try {
-            ((ZKStreamMetadataStore) store).close();
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+    public void cleanupTaskStore() throws Exception {
         cli.close();
         zkServer.close();
     }

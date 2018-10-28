@@ -191,6 +191,8 @@ public abstract class PersistentStreamBase implements Stream {
     
     @Override
     public CompletableFuture<Void> completeTruncation(VersionedMetadata<TruncationRecord> record) {
+        Preconditions.checkNotNull(record);
+        Preconditions.checkArgument(record.getObject().isUpdating());
         TruncationRecord current = record.getObject();
         if (current.isUpdating()) {
             TruncationRecord completedProp = TruncationRecord.complete(current);
@@ -649,7 +651,7 @@ public abstract class PersistentStreamBase implements Stream {
             }
         }).thenCompose(record -> getActiveEpochRecord(true).thenCompose(currentEpoch -> {
             if (!record.getObject().equals(EpochTransitionRecord.EMPTY)) {
-                // verify that its the same as the supplied input (--> segments to be sealed
+                // verify that it's the same as the supplied input (--> segments to be sealed
                 // and new ranges are identical). else throw scale conflict exception
                 if (!RecordHelper.verifyRecordMatchesInput(segmentsToSeal, newRanges, false, record.getObject())) {
                     log.debug("scale conflict, another scale operation is ongoing");
@@ -853,6 +855,8 @@ public abstract class PersistentStreamBase implements Stream {
 
     @Override
     public CompletableFuture<Void> completeScale(VersionedMetadata<EpochTransitionRecord> record) {
+        Preconditions.checkNotNull(record);
+        Preconditions.checkArgument(!record.getObject().equals(EpochTransitionRecord.EMPTY));
         return Futures.toVoid(updateEpochTransitionNode(new Data(EpochTransitionRecord.EMPTY.toBytes(), record.getVersion())));
     }
     
@@ -1300,8 +1304,6 @@ public abstract class PersistentStreamBase implements Stream {
 
     /**
      * Get transactions in epoch. If no transactions exist return null.
-     * If transactions exist, create a new Committing transactions record in the store.
-     * Note, before calling this method, we check if committingTxnList exists or not so we can never get DataExistsException.
      */
     private CompletableFuture<List<UUID>> getTxnCommitList(int epoch) {
         return getTransactionsInEpoch(epoch)
