@@ -228,6 +228,7 @@ interface Stream {
     /**
      * Called to start metadata updates to stream store with respect to new scale request. This method should only update
      * the epochTransition record to reflect current request. It should not initiate the scale workflow. 
+     * This should be called for both auto scale and manual scale. 
      * In case of rolling transactions, this record may become invalid and can be discarded during the startScale phase
      * of scale workflow. 
      *
