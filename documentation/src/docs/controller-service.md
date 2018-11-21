@@ -282,7 +282,7 @@ Controller service efficient queries for finding immediate successors
 and predecessors for any arbitrary segment.  
 
 To enable serving queries like those mentioned above, we need to efficiently store a time series of these segment transitions and index them against time.
-We store this information about the current and historical state of a stream-segments in a set of tables which are designed to optimize on aforementioned queries.
+We store this information about the current and historical state of a stream-segments in a set of  tables which are designed to optimize on aforementioned queries.
 Apart from segment specific metadata record, the current state of stream comprises of other metadata types that are described henceforth.
 
 #### Tables  
