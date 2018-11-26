@@ -282,49 +282,37 @@ Controller service efficient queries for finding immediate successors
 and predecessors for any arbitrary segment.  
 
 To enable serving queries like those mentioned above, we need to efficiently store a time series of these segment transitions and index them against time.
-We store this information about the current and historical state of a stream-segments in a set of  tables which are designed to optimize on aforementioned queries.
+We store this information about the current and historical state of a stream-segments in a set of records which are designed to optimize on aforementioned queries.
 Apart from segment specific metadata record, the current state of stream comprises of other metadata types that are described henceforth.
 
-#### Tables  
+#### Records  
 
-To efficiently store and query the segment information, we have split
-segment data into the following three append only tables.
+We store the stream time series as a series of records where each record corresponds to an epoch. As stream scales and transitions from one epoch to another, we create a new record that has complete information about segments that form the epoch. 
 
-  - **Segment Table**:  
-_Segment-info: ⟨segmentid, time, keySpace-start, keySpace-end⟩_  
-The Controller stores the segment table in an append-only table with
-**i**-**th** row corresponding to metadata for segment id **i**. It is important
-to note that each row in the segment table is of fixed size. As new
-segments are added, they are assigned new segment *Ids* in a strictly
-increasing order. So this table is very efficient in creating new
-segments and querying segment information response with *O(1)* processing
-for both these operations.
-
- - **History Table**:  
+ - **Epoch Records**:  
 _Epoch: ⟨time, list-of-segments-in-epoch⟩_
-The History Table stores a series of active segments as they transition
-from one epoch to another. Each row in the history table stores an epoch
+We store the series of active segments as they transition
+from one epoch to another into individual epoch records. Each epoch record corresponds to an epoch
 which captures a logically consistent (as defined earlier) set of
 segments that form the stream and are valid through the lifespan of the
-epoch. This table is designed to optimize queries to find set of
-segments that form the stream at any arbitrary time. There are three
-most commonly used scenarios where we want to efficiently know the set
-of segments that form the stream - _initial set of segments, current set
-of segments_ and _segments at any arbitrary time_.  First two queries are
-very efficiently answered in _O(1)_ time because they correspond to first
-and last rows in the table.
-Since rows in the table are sorted by increasing order of time and
-capture time series of streams segment set changes, so we could easily
-perform binary search to find row which corresponds to segment sets at
-any arbitrary time.
+epoch. The epoch record is stored against the epoch number. This record is optimized to answer to query segments from an epoch with a single call into the store that also enables retrieval of
+all segment records in the epoch in O(1). 
+This record is also used for fetching a segment specific record by first computing segment's creation epoch from segment Id and then retrieving 
+the epoch record. 
+We also maintain a special epoch record called `currentEpoch`. This is the currently active epoch in the stream. At any time exactly one epoch is marked as current epoch. 
+Typically this is the latest epoch with highest epoch number. However, during an ongoing stream update workflow like scale or rolling transaction, the current epoch may not necessarily be the latest epoch. However, at the completion of these workflows the current epoch is marked as the latest epoch in the stream. 
 
- - **Index Table**  
-_Index: ⟨time, offset-in-history-table⟩_  
-Since history rows are of variable length, we index history rows for
-timestamps in the index table. This enables us to navigate the history
-table and perform binary search to efficiently answer queries to get
-segment set at any arbitrary time. We also perform binary searches on
-history table to determine successors of any given segment.
+There are three most commonly used scenarios where we want to efficiently know the set
+of segments that form the stream - _initial set of segments, current set
+of segments_ and successors of a particular segment.  The head of the stream computation is very efficient as it is typically either the first epoch record or the latest truncation record. 
+The tail of the stream is identified by the current epoch record. The successor query results in two calls into the store to retrieve segment's sealed epoch and the corresponding epoch record. The successors are computed as the the segments that overlap with the given segment. 
+
+  - **Segment Records**:  
+_Segment-info: ⟨segmentid, time, keySpace-start, keySpace-end⟩_  
+The Controller stores segment information within each epoch record. A
+The segment id is composed of two parts, and is encoded as a 64 bit number. 
+The high 32 bit identifies the creation epoch of the segment and the low 32 bit uniquely identifies the segment. 
+To retrieve segment record given a segment id, we first need to extract the creation epoch and then retrive the segment record from the epoch record. 
 
 #### Stream Configuration
  Znode under which stream configuration is serialized and persisted. A
@@ -354,7 +342,7 @@ history table to determine successors of any given segment.
  and *sealed*. Once _active_, a stream transitions between performing a
  specific operation and active until it is sealed. A transition map is
  defined in the
- [State](https://github.com/pravega/pravega/blob/master/Controller/src/main/java/io/pravega/controller/store/stream/tables/State.java)
+ [State](https://github.com/pravega/pravega/blob/master/controller/src/main/java/io/pravega/controller/store/stream/State.java)
  class which allows and prohibits various state transitions.
  Stream state describes the current state of the stream. It transitions
  from _active_ to respective action based on the action being performed
@@ -373,11 +361,13 @@ history table to determine successors of any given segment.
  record and return segments that are strictly greater than or equal to
  the stream cut in truncation record.
 
-#### Sealed Segments Record
- Since the segment table is append only, any additional information
- that we need to persist when a segment is sealed is stored in sealed
- segments record. Presently, it simple contains a map of segment number
- to its sealed size.
+#### Sealed Segments Map
+Once segments are sealed, controller needs to store additional information about the segment. Presently we have two types of information that we store namely the epoch it was sealed in and the overall size of the segment at the time of sealing. 
+These records have two different characteristics and are used in different types of queries - for example, sealing epoch is important for querying successor segments; segment sizes are used during truncation workflows. Successor queries are performed on a single segment whereas truncation workflows work on a group of segments.
+So we maintain two kinds of records for these two types of records. For each segment we store its sealing epoch directly in the metadata store. For sealed sizes, we store it in a map of segment to size at the time of sealing. This ensures that during truncation we are able to retrieve sealed sizes for multiple segments with minimal number of calls into underlying metadata store.
+Since we could have arbitrarily large number of segments that have been sealed away, 
+we cannot store all of the information in a single map and hence we shard the map and store it. The sharding function we use is to hash the creation epoch and get the shard number. 
+
 
 The following are the Transaction Related metadata records:
 
@@ -654,31 +644,25 @@ policy. Now the state is reset to *Active*.
 
 Scale can be invoked either by explicit API call (referred to as manual
 scale) or performed automatically based on scale policy (referred to as
-auto-scale). We first write the event followed by updating the segment
-table by creating new entries for desired segments to be created. This
-step is idempotent and ensures that if an existing ongoing scale
-operation is in progress, then this attempt to start a new scale fails.
+auto-scale). We first write the event followed by updating the metada store to capture our intent to scale a stream. 
+This step is idempotent and ensures that if an existing ongoing scale
+operation is in progress, then this attempt to start a new scale is ignored. Also, if there is an ongoing scale operation with a 
+conflicting request input parameters, then the new request is rejected. Which essentially guarantees that there can be exactly one
+scale operation that can be performed at any given point in time. 
 The start of processing is similar to mechanism followed in update
 stream. If metadata is updated, the event processes and proceeds with
 executing the task. If the metadata is not updated within the desired
 time frame, the event is discarded.
 
 Once scale processing starts, it first sets the stream state *Scaling*.
-This is followed by creating new segments in Segment Stores. After
-successfully creating new segments, it updates the history table with a
-partial record corresponding to new epoch which contains list of
+This is followed by creating new segments in Segment Stores. After 
+successfully creating new segments, it creates a new epoch record in the 
+metadata store. This record corresponds to new epoch which contains list of
 segments as they would appear post scale. Each new epoch creation also
 creates a new root epoch node under which metadata for all transactions
-from that epoch reside. So as the scale is performed, there would be a
-node corresponding to old epoch and now there will also be a root node
-for new epoch. Any transaction creation from this point on will be done
-against new epoch. Now the workflow attempts to complete scale by
-opportunistically attempting to delete the old epoch. Old epoch can be
-deleted if and only if there are no transactions under its tree. Once we
-are sure there are no transactions on old epoch, we can proceed with
-sealing old segments and completing the scale. After old segments are
-sealed successfully, the partial record in history table is now
-completed whereby completing the scale workflow. The state is now reset
+from that epoch reside. After creating requisite metadata records, scale workflow
+attempts to seal old segments in the segment store. Once old segments are sealed, 
+we can safely mark the new epoch as the currently active epoch and reset state
 to *Active*.
 
 ### Truncate Stream
@@ -802,28 +786,23 @@ The create transaction function in the module performs the following steps:
 3. It creates a new transaction record in the Zookeeper using the metadata store interface.
 4. It then requests Segment Store to create special Transaction segments that are inherently linked to the parent active segments.
 
-While creating Transactions, Controller ensures that parent segments are not sealed as we attempt to create corresponding transaction segments.
-And during the lifespan of a transaction, should a scale commence, it should wait for Transactions on older epoch to finish before the scale proceeds
-to seal segments from old epoch.
+Controller creates shadow segments for current active segments by associating transaction id to compute unique shadow segment identifiers. The lifecycle of shadow segments are not linked to original segments and original segments can be sealed, truncated or deleted without affecting the lifecycle of shadow segment. 
 
 ### Commit Transaction
 
 Upon receiving request to commit a transaction, Controller Service passes the request to Transaction Utility module.
 This module first tries to mark the transaction for commit in the transaction specific metadata record via metadata store.
-Following this, it posts a commit event in the internal Commit Stream.
+Following this, it posts a commit event in the internal Commit Stream. The commit event only captures the epoch in which the 
+transaction has to be committed. 
 Commit transaction workflow is implemented on commit event processor and
-thereby processed asynchronously. The commit transaction workflow checks for eligibility of transaction to be committed, and if true,
-it performs the commit workflow with indefinite retries until it
-succeeds. If the Transaction is not eligible for commit, which typically
-happens if Transaction is created on a new epoch while the old epoch is
-still active, then such events are reposted into the internal stream to
-be picked later.
-
+thereby processed asynchronously. When commit workflow starts, it opportunistically collects all available transactions 
+that have been marked for commit in the given epoch and proceeds to commit them in order one transaction at a time. A transaction commit entails merging the transaction segment into its parent segment. This works perfectly in absense of scale. However, because of scaling of a stream, some of the parent segments for transaction's shadow segments could have been sealed away. In such happenstance, when we attempt to commit a transactions we may not have parent segments in which transaction segments could be merged into. 
+One approach to mitigate this could have been to prevent scaling operation while there were ongoing transactions. However, this could stall scaling for arbitrarily large periods of time and would be detrimental. Instead, controller decouples scale and tranactions and allows either to occur concurrently without impacting workings of the other. 
+This is achieved by using a scheme where controller allows transaction segments to outlive their parent segments and whenver their commits are issued, at a logical level controller elevates the transaction segments as first class segments and includes them in a new epoch in the epoch timeseries of the stream. 
+This scheme is called Rolling Transactions. It is named as such because transactions are created in an older epoch and when they are attempted to be committed, the latest epoch is sealed, transactions are rolled over and included and then a duplicate of latest epoch is created for stream to restore its previous state before rolling of transactions. This ensures that transactions could be created at any time and then  be committed at any time without interfering with any other stream processing. 
+The commit workflow on controller guarantees that once started it will attempt to commit each of the identified transactions with indefinite retries until they all succeed. 
 Once a Transaction is committed successfully, the record for the
-transaction is removed from under its epoch root. Then if there is an
-ongoing scale, then it calls to attempt to complete the ongoing scale.
-Trying to complete scale hinges on ability to delete old epoch which can
-be deleted if and only if there are no outstanding active transactions against the said epoch (refer to scale workflow for more details).   
+transaction is removed from under its epoch root. 
 
 ### Abort Transaction
 
@@ -836,10 +815,6 @@ respective metadata. Post this, the event is picked for processing by
 abort event processor and Transactions abort is immediately attempted.
 There is no ordering requirement for abort Transaction and hence it is
 performed concurrently and across streams.
-
-Like commit, once the Transaction is aborted, its node is deleted from
-its epoch root and if there is an ongoing scale, it complete scale flow
-is attempted.
 
 ### Ping Transaction
 
