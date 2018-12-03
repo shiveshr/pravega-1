@@ -10,18 +10,20 @@
 package io.pravega.test.integration;
 
 import com.codahale.metrics.Counter;
+import com.codahale.metrics.Timer;
 import io.pravega.client.ClientConfig;
-import io.pravega.client.ClientFactory;
+import io.pravega.client.EventStreamClientFactory;
+import io.pravega.client.admin.ReaderGroupManager;
 import io.pravega.client.admin.StreamManager;
-import io.pravega.client.stream.EventStreamWriter;
-import io.pravega.client.stream.EventWriterConfig;
+import io.pravega.client.stream.ReaderGroup;
+import io.pravega.client.stream.ReaderGroupConfig;
 import io.pravega.client.stream.ScalingPolicy;
+import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.StreamConfiguration;
-import io.pravega.client.stream.Transaction;
-import io.pravega.client.stream.TxnFailedException;
-import io.pravega.client.stream.impl.JavaSerializer;
-import io.pravega.common.Exceptions;
+import io.pravega.client.stream.StreamCut;
 import io.pravega.common.concurrent.ExecutorServiceHelpers;
+import io.pravega.common.concurrent.Futures;
+import io.pravega.common.hash.RandomFactory;
 import io.pravega.segmentstore.contracts.StreamSegmentStore;
 import io.pravega.segmentstore.server.host.handler.PravegaConnectionListener;
 import io.pravega.segmentstore.server.store.ServiceBuilder;
@@ -29,7 +31,6 @@ import io.pravega.segmentstore.server.store.ServiceBuilderConfig;
 import io.pravega.shared.metrics.MetricRegistryUtils;
 import io.pravega.shared.metrics.MetricsConfig;
 import io.pravega.shared.metrics.MetricsProvider;
-import io.pravega.shared.metrics.StatsProvider;
 import io.pravega.test.common.TestUtils;
 import io.pravega.test.common.TestingServerStarter;
 import io.pravega.test.integration.demo.ControllerWrapper;
@@ -40,13 +41,25 @@ import lombok.Cleanup;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.curator.test.TestingServer;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
-import static io.pravega.shared.MetricsNames.ABORT_TRANSACTION;
-import static io.pravega.shared.MetricsNames.COMMIT_TRANSACTION;
-import static io.pravega.shared.MetricsNames.CREATE_TRANSACTION;
+import static io.pravega.shared.MetricsNames.CREATE_STREAM;
+import static io.pravega.shared.MetricsNames.CREATE_STREAM_LATENCY;
+import static io.pravega.shared.MetricsNames.DELETE_STREAM;
+import static io.pravega.shared.MetricsNames.DELETE_STREAM_LATENCY;
+import static io.pravega.shared.MetricsNames.SEAL_STREAM;
+import static io.pravega.shared.MetricsNames.SEAL_STREAM_LATENCY;
+import static io.pravega.shared.MetricsNames.TRUNCATE_STREAM_LATENCY;
+import static io.pravega.shared.MetricsNames.UPDATE_STREAM;
+import static io.pravega.shared.MetricsNames.UPDATE_STREAM_LATENCY;
+import static io.pravega.shared.MetricsNames.globalMetricName;
+import static io.pravega.shared.MetricsNames.nameFromStream;
+import static io.pravega.test.integration.ReadWriteUtils.readEvents;
+import static io.pravega.test.integration.ReadWriteUtils.writeEvents;
 
 /**
  * Check the end to end correctness of metrics published by the Controller.
@@ -64,21 +77,20 @@ public class ControllerMetricsTest {
     private ControllerWrapper controllerWrapper;
     private ServiceBuilder serviceBuilder;
     private ScheduledExecutorService executor;
-    private StatsProvider statsProvider = null;
+
+    @BeforeClass
+    public static void initialize() {
+        if (MetricRegistryUtils.getCounter(getCounterMetricName(CREATE_STREAM)) == null) {
+            MetricsProvider.initialize(MetricsConfig.builder()
+                                                    .with(MetricsConfig.ENABLE_STATISTICS, true)
+                                                    .with(MetricsConfig.ENABLE_CSV_REPORTER, true)
+                                                    .build());
+            MetricsProvider.getMetricsProvider().start();
+        }
+    }
 
     @Before
     public void setUp() throws Exception {
-        MetricsConfig metricsConfig = MetricsConfig.builder()
-                                                   .with(MetricsConfig.ENABLE_CSV_REPORTER, false)
-                                                   .with(MetricsConfig.ENABLE_STATSD_REPORTER, false)
-                                                   .build();
-        metricsConfig.setDynamicCacheEvictionDurationMs(300000);
-
-        MetricsProvider.initialize(metricsConfig);
-        statsProvider = MetricsProvider.getMetricsProvider();
-        statsProvider.start();
-        log.info("Metrics Stats provider is started");
-
         executor = Executors.newSingleThreadScheduledExecutor();
         zkTestServer = new TestingServerStarter().start();
 
@@ -100,12 +112,6 @@ public class ControllerMetricsTest {
 
     @After
     public void tearDown() throws Exception {
-        if (this.statsProvider != null) {
-            statsProvider.close();
-            statsProvider = null;
-            log.info("Metrics statsProvider is now closed.");
-        }
-
         ExecutorServiceHelpers.shutdown(executor);
         controllerWrapper.close();
         server.close();
@@ -113,82 +119,109 @@ public class ControllerMetricsTest {
         zkTestServer.close();
     }
 
-    /**
-     * Verify that transaction metrics counters are being correctly reported.
-     */
-    @Test(timeout = 20000)
-    public void transactionMetricsTest() throws TxnFailedException {
-        final String scope = "transactionMetricsTestScope";
-        final String streamName = "transactionMetricsTestStream";
-        final int parallelism = 4;
-        int iterations = 6;
+    @AfterClass
+    public static void cleanUp() {
+        MetricsProvider.getMetricsProvider().close();
+    }
 
+    /**
+     * This test verifies that the appropriate metrics for Stream operations are updated correctly (counters, latency
+     * histograms). Note that this test performs "at least" assertions on metrics as in an environment with concurrent
+     * tests running, it might be possible that metrics get updated by other tests.
+     */
+    @Test(timeout = 300000)
+    public void streamMetricsTest() {
+        final String scope = "controllerMetricsTestScope";
+        final String streamName = "controllerMetricsTestStream";
+        final String readerGroupName = "RGControllerMetricsTestStream";
+        final int parallelism = 4;
+        final int eventsWritten = 10;
+        int streamCount = 6;
+        int iterations = 3;
+        Counter createdStreamsCounter = MetricRegistryUtils.getCounter(getCounterMetricName(CREATE_STREAM));
+
+        // At this point, we have at least 6 internal streams.
+        Assert.assertTrue(streamCount <= createdStreamsCounter.getCount());
         StreamConfiguration streamConfiguration = StreamConfiguration.builder()
                                                                      .scalingPolicy(ScalingPolicy.fixed(parallelism))
                                                                      .build();
-        @Cleanup
         StreamManager streamManager = StreamManager.create(controllerURI);
         streamManager.createScope(scope);
-        streamManager.createStream(scope, streamName, streamConfiguration);
         @Cleanup
-        ClientFactory clientFactory = ClientFactory.withScope(scope, ClientConfig.builder()
-                                                                                 .controllerURI(controllerURI)
-                                                                                 .build());
+        EventStreamClientFactory clientFactory = EventStreamClientFactory.withScope(scope, ClientConfig.builder()
+                                                                                                       .controllerURI(controllerURI)
+                                                                                                       .build());
         @Cleanup
-        EventStreamWriter<String> writer = clientFactory.createEventWriter(streamName, new JavaSerializer<>(),
-                EventWriterConfig.builder().build());
+        ReaderGroupManager groupManager = ReaderGroupManager.withScope(scope, controllerURI);
+        streamCount++;
 
         for (int i = 0; i < iterations; i++) {
-            Transaction<String> transaction = writer.beginTxn();
+            final String iterationStreamName = streamName + i;
+            final String iterationReaderGroupName = readerGroupName + RandomFactory.getSeed();
 
-            // Get the createTransactions metric.
-            Counter createTransactions = getCounter(getCounterMetricName(CREATE_TRANSACTION + "." + scope + "." + streamName));
-            Assert.assertNotNull(createTransactions);
-            Assert.assertEquals(i + 1, createTransactions.getCount());
+            // Check that the number of streams in metrics has been incremented.
+            streamManager.createStream(scope, iterationStreamName, streamConfiguration);
+            Assert.assertTrue(streamCount + i <= createdStreamsCounter.getCount());
+            groupManager.createReaderGroup(iterationReaderGroupName, ReaderGroupConfig.builder().disableAutomaticCheckpoints()
+                                                                                                .stream(scope + "/" + iterationStreamName)
+                                                                                                .build());
+            // Account for the Reader Group stream created.
+            streamCount++;
 
-            // Write some data in the transaction.
-            for (int j = 0; j < 100; j++) {
-                transaction.writeEvent(String.valueOf(j));
+            for (long j = 1; j < iterations + 1; j++) {
+                @Cleanup
+                ReaderGroup readerGroup = groupManager.getReaderGroup(iterationReaderGroupName);
+                // Update the Stream and check that the number of updated streams and per-stream updates is incremented.
+                streamManager.updateStream(scope, iterationStreamName, streamConfiguration);
+                Counter updatedStreamsCounter = MetricRegistryUtils.getCounter(getCounterMetricName(globalMetricName(UPDATE_STREAM)));
+                Counter streamUpdatesCounter = MetricRegistryUtils.getCounter(
+                        getCounterMetricName(nameFromStream(UPDATE_STREAM, scope, iterationStreamName)));
+                Assert.assertTrue(iterations * i + j <= updatedStreamsCounter.getCount());
+                Assert.assertTrue(j <= streamUpdatesCounter.getCount());
+
+                // Read and write some events.
+                writeEvents(clientFactory, iterationStreamName, eventsWritten);
+                Futures.allOf(readEvents(clientFactory, iterationReaderGroupName, parallelism));
+
+                // Get a StreamCut for truncating the Stream.
+                StreamCut streamCut = readerGroup.generateStreamCuts(executor).join().get(Stream.of(scope, iterationStreamName));
+
+                // Truncate the Stream and check that the number of truncated Streams and per-Stream truncations is incremented.
+                streamManager.truncateStream(scope, iterationStreamName, streamCut);
+                Counter streamTruncationCounter = MetricRegistryUtils.getCounter(getCounterMetricName(globalMetricName(UPDATE_STREAM)));
+                Counter perStreamTruncationCounter = MetricRegistryUtils.getCounter(
+                        getCounterMetricName(nameFromStream(UPDATE_STREAM, scope, iterationStreamName)));
+                Assert.assertTrue(iterations * i + j <= streamTruncationCounter.getCount());
+                Assert.assertTrue(j <= perStreamTruncationCounter.getCount());
             }
 
-            // Test counters for aborted and committed transactions.
-            if (i % 2 == 0) {
-                transaction.commit();
-                checkCommitOrAbortMetric(getCounter(getCounterMetricName(COMMIT_TRANSACTION + "." + scope + "." + streamName)), i / 2 + 1);
-            } else {
-                transaction.abort();
-                checkCommitOrAbortMetric(getCounter(getCounterMetricName(ABORT_TRANSACTION + "." + scope + "." + streamName)), i / 2 + 1);
-            }
+            // Check metrics accounting for sealed and deleted streams.
+            streamManager.sealStream(scope, iterationStreamName);
+            Counter streamSealCounter = MetricRegistryUtils.getCounter(getCounterMetricName(SEAL_STREAM));
+            Assert.assertTrue(i + 1 <= streamSealCounter.getCount());
+            streamManager.deleteStream(scope, iterationStreamName);
+            Counter streamDeleteCounter = MetricRegistryUtils.getCounter(getCounterMetricName(DELETE_STREAM));
+            Assert.assertTrue(i + 1 <= streamDeleteCounter.getCount());
         }
+
+        checkStatsRegisteredValues(12, CREATE_STREAM_LATENCY);
+        checkStatsRegisteredValues(iterations * iterations, UPDATE_STREAM_LATENCY, TRUNCATE_STREAM_LATENCY);
+        checkStatsRegisteredValues(iterations, SEAL_STREAM_LATENCY, DELETE_STREAM_LATENCY);
     }
 
-    private Counter getCounter(String counterName) {
-        Counter counter = null;
-        // Access the cache until the metric is available.
-        while (counter == null) {
-            counter = MetricRegistryUtils.getCounter(counterName);
-            Exceptions.handleInterrupted(() -> Thread.sleep(100));
+    private void checkStatsRegisteredValues(int minExpectedValues, String...metricNames) {
+        for (String metricName: metricNames) {
+            Timer latencyValues = MetricRegistryUtils.getTimer(getTimerMetricName(metricName));
+            Assert.assertNotNull(latencyValues);
+            Assert.assertTrue(minExpectedValues <= latencyValues.getSnapshot().size());
         }
-
-        return counter;
-    }
-
-    private void checkCommitOrAbortMetric(Counter metric, int expectedValue) {
-        // Check that the metric is being correctly reported.
-        boolean updatedCounter = false;
-        do {
-            try {
-                Assert.assertNotNull(metric);
-                Assert.assertEquals(expectedValue, metric.getCount());
-                updatedCounter = true;
-            } catch (AssertionError e) {
-                log.info("Metric not updated in the cache. Retrying.", e);
-                Exceptions.handleInterrupted(() -> Thread.sleep(100));
-            }
-        } while (!updatedCounter);
     }
 
     private static String getCounterMetricName(String metricName) {
         return "pravega." + metricName + ".Counter";
+    }
+
+    private static String getTimerMetricName(String metricName) {
+        return "pravega.controller." + metricName;
     }
 }
