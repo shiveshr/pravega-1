@@ -10,6 +10,7 @@
 package io.pravega.client.stream.impl;
 
 import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.AtomicDouble;
 import io.pravega.client.segment.impl.Segment;
 import io.pravega.common.hash.HashHelper;
 import java.util.Collection;
@@ -20,9 +21,14 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
+
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 
 /**
  * The segments that within a stream at a particular point in time.
@@ -30,6 +36,8 @@ import lombok.extern.slf4j.Slf4j;
 @EqualsAndHashCode
 @Slf4j
 public class StreamSegments {
+    private static final ConcurrentHashMap<Segment, Pair<Double, Double>> SEGMENTS = new ConcurrentHashMap<>();
+
     private static final HashHelper HASHER = HashHelper.seededWith("EventRouter");
     private final NavigableMap<Double, Segment> segments;
     @Getter
@@ -46,6 +54,12 @@ public class StreamSegments {
         this.segments = Collections.unmodifiableNavigableMap(segments);
         this.delegationToken = delegationToken;
         verifySegments();
+        AtomicDouble start = new AtomicDouble(0.0);
+        segments.entrySet().stream().sorted(Comparator.comparingDouble(Entry::getKey))
+                .forEach(x -> {
+                    SEGMENTS.put(x.getValue(), new ImmutablePair<>(start.get(), x.getKey()));
+                    start.set(x.getKey());
+                });
     }
 
     private void verifySegments() {
@@ -63,7 +77,14 @@ public class StreamSegments {
     public Segment getSegmentForKey(double key) {
         Preconditions.checkArgument(key >= 0.0);
         Preconditions.checkArgument(key <= 1.0);
-        return segments.ceilingEntry(key).getValue();
+        Segment value = segments.ceilingEntry(key).getValue();
+        Pair<Double, Double> range = SEGMENTS.get(value);
+        if (range.getKey() > key || 
+            range.getValue() < key) {
+            log.error("Misrouting for key {} into segment {} range {}", key, value, range);
+            throw new IllegalStateException("Misrouting for key " + key + " into segment " + value.getSegmentId() + " range [" + range.getKey() + "," + range.getValue() + ")");
+        }
+        return value;
     }
 
     public Collection<Segment> getSegments() {
@@ -76,6 +97,11 @@ public class StreamSegments {
         NavigableMap<Double, Segment> result = new TreeMap<>();
         Map<Long, List<SegmentWithRange>> replacedRanges = replacementRanges.getReplacementRanges();
         List<SegmentWithRange> replacements = replacedRanges.get(replacedSegment.getSegmentId());
+
+        replacements.forEach(segmentWithRange -> SEGMENTS.put(segmentWithRange.getSegment(), new ImmutablePair<>(segmentWithRange.getLow(), segmentWithRange.getHigh())));
+        
+        verifyReplacementSegments(replacedSegment.getSegmentId(), SEGMENTS.get(replacedSegment), replacements);
+
         Preconditions.checkNotNull(replacements, "Empty set of replacements for: {}", replacedSegment.getSegmentId());
         replacements.sort(Comparator.comparingDouble(SegmentWithRange::getHigh).reversed());
         Segment lastSegmentValue = null;
@@ -99,7 +125,40 @@ public class StreamSegments {
         }
         return new StreamSegments(result, delegationToken);
     }
-    
+
+    private void verifyReplacementSegments(long replacedId, Pair<Double, Double> replaced, List<SegmentWithRange> replacements) {
+        List<SegmentWithRange> replacementSegments = replacements.stream()
+                                                                 .sorted(Comparator.comparingDouble(SegmentWithRange::getLow))
+                                                                 .collect(Collectors.toList());
+
+        SegmentWithRange previous = null;
+        double lowest = 0.0;
+        double highest = 0.0;
+        for(SegmentWithRange segment: replacementSegments) {
+           if (previous == null) {
+               previous = segment;
+               lowest = segment.getLow();
+               highest = segment.getHigh();
+               continue;
+           }
+           if (segment.getLow() != previous.getHigh()) {
+               log.error("Invalid successor response from controller. Either disjoint or overlapping. replaced = {}, replacements = {}", 
+                       replaced, replacements);
+
+               throw new RuntimeException("Invalid successor response from controller. Either disjoint or overlapping." +
+                       " previous high =" + previous.getHigh() + "next low = " + segment.getLow());
+           }
+           highest = segment.getHigh();
+        }
+        
+        if (replaced.getKey() < lowest || replaced.getValue() > highest) {
+            log.error("Invalid successor response from controller. Full range not replaced. replaced = {}, replacements = {}",
+                    replaced, replacements);
+
+            throw new RuntimeException("invalid successor response. Full range of replaced segment " + replacedId + " is not covered");
+        }
+    }
+
     /**
      * Checks that replacementSegments provided are consistent with the segments that currently being used.
      * @param replacementSegments The StreamSegmentsWithPredecessors to verify
