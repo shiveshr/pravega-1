@@ -25,12 +25,13 @@ import io.pravega.controller.fault.ControllerClusterListener;
 import io.pravega.controller.fault.FailoverSweeper;
 import io.pravega.controller.fault.SegmentContainerMonitor;
 import io.pravega.controller.fault.UniformContainerBalancer;
+import io.pravega.controller.server.bucket.BucketManager;
+import io.pravega.controller.server.bucket.BucketServiceFactory;
 import io.pravega.controller.metrics.StreamMetrics;
 import io.pravega.controller.metrics.TransactionMetrics;
 import io.pravega.controller.server.eventProcessor.ControllerEventProcessors;
 import io.pravega.controller.server.eventProcessor.LocalController;
 import io.pravega.controller.server.rest.RESTServer;
-import io.pravega.controller.server.retention.StreamCutService;
 import io.pravega.controller.server.rpc.auth.AuthHelper;
 import io.pravega.controller.server.rpc.grpc.GRPCServer;
 import io.pravega.controller.store.checkpoint.CheckpointStore;
@@ -38,6 +39,7 @@ import io.pravega.controller.store.checkpoint.CheckpointStoreFactory;
 import io.pravega.controller.store.client.StoreClient;
 import io.pravega.controller.store.host.HostControllerStore;
 import io.pravega.controller.store.host.HostStoreFactory;
+import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.task.TaskMetadataStore;
@@ -76,7 +78,7 @@ public class ControllerServiceStarter extends AbstractIdleService {
     private ConnectionFactory connectionFactory;
     private StreamMetadataTasks streamMetadataTasks;
     private StreamTransactionMetadataTasks streamTransactionMetadataTasks;
-    private StreamCutService streamCutService;
+    private BucketManager retentionService;
     private SegmentContainerMonitor monitor;
     private ControllerClusterListener controllerClusterListener;
 
@@ -116,6 +118,7 @@ public class ControllerServiceStarter extends AbstractIdleService {
         log.info("     REST server enabled = {}", serviceConfig.getRestServerConfig().isPresent());
 
         final StreamMetadataStore streamStore;
+        final BucketStore bucketStore;
         final TaskMetadataStore taskMetadataStore;
         final HostControllerStore hostStore;
         final CheckpointStore checkpointStore;
@@ -130,6 +133,9 @@ public class ControllerServiceStarter extends AbstractIdleService {
 
             log.info("Creating the stream store");
             streamStore = StreamStoreFactory.createStore(storeClient, controllerExecutor);
+
+            log.info("Creating the bucket store");
+            bucketStore = StreamStoreFactory.createBucketStore(storeClient, controllerExecutor);
 
             log.info("Creating the task store");
             taskMetadataStore = TaskStoreFactory.createStore(storeClient, controllerExecutor);
@@ -169,17 +175,19 @@ public class ControllerServiceStarter extends AbstractIdleService {
 
             AuthHelper authHelper = new AuthHelper(serviceConfig.getGRPCServerConfig().get().isAuthorizationEnabled(),
                     serviceConfig.getGRPCServerConfig().get().getTokenSigningKey());
-            streamMetadataTasks = new StreamMetadataTasks(streamStore, hostStore, taskMetadataStore,
+            streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, hostStore, taskMetadataStore,
                     segmentHelper, controllerExecutor, host.getHostId(), connectionFactory, authHelper, requestTracker);
             streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore,
                     hostStore, segmentHelper, controllerExecutor, host.getHostId(), serviceConfig.getTimeoutServiceConfig(),
                     connectionFactory, authHelper);
+            
+            BucketServiceFactory bucketServiceFactory = new BucketServiceFactory(host.getHostId(), bucketStore, streamStore, 
+                    streamMetadataTasks, retentionExecutor, requestTracker);
+            retentionService = bucketServiceFactory.getBucketManagerService(BucketStore.ServiceType.RetentionService);
 
-            streamCutService = new StreamCutService(Config.BUCKET_COUNT, host.getHostId(), streamStore, streamMetadataTasks,
-                    retentionExecutor, requestTracker);
-            log.info("starting auto retention service asynchronously");
-            streamCutService.startAsync();
-            streamCutService.awaitRunning();
+            log.info("starting background periodic service for retention");
+            retentionService.startAsync();
+            retentionService.awaitRunning();
 
             // Controller has a mechanism to track the currently active controller host instances. On detecting a failure of
             // any controller instance, the failure detector stores the failed HostId in a failed hosts directory (FH), and
@@ -210,7 +218,7 @@ public class ControllerServiceStarter extends AbstractIdleService {
                 // Create ControllerEventProcessor object.
                 controllerEventProcessors = new ControllerEventProcessors(host.getHostId(),
                         serviceConfig.getEventProcessorConfig().get(), localController, checkpointStore, streamStore,
-                        connectionFactory, streamMetadataTasks, streamTransactionMetadataTasks,
+                        bucketStore, connectionFactory, streamMetadataTasks, streamTransactionMetadataTasks,
                         controllerExecutor);
 
                 // Bootstrap and start it asynchronously.
@@ -297,9 +305,9 @@ public class ControllerServiceStarter extends AbstractIdleService {
                 log.info("Controller cluster listener shutdown");
             }
 
-            if (streamCutService != null) {
+            if (retentionService != null) {
                 log.info("Stopping auto retention service");
-                streamCutService.stopAsync();
+                retentionService.stopAsync();
             }
 
             log.info("Closing stream metadata tasks");
@@ -334,9 +342,9 @@ public class ControllerServiceStarter extends AbstractIdleService {
                 controllerClusterListener.awaitTerminated();
             }
 
-            if (streamCutService != null) {
+            if (retentionService != null) {
                 log.info("Awaiting termination of auto retention");
-                streamCutService.awaitTerminated();
+                retentionService.awaitTerminated();
             }
         } catch (Exception e) {
             log.error("Controller Service Starter threw exception during shutdown", e);

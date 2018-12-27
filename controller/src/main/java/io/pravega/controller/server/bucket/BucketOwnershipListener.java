@@ -7,7 +7,7 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
-package io.pravega.controller.server.retention;
+package io.pravega.controller.server.bucket;
 
 import lombok.Data;
 
