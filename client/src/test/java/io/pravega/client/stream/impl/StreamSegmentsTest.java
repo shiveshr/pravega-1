@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.TreeMap;
-import java.util.concurrent.ConcurrentHashMap;
 
 import io.pravega.shared.segment.StreamSegmentNameUtils;
 import org.junit.Before;
@@ -36,11 +35,11 @@ public class StreamSegmentsTest {
     
     @Before
     public void setUp() {
-        for(Segment segment : StreamSegments.SEGMENTS.keySet()) {
+        for (Segment segment : StreamSegments.SEGMENTS.keySet()) {
             StreamSegments.SEGMENTS.remove(segment);
         }
-        
-        for(Segment segment : ControllerImpl.SEGMENTS.keySet()) {
+
+        for (Segment segment : ControllerImpl.SEGMENTS.keySet()) {
             ControllerImpl.SEGMENTS.remove(segment);
         }
     }

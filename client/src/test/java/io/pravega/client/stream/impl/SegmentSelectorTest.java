@@ -24,6 +24,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 import io.pravega.shared.segment.StreamSegmentNameUtils;
+import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
@@ -41,6 +42,17 @@ public class SegmentSelectorTest {
     private final String streamName = "streamName";
     private final EventWriterConfig config = EventWriterConfig.builder().build();
     private final Consumer<Segment> segmentSealedCallback = segment -> { };
+
+    @Before
+    public void setUp() {
+        for (Segment segment : StreamSegments.SEGMENTS.keySet()) {
+            StreamSegments.SEGMENTS.remove(segment);
+        }
+
+        for (Segment segment : ControllerImpl.SEGMENTS.keySet()) {
+            ControllerImpl.SEGMENTS.remove(segment);
+        }
+    }
 
     @Test
     public void testUsesAllSegments() {
