@@ -17,8 +17,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 import io.pravega.shared.segment.StreamSegmentNameUtils;
+import org.junit.Before;
 import org.junit.Test;
 
 import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
@@ -31,6 +33,17 @@ public class StreamSegmentsTest {
 
     private final String scope = "scope";
     private final String streamName = "streamName";
+    
+    @Before
+    public void setUp() {
+        for(Segment segment : StreamSegments.SEGMENTS.keySet()) {
+            StreamSegments.SEGMENTS.remove(segment);
+        }
+        
+        for(Segment segment : ControllerImpl.SEGMENTS.keySet()) {
+            ControllerImpl.SEGMENTS.remove(segment);
+        }
+    }
     
     @Test
     public void testUsesAllSegments() {

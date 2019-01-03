@@ -36,7 +36,7 @@ import org.apache.commons.lang3.tuple.Pair;
 @EqualsAndHashCode
 @Slf4j
 public class StreamSegments {
-    private static final ConcurrentHashMap<Segment, Pair<Double, Double>> SEGMENTS = new ConcurrentHashMap<>();
+    static final ConcurrentHashMap<Segment, Pair<Double, Double>> SEGMENTS = new ConcurrentHashMap<>();
 
     private static final HashHelper HASHER = HashHelper.seededWith("EventRouter");
     private final NavigableMap<Double, Segment> segments;
@@ -57,7 +57,7 @@ public class StreamSegments {
         AtomicDouble start = new AtomicDouble(0.0);
         segments.entrySet().stream().sorted(Comparator.comparingDouble(Entry::getKey))
                 .forEach(x -> {
-                    SEGMENTS.put(x.getValue(), new ImmutablePair<>(start.get(), x.getKey()));
+                    SEGMENTS.putIfAbsent(x.getValue(), new ImmutablePair<>(start.get(), x.getKey()));
                     start.set(x.getKey());
                 });
     }
@@ -77,14 +77,13 @@ public class StreamSegments {
     public Segment getSegmentForKey(double key) {
         Preconditions.checkArgument(key >= 0.0);
         Preconditions.checkArgument(key <= 1.0);
-        Segment value = segments.ceilingEntry(key).getValue();
-        Pair<Double, Double> range = SEGMENTS.get(value);
-        if (range.getKey() > key || 
-            range.getValue() < key) {
-            log.error("Misrouting for key {} into segment {} range {}", key, value, range);
-            throw new IllegalStateException("Misrouting for key " + key + " into segment " + value.getSegmentId() + " range [" + range.getKey() + "," + range.getValue() + ")");
+        Segment segment = segments.ceilingEntry(key).getValue();
+        Pair<Double, Double> range = SEGMENTS.get(segment);
+        if (range.getKey() > key || range.getValue() < key) {
+            log.error("ClientExpt:: Misrouting for key {} into segment {} range {}", key, segment, range);
+            throw new IllegalStateException("Misrouting for key " + key + " into segment " + segment.getSegmentId() + " range [" + range.getKey() + "," + range.getValue() + ")");
         }
-        return value;
+        return segment;
     }
 
     public Collection<Segment> getSegments() {
@@ -92,13 +91,29 @@ public class StreamSegments {
     }
     
     public StreamSegments withReplacementRange(Segment replacedSegment, StreamSegmentsWithPredecessors replacementRanges) {
+        log.info("ClientExpt:: replaced segment {} with replacement ranges {}", replacedSegment, replacementRanges);
         Preconditions.checkState(segments.containsValue(replacedSegment), "Segment to be replaced should be present in the segment list");
         verifyReplacementRange(replacementRanges);
         NavigableMap<Double, Segment> result = new TreeMap<>();
         Map<Long, List<SegmentWithRange>> replacedRanges = replacementRanges.getReplacementRanges();
         List<SegmentWithRange> replacements = replacedRanges.get(replacedSegment.getSegmentId());
 
-        replacements.forEach(segmentWithRange -> SEGMENTS.put(segmentWithRange.getSegment(), new ImmutablePair<>(segmentWithRange.getLow(), segmentWithRange.getHigh())));
+        replacements.forEach(segmentWithRange -> {
+            SEGMENTS.get(segmentWithRange.getSegment());
+            SEGMENTS.compute(segmentWithRange.getSegment(),
+                    (x, y) -> {
+                        if (y != null) {
+                            log.info("ClientExpt:: segment {} exists in the map with range [{}, {})", x, y.getKey(), y.getValue());
+                            if (y.getKey() != segmentWithRange.getLow() || y.getValue() != segmentWithRange.getHigh()) {
+                                log.error("ClientExpt:: New segment range does not match exiting range with client!! {} [{}, {})", y, segmentWithRange.getLow(), segmentWithRange.getHigh());
+                            }
+                        }
+
+                        log.info("ClientExpt:: adding segment {} with range [{}, {})", segmentWithRange.getSegment(), segmentWithRange.getLow(), segmentWithRange.getHigh());
+
+                        return new ImmutablePair<>(segmentWithRange.getLow(), segmentWithRange.getHigh());
+                    });
+        });
         
         verifyReplacementSegments(replacedSegment.getSegmentId(), SEGMENTS.get(replacedSegment), replacements);
 
@@ -134,7 +149,7 @@ public class StreamSegments {
         SegmentWithRange previous = null;
         double lowest = 0.0;
         double highest = 0.0;
-        for(SegmentWithRange segment: replacementSegments) {
+        for (SegmentWithRange segment: replacementSegments) {
            if (previous == null) {
                previous = segment;
                lowest = segment.getLow();
@@ -142,7 +157,7 @@ public class StreamSegments {
                continue;
            }
            if (segment.getLow() != previous.getHigh()) {
-               log.error("Invalid successor response from controller. Either disjoint or overlapping. replaced = {}, replacements = {}", 
+               log.error("ClientExpt:: Invalid successor response from controller. Either disjoint or overlapping. replaced = {}, replacements = {}", 
                        replaced, replacements);
 
                throw new RuntimeException("Invalid successor response from controller. Either disjoint or overlapping." +
@@ -152,7 +167,7 @@ public class StreamSegments {
         }
         
         if (replaced.getKey() < lowest || replaced.getValue() > highest) {
-            log.error("Invalid successor response from controller. Full range not replaced. replaced = {}, replacements = {}",
+            log.error("ClientExpt:: Invalid successor response from controller. Full range not replaced. replaced = {}, replacements = {}",
                     replaced, replacements);
 
             throw new RuntimeException("invalid successor response. Full range of replaced segment " + replacedId + " is not covered");

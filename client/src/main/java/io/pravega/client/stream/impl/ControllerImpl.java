@@ -79,18 +79,24 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import javax.net.ssl.SSLException;
+
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 import org.slf4j.LoggerFactory;
 
 /**
  * RPC based client implementation of Stream Controller V1 API.
  */
 public class ControllerImpl implements Controller {
+
+    public static final ConcurrentHashMap<Segment, Pair<Double, Double>> SEGMENTS = new ConcurrentHashMap<>();
 
     private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(ControllerImpl.class));
 
@@ -624,6 +630,19 @@ public class ControllerImpl implements Controller {
         });
     }
 
+    private void addToSegments(Segment segment, double low, double high) {
+        SEGMENTS.compute(segment,
+                (x, y) -> {
+                    if (y != null) {
+                        log.info("ControllerImpl:: segment {} exists in the map with range [{}, {})", x, y.getKey(), y.getValue());
+                    }
+
+                    log.info("ControllerImpl:: adding segment {} with range [{}, {})", segment, low, high);
+
+                    return new ImmutablePair<>(low, high);
+                });
+    }
+
     @Override
     public CompletableFuture<StreamSegmentsWithPredecessors> getSuccessors(Segment segment) {
         Exceptions.checkNotClosed(closed.get(), this);
@@ -635,12 +654,16 @@ public class ControllerImpl implements Controller {
             return callback.getFuture();
         }, this.executor);
         return resultFuture.thenApply(successors -> {
-            log.debug("Received the following data from the controller {}", successors.getSegmentsList());
+            log.info("Received the following data from the controller {}", successors.getSegmentsList());
             Map<SegmentWithRange, List<Long>> result = new HashMap<>();
             for (SuccessorResponse.SegmentEntry entry : successors.getSegmentsList()) {
-                result.put(ModelHelper.encode(entry.getSegment()), entry.getValueList());
+                SegmentWithRange segmentWithRange = ModelHelper.encode(entry.getSegment());
+                result.put(segmentWithRange, entry.getValueList());
+                addToSegments(segmentWithRange.getSegment(), segmentWithRange.getLow(), segmentWithRange.getHigh());            
             }
-            return new StreamSegmentsWithPredecessors(result, successors.getDelegationToken());
+            StreamSegmentsWithPredecessors streamSegmentsWithPredecessors = new StreamSegmentsWithPredecessors(result, successors.getDelegationToken());
+            log.info("Converted controller response to segmentWithPredecessors object {}", streamSegmentsWithPredecessors);
+            return streamSegmentsWithPredecessors;
         }).whenComplete((x, e) -> {
             if (e != null) {
                 log.warn("getSuccessors failed: ", e);
@@ -648,7 +671,7 @@ public class ControllerImpl implements Controller {
             LoggerHelpers.traceLeave(log, "getSuccessors", traceId);
         });
     }
-
+    
     @Override
     public CompletableFuture<StreamSegmentSuccessors> getSuccessors(final StreamCut from) {
         Exceptions.checkNotClosed(closed.get(), this);
@@ -729,7 +752,9 @@ public class ControllerImpl implements Controller {
                 Preconditions.checkState(r.getMinKey() <= r.getMaxKey(),
                                          "Min keyrange %s was not less than maximum keyRange %s for segment %s",
                                          r.getMinKey(), r.getMaxKey(), r.getSegmentId());
-                rangeMap.put(r.getMaxKey(), ModelHelper.encode(r.getSegmentId()));
+                Segment segment = ModelHelper.encode(r.getSegmentId());
+                addToSegments(segment, r.getMinKey(), r.getMaxKey());
+                rangeMap.put(r.getMaxKey(), segment);
             }
             return new StreamSegments(rangeMap, ranges.getDelegationToken());
         }).whenComplete((x, e) -> {
