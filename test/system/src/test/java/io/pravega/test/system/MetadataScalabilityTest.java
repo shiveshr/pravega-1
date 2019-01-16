@@ -49,7 +49,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 /**
- * This test creates a stream with 50 segments and then rapidly scales it 1010 times.  
+ * This test creates a stream with 10k segments and then rapidly scales it 1010 times.
+ * Then it performs truncation a random number (less than 1010) of times. 
  */
 @Slf4j
 @RunWith(SystemTestRunner.class)
@@ -58,7 +59,7 @@ public class MetadataScalabilityTest extends AbstractScaleTests {
     private static final int NUM_SEGMENTS = 10000;
     private static final StreamConfiguration CONFIG = StreamConfiguration.builder()
                                                       .scalingPolicy(ScalingPolicy.fixed(NUM_SEGMENTS)).build();
-    private static final int SCALES_TO_PERFORM = 10001;
+    private static final int SCALES_TO_PERFORM = 1010;
 
     @Rule
     public Timeout globalTimeout = Timeout.seconds(60 * 60);
