@@ -43,12 +43,9 @@ import io.pravega.controller.store.host.HostStoreFactory;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
 import io.pravega.controller.task.Stream.TxnSweeper;
-import io.pravega.controller.task.TaskSweeper;
 import io.pravega.controller.util.Config;
 import java.net.InetAddress;
 import java.net.URI;
@@ -129,7 +126,6 @@ public class ControllerServiceStarter extends AbstractIdleService {
         log.info("     REST server enabled = {}", serviceConfig.getRestServerConfig().isPresent());
 
         final BucketStore bucketStore;
-        final TaskMetadataStore taskMetadataStore;
         final HostControllerStore hostStore;
         final CheckpointStore checkpointStore;
 
@@ -140,12 +136,9 @@ public class ControllerServiceStarter extends AbstractIdleService {
 
             retentionExecutor = ExecutorServiceHelpers.newScheduledThreadPool(Config.RETENTION_THREAD_POOL_SIZE,
                                                                                "retentionpool");
-            
+
             log.info("Creating the bucket store");
             bucketStore = StreamStoreFactory.createBucketStore(storeClient, controllerExecutor);
-
-            log.info("Creating the task store");
-            taskMetadataStore = TaskStoreFactory.createStore(storeClient, controllerExecutor);
 
             log.info("Creating the host store");
             hostStore = HostStoreFactory.createStore(serviceConfig.getHostMonitorConfig(), storeClient);
@@ -187,7 +180,7 @@ public class ControllerServiceStarter extends AbstractIdleService {
             log.info("Creating the stream store");
             streamStore = StreamStoreFactory.createStore(storeClient, segmentHelper, controllerExecutor);
 
-            streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore,
+            streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, 
                     segmentHelper, controllerExecutor, host.getHostId(), requestTracker);
             streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore,
                     segmentHelper, controllerExecutor, host.getHostId(), serviceConfig.getTimeoutServiceConfig());
@@ -201,15 +194,6 @@ public class ControllerServiceStarter extends AbstractIdleService {
             log.info("starting background periodic service for retention");
             retentionService.startAsync();
             retentionService.awaitRunning();
-
-            // Controller has a mechanism to track the currently active controller host instances. On detecting a failure of
-            // any controller instance, the failure detector stores the failed HostId in a failed hosts directory (FH), and
-            // invokes the taskSweeper.sweepOrphanedTasks for each failed host. When all resources under the failed hostId
-            // are processed and deleted, that failed HostId is removed from FH folder.
-            // Moreover, on controller process startup, it detects any hostIds not in the currently active set of
-            // controllers and starts sweeping tasks orphaned by those hostIds.
-            TaskSweeper taskSweeper = new TaskSweeper(taskMetadataStore, host.getHostId(), controllerExecutor,
-                    streamMetadataTasks);
 
             TxnSweeper txnSweeper = new TxnSweeper(streamStore, streamTransactionMetadataTasks,
                     serviceConfig.getTimeoutServiceConfig().getMaxLeaseValue(), controllerExecutor);
@@ -243,7 +227,6 @@ public class ControllerServiceStarter extends AbstractIdleService {
             // Setup and start controller cluster listener after all sweepers have been initialized.
             if (serviceConfig.isControllerClusterListenerEnabled()) {
                 List<FailoverSweeper> failoverSweepers = new ArrayList<>();
-                failoverSweepers.add(taskSweeper);
                 failoverSweepers.add(txnSweeper);
                 if (serviceConfig.getEventProcessorConfig().isPresent()) {
                     assert controllerEventProcessors != null;

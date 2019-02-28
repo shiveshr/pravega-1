@@ -34,8 +34,6 @@ import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.Segment;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.stream.api.grpc.v1.Controller;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
@@ -101,7 +99,6 @@ public abstract class ControllerServiceWithStreamTest {
 
         streamStore = getStore();
         BucketStore bucketStore = StreamStoreFactory.createZKBucketStore(zkClient, executor);
-        TaskMetadataStore taskMetadataStore = TaskStoreFactory.createZKStore(zkClient, executor);
         HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
 
         connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
@@ -109,7 +106,7 @@ public abstract class ControllerServiceWithStreamTest {
                                                                   .build());
         AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
         SegmentHelper segmentHelperMock = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, disabledAuthHelper);
-        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelperMock,
+        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, segmentHelperMock,
                 executor, "host", requestTracker);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelperMock, executor, "host");
         StreamRequestHandler streamRequestHandler = new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamStore, executor),

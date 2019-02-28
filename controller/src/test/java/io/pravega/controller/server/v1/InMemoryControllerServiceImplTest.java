@@ -35,8 +35,6 @@ import io.pravega.controller.store.host.impl.HostMonitorConfigImpl;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
 import java.net.URI;
@@ -51,7 +49,6 @@ import static org.mockito.Mockito.when;
  */
 public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest {
 
-    private TaskMetadataStore taskMetadataStore;
     private HostControllerStore hostStore;
     private StreamMetadataTasks streamMetadataTasks;
     private StreamRequestHandler streamRequestHandler;
@@ -65,7 +62,6 @@ public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest
     @Override
     public void setup() throws Exception {
         executorService = ExecutorServiceHelpers.newScheduledThreadPool(20, "testpool");
-        taskMetadataStore = TaskStoreFactory.createInMemoryStore(executorService);
         hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
         streamStore = StreamStoreFactory.createInMemoryStore(executorService);
         BucketStore bucketStore = StreamStoreFactory.createInMemoryBucketStore();
@@ -76,7 +72,7 @@ public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest
                                                                                         .build());
         AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
         segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, disabledAuthHelper);
-        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelper,
+        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, segmentHelper,
                 executorService, "host", requestTracker);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper,
                 executorService, "host");

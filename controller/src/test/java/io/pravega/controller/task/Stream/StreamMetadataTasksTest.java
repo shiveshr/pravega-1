@@ -54,8 +54,6 @@ import io.pravega.controller.store.stream.records.EpochTransitionRecord;
 import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.records.StreamCutRecord;
 import io.pravega.controller.store.stream.records.StreamTruncationRecord;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.stream.api.grpc.v1.Controller;
 import io.pravega.controller.stream.api.grpc.v1.Controller.ScaleResponse;
 import io.pravega.controller.stream.api.grpc.v1.Controller.ScaleResponse.ScaleStreamStatus;
@@ -143,13 +141,12 @@ public class StreamMetadataTasksTest {
         streamStorePartialMock = spy(streamStore); //create a partial mock.
         bucketStore = StreamStoreFactory.createInMemoryBucketStore(1);
         
-        TaskMetadataStore taskMetadataStore = TaskStoreFactory.createZKStore(zkClient, executor);
         HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
 
         AuthHelper authHelper = new AuthHelper(authEnabled, "key");
         SegmentHelper segmentHelperMock = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, authHelper);
         connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
-        streamMetadataTasks = spy(new StreamMetadataTasks(streamStorePartialMock, bucketStore, taskMetadataStore, segmentHelperMock,
+        streamMetadataTasks = spy(new StreamMetadataTasks(streamStorePartialMock, bucketStore, segmentHelperMock,
                 executor, "host", requestTracker));
 
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(
@@ -867,7 +864,7 @@ public class StreamMetadataTasksTest {
         final StreamConfiguration noRetentionConfig = StreamConfiguration.builder().scalingPolicy(policy).build();
 
         // add stream without retention policy
-        streamMetadataTasks.createStreamBody(SCOPE, stream, noRetentionConfig, System.currentTimeMillis()).join();
+        streamMetadataTasks.createStream(SCOPE, stream, noRetentionConfig, System.currentTimeMillis()).join();
         String scopedStreamName = String.format("%s/%s", SCOPE, stream);
 
         // verify that stream is not added to bucket

@@ -30,8 +30,6 @@ import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.VersionedMetadata;
 import io.pravega.controller.store.stream.State;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.stream.api.grpc.v1.Controller.SegmentId;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
@@ -87,13 +85,12 @@ public class ControllerServiceTest {
                 new ExponentialBackoffRetry(200, 10, 5000));
         zkClient.start();
 
-        final TaskMetadataStore taskMetadataStore = TaskStoreFactory.createZKStore(zkClient, executor);
         final HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
         BucketStore bucketStore = StreamStoreFactory.createInMemoryBucketStore();
         connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
         AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
         SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, disabledAuthHelper);
-        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore,
+        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, 
                 segmentHelper, executor, "host", requestTracker);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper, executor, "host");
 
@@ -162,7 +159,6 @@ public class ControllerServiceTest {
     @After
     public void tearDown() throws Exception {
         streamTransactionMetadataTasks.close();
-        streamMetadataTasks.close();
         connectionFactory.close();
         streamStore.close();
         zkClient.close();

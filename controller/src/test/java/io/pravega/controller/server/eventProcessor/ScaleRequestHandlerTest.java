@@ -46,8 +46,6 @@ import io.pravega.controller.store.stream.VersionedMetadata;
 import io.pravega.controller.store.stream.VersionedTransactionData;
 import io.pravega.controller.store.stream.records.EpochRecord;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
 import io.pravega.controller.util.Config;
@@ -110,7 +108,6 @@ public abstract class ScaleRequestHandlerTest {
     private final String stream = "stream";
     private StreamMetadataStore streamStore;
     private BucketStore bucketStore;
-    private TaskMetadataStore taskMetadataStore;
     private HostControllerStore hostStore;
     private StreamMetadataTasks streamMetadataTasks;
     private StreamTransactionMetadataTasks streamTransactionMetadataTasks;
@@ -143,15 +140,13 @@ public abstract class ScaleRequestHandlerTest {
         streamStore = spy(getStore());
         bucketStore = StreamStoreFactory.createZKBucketStore(zkClient, executor);
 
-        taskMetadataStore = TaskStoreFactory.createZKStore(zkClient, executor);
-
         hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
 
         connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
         clientFactory = mock(EventStreamClientFactory.class);
         AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
         SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, disabledAuthHelper);
-        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelper,
+        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, segmentHelper,
                 executor, hostId, requestTracker);
         streamMetadataTasks.initializeStreamWriters(clientFactory, Config.SCALE_STREAM_NAME);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper, executor, hostId);
@@ -172,7 +167,6 @@ public abstract class ScaleRequestHandlerTest {
     public void tearDown() throws Exception {
         clientFactory.close();
         connectionFactory.close();
-        streamMetadataTasks.close();
         streamTransactionMetadataTasks.close();
         streamStore.close();
         zkClient.close();

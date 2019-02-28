@@ -38,8 +38,6 @@ import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.records.RetentionSet;
 import io.pravega.controller.store.stream.records.StreamCutRecord;
 import io.pravega.controller.store.stream.records.StreamCutReferenceRecord;
-import io.pravega.controller.store.task.Resource;
-import io.pravega.controller.store.task.TaskMetadataStore;
 import io.pravega.controller.stream.api.grpc.v1.Controller;
 import io.pravega.controller.stream.api.grpc.v1.Controller.CreateStreamStatus;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteStreamStatus;
@@ -47,8 +45,6 @@ import io.pravega.controller.stream.api.grpc.v1.Controller.ScaleResponse;
 import io.pravega.controller.stream.api.grpc.v1.Controller.ScaleStatusResponse;
 import io.pravega.controller.stream.api.grpc.v1.Controller.SegmentRange;
 import io.pravega.controller.stream.api.grpc.v1.Controller.UpdateStreamStatus;
-import io.pravega.controller.task.Task;
-import io.pravega.controller.task.TaskBase;
 import io.pravega.controller.util.Config;
 import io.pravega.shared.controller.event.ControllerEvent;
 import io.pravega.shared.controller.event.DeleteStreamEvent;
@@ -58,7 +54,8 @@ import io.pravega.shared.controller.event.TruncateStreamEvent;
 import io.pravega.shared.controller.event.UpdateStreamEvent;
 import io.pravega.shared.protocol.netty.WireCommands;
 import io.pravega.shared.segment.StreamSegmentNameUtils;
-import java.io.Serializable;
+
+import java.io.Closeable;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -88,7 +85,7 @@ import static io.pravega.controller.task.Stream.TaskStepsRetryHelper.withRetries
  * Any update to the task method signature should be avoided, since it can cause problems during upgrade.
  * Instead, a new overloaded method may be created with the same task annotation name but a new version.
  */
-public class StreamMetadataTasks extends TaskBase {
+public class StreamMetadataTasks implements Closeable {
 
     private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(StreamMetadataTasks.class));
     private static final long RETENTION_FREQUENCY_IN_MINUTES = Duration.ofMinutes(Config.MINIMUM_RETENTION_FREQUENCY_IN_MINUTES).toMillis();
@@ -101,25 +98,19 @@ public class StreamMetadataTasks extends TaskBase {
 
     private final AtomicReference<EventStreamWriter<ControllerEvent>> requestEventWriterRef = new AtomicReference<>();
     private final RequestTracker requestTracker;
-
+    private final String hostId;
+    private final ScheduledExecutorService executor;
+    
     public StreamMetadataTasks(final StreamMetadataStore streamMetadataStore,
-                               BucketStore bucketStore, final TaskMetadataStore taskMetadataStore,
+                               BucketStore bucketStore, 
                                final SegmentHelper segmentHelper, final ScheduledExecutorService executor, final String hostId,
                                RequestTracker requestTracker) {
-        this(streamMetadataStore, bucketStore, taskMetadataStore, segmentHelper, executor, new Context(hostId),
-                requestTracker);
-    }
-
-    private StreamMetadataTasks(final StreamMetadataStore streamMetadataStore,
-                                BucketStore bucketStore, final TaskMetadataStore taskMetadataStore,
-                                final SegmentHelper segmentHelper, final ScheduledExecutorService executor, final Context context,
-                                RequestTracker requestTracker) {
-        super(taskMetadataStore, executor, context);
         this.streamMetadataStore = streamMetadataStore;
         this.bucketStore = bucketStore;
         this.segmentHelper = segmentHelper;
         this.requestTracker = requestTracker;
-        this.setReady();
+        this.hostId = hostId;
+        this.executor = executor;
     }
 
     public void initializeStreamWriters(final EventStreamClientFactory clientFactory,
@@ -127,24 +118,7 @@ public class StreamMetadataTasks extends TaskBase {
         this.requestStreamName = streamName;
         this.clientFactory = clientFactory;
     }
-
-    /**
-     * Create stream.
-     *
-     * @param scope           scope.
-     * @param stream          stream name.
-     * @param config          stream configuration.
-     * @param createTimestamp creation timestamp.
-     * @return creation status.
-     */
-    @Task(name = "createStream", version = "1.0", resource = "{scope}/{stream}")
-    public CompletableFuture<CreateStreamStatus.Status> createStream(String scope, String stream, StreamConfiguration config, long createTimestamp) {
-        return execute(
-                new Resource(scope, stream),
-                new Serializable[]{scope, stream, config, createTimestamp},
-                () -> createStreamBody(scope, stream, config, createTimestamp));
-    }
-
+    
     /**
      * Update stream's configuration.
      *
@@ -589,7 +563,7 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     @VisibleForTesting
-    CompletableFuture<CreateStreamStatus.Status> createStreamBody(String scope, String stream, StreamConfiguration config, long timestamp) {
+    public CompletableFuture<CreateStreamStatus.Status> createStream(String scope, String stream, StreamConfiguration config, long timestamp) {
         final long requestId = requestTracker.getRequestIdFor("createStream", scope, stream);
         return this.streamMetadataStore.createStream(scope, stream, config, timestamp, null, executor)
                 .thenComposeAsync(response -> {
@@ -834,17 +808,9 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     @Override
-    public TaskBase copyWithContext(Context context) {
-        return new StreamMetadataTasks(streamMetadataStore,
-                bucketStore, 
-                taskMetadataStore,
-                segmentHelper,
-                executor,
-                context,
-                requestTracker);
-    }
-
-    @Override
-    public void close() throws Exception {
+    public void close()  {
+        if (requestEventWriterRef.get() != null) {
+            requestEventWriterRef.get().close();
+        }
     }
 }

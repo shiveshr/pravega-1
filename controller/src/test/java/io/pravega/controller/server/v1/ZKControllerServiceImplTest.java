@@ -41,8 +41,6 @@ import io.pravega.controller.store.host.impl.HostMonitorConfigImpl;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.stream.api.grpc.v1.Controller;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
@@ -77,7 +75,6 @@ public class ZKControllerServiceImplTest extends ControllerServiceImplTest {
     @Override
     public void setup() throws Exception {
         final HostControllerStore hostStore;
-        final TaskMetadataStore taskMetadataStore;
         final SegmentHelper segmentHelper;
         final RequestTracker requestTracker = new RequestTracker(true);
 
@@ -89,7 +86,6 @@ public class ZKControllerServiceImplTest extends ControllerServiceImplTest {
 
         storeClient = StoreClientFactory.createZKStoreClient(zkClient);
         executorService = ExecutorServiceHelpers.newScheduledThreadPool(20, "testpool");
-        taskMetadataStore = TaskStoreFactory.createStore(storeClient, executorService);
         hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
         streamStore = StreamStoreFactory.createZKStore(zkClient, executorService);
         BucketStore bucketStore = StreamStoreFactory.createZKBucketStore(zkClient, executorService);
@@ -97,7 +93,7 @@ public class ZKControllerServiceImplTest extends ControllerServiceImplTest {
         ConnectionFactoryImpl connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
         AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
         segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, disabledAuthHelper);
-        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelper,
+        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, segmentHelper,
                 executorService, "host", requestTracker);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper,
                 executorService, "host");

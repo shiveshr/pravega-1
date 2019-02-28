@@ -23,8 +23,6 @@ import io.pravega.controller.store.host.HostStoreFactory;
 import io.pravega.controller.store.host.impl.HostMonitorConfigImpl;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.StreamMetadataStore;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.util.RetryHelper;
 import io.pravega.test.common.AssertExtensions;
@@ -63,13 +61,12 @@ public abstract class BucketServiceTest {
         streamMetadataStore = createStreamStore(executor);
         bucketStore = createBucketStore(3);
         
-        TaskMetadataStore taskMetadataStore = TaskStoreFactory.createInMemoryStore(executor);
         HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
 
         connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
         SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, AuthHelper.getDisabledAuthHelper());
 
-        streamMetadataTasks = new StreamMetadataTasks(streamMetadataStore, bucketStore, taskMetadataStore, 
+        streamMetadataTasks = new StreamMetadataTasks(streamMetadataStore, bucketStore, 
                 segmentHelper, executor, hostId, requestTracker);
         BucketServiceFactory bucketStoreFactory = new BucketServiceFactory(hostId, bucketStore, 2, executor);
         PeriodicRetention periodicRetention = new PeriodicRetention(streamMetadataStore, streamMetadataTasks, executor, requestTracker);
