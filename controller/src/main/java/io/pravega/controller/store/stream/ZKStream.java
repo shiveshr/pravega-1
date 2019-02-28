@@ -687,7 +687,7 @@ class ZKStream extends PersistentStreamBase {
                     .thenApply(pos -> {
                         idRef.compareAndSet(null, pos);
                         return pos;
-                    }), e -> Exceptions.unwrap(e) instanceof StoreException.DataNotEmptyException, null);
+                    }), e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, null);
         }
     }
 }
