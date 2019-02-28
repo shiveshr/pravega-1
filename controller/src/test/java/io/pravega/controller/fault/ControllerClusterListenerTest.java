@@ -157,10 +157,6 @@ public class ControllerClusterListenerTest {
         Host host = new Host(hostName, 10, "originalhost");
         // Following futures are used as latches. When awaitRunning a sweeper, we wait on a latch by calling
         // Futures.await across the test case.
-        // Future for when taskSweeper.failedHost is called once
-        CompletableFuture<Void> taskHostSweep1 = new CompletableFuture<>();
-        // Future for when taskSweeper.failedHost is called second time
-        CompletableFuture<Void> taskHostSweep2 = new CompletableFuture<>();
         // Future for txn sweeper to get ready.
         CompletableFuture<Void> txnSweep = new CompletableFuture<>();
         // Future for txnsweeper.failedProcess to be called the first time
@@ -217,7 +213,6 @@ public class ControllerClusterListenerTest {
         validateRemovedNode(newHost.getHostId());
         log.info("deregistering new host");
 
-        assertTrue(Futures.await(taskHostSweep1, 3000));
         assertTrue(Futures.await(txnHostSweepIgnore, 10000));
 
         log.info("task sweep for new host done");
@@ -249,7 +244,6 @@ public class ControllerClusterListenerTest {
         log.info("removing newhost2");
 
         validateRemovedNode(newHost.getHostId());
-        assertTrue(Futures.await(taskHostSweep2, 3000));
         assertTrue(Futures.await(txnHostSweep2, 3000));
 
         verify(txnSweeper, atLeast(1)).handleFailedProcess(anyString());
