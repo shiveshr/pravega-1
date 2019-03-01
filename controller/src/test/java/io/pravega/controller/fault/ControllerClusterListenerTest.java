@@ -115,7 +115,7 @@ public class ControllerClusterListenerTest {
     public void clusterListenerTest() throws Exception {
         String hostName = "localhost";
         Host host = new Host(hostName, 10, "host1");
-        
+
         // Create txn sweeper.
         try (StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore(executor)) {
             HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
@@ -170,8 +170,7 @@ public class ControllerClusterListenerTest {
         SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, AuthHelper.getDisabledAuthHelper());
         // create streamtransactionmetadatatasks but dont initialize it with writers. this will not be
         // ready until writers are supplied.
-        StreamTransactionMetadataTasks txnTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper, executor, 
-                host.getHostId());
+        StreamTransactionMetadataTasks txnTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper, executor, host.getHostId());
 
         TxnSweeper txnSweeper = spy(new TxnSweeper(streamStore, txnTasks, 100, executor));
         // any attempt to sweep txnHost should have been ignored
