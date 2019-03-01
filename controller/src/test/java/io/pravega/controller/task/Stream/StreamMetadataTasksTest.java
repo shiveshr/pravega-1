@@ -198,6 +198,23 @@ public class StreamMetadataTasksTest {
     }
 
     @Test(timeout = 30000)
+    public void testCreateStream() {
+        String stream = "createStream";
+        StreamConfiguration configuration1 = StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(2)).build();
+        streamStorePartialMock.createScope(SCOPE).join();
+
+        Controller.CreateStreamStatus.Status status = streamMetadataTasks.createStream(SCOPE, stream, configuration1, 
+                System.currentTimeMillis()).join();
+        assertEquals(Controller.CreateStreamStatus.Status.SUCCESS, status);
+        status = streamMetadataTasks.createStream(SCOPE, stream, configuration1,
+                System.currentTimeMillis()).join();
+        assertEquals(Controller.CreateStreamStatus.Status.STREAM_EXISTS, status);
+
+        // TODO: test concurrent stream creation
+        
+    }
+    
+    @Test(timeout = 30000)
     public void updateStreamTest() throws Exception {
         assertNotEquals(0, consumer.getCurrentSegments(SCOPE, stream1).get().size());
         WriterMock requestEventWriter = new WriterMock(streamMetadataTasks, executor);

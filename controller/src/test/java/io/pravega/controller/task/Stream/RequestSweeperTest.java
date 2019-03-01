@@ -63,8 +63,6 @@ public abstract class RequestSweeperTest {
     protected CuratorFramework cli;
 
     private final String stream1 = "stream1";
-    private final ScalingPolicy policy1 = ScalingPolicy.fixed(2);
-    private final StreamConfiguration configuration1 = StreamConfiguration.builder().scalingPolicy(policy1).build();
 
     private StreamMetadataStore streamStore;
 
@@ -116,18 +114,6 @@ public abstract class RequestSweeperTest {
         zkServer.stop();
         zkServer.close();
         ExecutorServiceHelpers.shutdown(executor);
-    }
-
-    @Test
-    public void testCreateStream() {
-        CreateStreamStatus.Status status = streamMetadataTasks.createStream(SCOPE, stream1, configuration1, System.currentTimeMillis()).join();
-        assertEquals(CreateStreamStatus.Status.STREAM_EXISTS, status);
-        streamStore.createScope(SCOPE);
-        CreateStreamStatus.Status result = streamMetadataTasks.createStream(SCOPE, "dummy", configuration1,
-                System.currentTimeMillis()).join();
-        assertEquals(result, CreateStreamStatus.Status.SUCCESS);
-        
-        // TODO: test concurrent stream creation
     }
 
     @Test
