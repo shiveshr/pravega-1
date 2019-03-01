@@ -817,8 +817,9 @@ public class StreamMetadataTasks implements Closeable {
 
     @Override
     public void close()  {
-        if (requestEventWriterRef.get() != null) {
-            requestEventWriterRef.get().close();
+        EventStreamWriter<ControllerEvent> writer = requestEventWriterRef.get();
+        if (writer != null) {
+            writer.close();
         }
     }
 }

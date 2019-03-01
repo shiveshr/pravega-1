@@ -43,7 +43,7 @@ public class PravegaTableScope implements Scope {
     private final String scopeName;
     private final PravegaTablesStoreHelper storeHelper;
     private final AtomicReference<UUID> idRef;
-    
+
     PravegaTableScope(final String scopeName, PravegaTablesStoreHelper storeHelper) {
         this.scopeName = scopeName;
         this.storeHelper = storeHelper;
@@ -72,7 +72,7 @@ public class PravegaTableScope implements Scope {
                                  }))
                       .thenCompose(v -> getStreamsInScopeTableName())
                       .thenCompose(tableName -> storeHelper.createTable(scopeName, tableName)
-                      .thenAccept(v -> log.debug("table created {}/{}", scopeName, tableName)));
+                                                           .thenAccept(v -> log.debug("table created {}/{}", scopeName, tableName)));
     }
 
     private byte[] newId() {
@@ -86,7 +86,7 @@ public class PravegaTableScope implements Scope {
             return String.format(STREAMS_IN_SCOPE_TABLE_FORMAT, id.toString());
         });
     }
-    
+
     CompletableFuture<UUID> getId() {
         UUID id = idRef.get();
         if (Objects.isNull(id)) {
@@ -115,25 +115,25 @@ public class PravegaTableScope implements Scope {
         AtomicReference<String> token = new AtomicReference<>(continuationToken);
         AtomicBoolean canContinue = new AtomicBoolean(true);
         return getStreamsInScopeTableName()
-            .thenCompose(entry -> storeHelper.getKeysPaginated(scopeName, entry, 
+                .thenCompose(entry -> storeHelper.getKeysPaginated(scopeName, entry,
                         Unpooled.wrappedBuffer(Base64.getDecoder().decode(token.get())), limit)
-                .thenApply(result -> {
-                    if (result.getValue().isEmpty()) {
-                        canContinue.set(false);
-                    } else {
-                        taken.addAll(result.getValue());
-                    }
-                    token.set(Base64.getEncoder().encodeToString(result.getKey().array()));
-                    return new ImmutablePair<>(taken, token.get());
-                }));
+                                                 .thenApply(result -> {
+                                                     if (result.getValue().isEmpty()) {
+                                                         canContinue.set(false);
+                                                     } else {
+                                                         taken.addAll(result.getValue());
+                                                     }
+                                                     token.set(Base64.getEncoder().encodeToString(result.getKey().array()));
+                                                     return new ImmutablePair<>(taken, token.get());
+                                                 }));
     }
 
     @Override
     public CompletableFuture<List<String>> listStreamsInScope() {
         List<String> result = new ArrayList<>();
         return getStreamsInScopeTableName()
-            .thenCompose(tableName -> storeHelper.getAllKeys(scopeName, tableName).collectRemaining(result::add)
-                .thenApply(v -> result));
+                .thenCompose(tableName -> storeHelper.getAllKeys(scopeName, tableName).collectRemaining(result::add)
+                                                     .thenApply(v -> result));
     }
 
     @Override
@@ -143,9 +143,9 @@ public class PravegaTableScope implements Scope {
 
     CompletableFuture<Void> addStreamToScope(String stream) {
         return getStreamsInScopeTableName()
-            .thenCompose(tableName -> Futures.toVoid(storeHelper.addNewEntryIfAbsent(scopeName, tableName, stream, newId())));
+                .thenCompose(tableName -> Futures.toVoid(storeHelper.addNewEntryIfAbsent(scopeName, tableName, stream, newId())));
     }
-    
+
     CompletableFuture<Void> removeStreamFromScope(String stream) {
         return getStreamsInScopeTableName()
                 .thenCompose(tableName -> Futures.toVoid(storeHelper.removeEntry(scopeName, tableName, stream)));

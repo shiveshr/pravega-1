@@ -105,7 +105,7 @@ class ZKStream extends PersistentStreamBase {
     ZKStream(final String scopeName, final String streamName, ZKStoreHelper storeHelper, Supplier<Integer> currentBatchSupplier) {
         this(scopeName, streamName, storeHelper, currentBatchSupplier, HistoryTimeSeries.HISTORY_CHUNK_SIZE, SealedSegmentsMapShard.SHARD_SIZE);
     }
-
+    
     @VisibleForTesting
     ZKStream(final String scopeName, final String streamName, ZKStoreHelper storeHelper, Supplier<Integer> currentBatchSupplier,
              int chunkSize, int shardSize) {
@@ -203,11 +203,8 @@ class ZKStream extends PersistentStreamBase {
 
     @Override
     public CompletableFuture<Long> getCreationTime() {
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.getCachedData(creationPath, id)
-                                .thenApply(data -> BitConverter.readLong(data.getData(), 0));
-                });
+        return getCachedData(creationPath)
+                    .thenApply(data -> BitConverter.readLong(data.getData(), 0));
     }
 
     @Override
@@ -223,7 +220,7 @@ class ZKStream extends PersistentStreamBase {
     @Override
     CompletableFuture<Version> updateRetentionSetData(Data retention) {
         return store.setData(retentionSetPath, retention)
-                    .thenApply(Version.IntVersion::new);
+                .thenApply(Version.IntVersion::new);
     }
 
     @Override
@@ -235,23 +232,17 @@ class ZKStream extends PersistentStreamBase {
     @Override
     CompletableFuture<Data> getStreamCutRecordData(long recordingTime) {
         String path = String.format(retentionStreamCutRecordPathFormat, recordingTime);
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.getCachedData(path, id);
-                });
+        return getCachedData(path);
     }
 
     @Override
     CompletableFuture<Void> deleteStreamCutRecordData(long recordingTime) {
         String path = String.format(retentionStreamCutRecordPathFormat, recordingTime);
 
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.deletePath(path, false)
-                                .thenAccept(x -> store.invalidateCache(path, id));
-                });
+        return store.deletePath(path, false)
+                    .thenCompose(x -> invalidateCache(path));
     }
-
+    
     @Override
     CompletableFuture<Void> createHistoryTimeSeriesChunkDataIfAbsent(int chunkNumber, byte[] data) {
         String path = String.format(historyTimeSeriesChunkPathFormat, chunkNumber);
@@ -261,21 +252,14 @@ class ZKStream extends PersistentStreamBase {
     @Override
     CompletableFuture<Data> getHistoryTimeSeriesChunkData(int chunkNumber, boolean ignoreCached) {
         String path = String.format(historyTimeSeriesChunkPathFormat, chunkNumber);
-        return getId()
-                .thenComposeAsync(id -> {
-
-                    if (ignoreCached) {
-                        store.invalidateCache(path, id);
-                    }
-                    return store.getCachedData(path, id);
-                });
+        return getCachedData(path, ignoreCached);
     }
 
     @Override
     CompletableFuture<Version> updateHistoryTimeSeriesChunkData(int chunkNumber, Data data) {
         String path = String.format(historyTimeSeriesChunkPathFormat, chunkNumber);
         return store.setData(path, data)
-                    .thenApply(Version.IntVersion::new);
+                .thenApply(Version.IntVersion::new);
     }
 
     @Override
@@ -291,13 +275,7 @@ class ZKStream extends PersistentStreamBase {
 
     @Override
     CompletableFuture<Data> getCurrentEpochRecordData(boolean ignoreCached) {
-        return getId()
-                .thenComposeAsync(id -> {
-                    if (ignoreCached) {
-                        store.invalidateCache(currentEpochRecordPath, id);
-                    }
-                    return store.getCachedData(currentEpochRecordPath, id);
-                });
+        return getCachedData(currentEpochRecordPath, ignoreCached);
     }
 
     @Override
@@ -309,10 +287,7 @@ class ZKStream extends PersistentStreamBase {
     @Override
     CompletableFuture<Data> getEpochRecordData(int epoch) {
         String path = String.format(epochRecordPathFormat, epoch);
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.getCachedData(path, id);
-                });
+        return getCachedData(path);
     }
 
     @Override
@@ -345,10 +320,7 @@ class ZKStream extends PersistentStreamBase {
     @Override
     CompletableFuture<Data> getSegmentSealedRecordData(long segmentId) {
         String path = String.format(segmentSealedEpochPathFormat, segmentId);
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.getCachedData(path, id);
-                });
+        return getCachedData(path);
     }
 
     @Override
@@ -391,11 +363,8 @@ class ZKStream extends PersistentStreamBase {
         byte[] b = new byte[Long.BYTES];
         BitConverter.writeLong(b, 0, timestamp);
 
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.createZNodeIfNotExist(path, b)
-                                .thenAccept(x -> store.invalidateCache(markerPath, id));
-                });
+        return store.createZNodeIfNotExist(path, b)
+                    .thenCompose(x -> invalidateCache(markerPath));
     }
 
     @Override
@@ -429,11 +398,9 @@ class ZKStream extends PersistentStreamBase {
     @Override
     CompletableFuture<Void> removeMarkerData(long segmentId) {
         final String path = ZKPaths.makePath(markerPath, String.format("%d", segmentId));
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.deletePath(path, false)
-                                .whenComplete((r, e) -> store.invalidateCache(path, id));
-                });
+
+        return store.deletePath(path, false)
+                    .thenCompose(r -> invalidateCache(path));
     }
 
     @Override
@@ -508,18 +475,15 @@ class ZKStream extends PersistentStreamBase {
                             String root = String.format(STREAM_COMPLETED_TX_BATCH_PATH, Long.parseLong(child), getScope(), getName());
                             String path = ZKPaths.makePath(root, txId.toString());
 
-                            return getId()
-                                    .thenComposeAsync(id -> {
-                                        return store.getCachedData(path, id)
-                                                    .exceptionally(e -> {
-                                                        if (Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException) {
-                                                            return null;
-                                                        } else {
-                                                            log.error("Exception while trying to fetch completed transaction status", e);
-                                                            throw new CompletionException(e);
-                                                        }
-                                                    });
-                                    });
+                            return getCachedData(path)
+                                        .exceptionally(e -> {
+                                            if (Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException) {
+                                                return null;
+                                            } else {
+                                                log.error("Exception while trying to fetch completed transaction status", e);
+                                                throw new CompletionException(e);
+                                            }
+                                        });
                         }).collect(Collectors.toList()));
                     })
                     .thenCompose(result -> {
@@ -539,76 +503,41 @@ class ZKStream extends PersistentStreamBase {
 
     @Override
     CompletableFuture<Version> setTruncationData(final Data truncationRecord) {
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.setData(truncationPath, truncationRecord)
-                                .thenApply(r -> {
-                                    store.invalidateCache(truncationPath, id);
-                                    return new Version.IntVersion(r);
-                                });
-                });
+        return store.setData(truncationPath, truncationRecord)
+                    .thenCompose(r -> invalidateCache(truncationPath)
+                            .thenApply(v -> new Version.IntVersion(r)));
     }
 
     @Override
     CompletableFuture<Data> getTruncationData(boolean ignoreCached) {
-        return getId()
-                .thenComposeAsync(id -> {
-                    if (ignoreCached) {
-                        store.invalidateCache(truncationPath, id);
-                    }
-
-                    return store.getCachedData(truncationPath, id);
-                });
+        return getCachedData(truncationPath, ignoreCached);
     }
 
     @Override
     CompletableFuture<Version> setConfigurationData(final Data configuration) {
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.setData(configurationPath, configuration)
-                                .thenApply(r -> {
-                                    store.invalidateCache(configurationPath, id);
-                                    return new Version.IntVersion(r);
-                                });
-                });
+        return store.setData(configurationPath, configuration)
+                    .thenCompose(r -> invalidateCache(configurationPath)
+                            .thenApply(v -> new Version.IntVersion(r)));
     }
 
     @Override
     CompletableFuture<Data> getConfigurationData(boolean ignoreCached) {
-        return getId()
-                .thenComposeAsync(id -> {
-                    if (ignoreCached) {
-                        store.invalidateCache(configurationPath, id);
-                    }
-
-                    return store.getCachedData(configurationPath, id);
-                });
+        return getCachedData(configurationPath, ignoreCached);
     }
 
     @Override
     CompletableFuture<Version> setStateData(final Data state) {
-        return getId()
-                .thenComposeAsync(id -> {
-                    return store.setData(statePath, state)
-                                .thenApply(r -> {
-                                    store.invalidateCache(statePath, id);
-                                    return new Version.IntVersion(r);
-                                });
-                });
+        return store.setData(statePath, state)
+                    .thenCompose(r -> invalidateCache(statePath)
+                            .thenApply(v -> new Version.IntVersion(r)));
     }
 
     @Override
     CompletableFuture<Data> getStateData(boolean ignoreCached) {
-        return getId()
-                .thenComposeAsync(id -> {
-                    if (ignoreCached) {
-                        store.invalidateCache(statePath, id);
-                    }
 
-                    return store.getCachedData(statePath, id);
-                });
+        return getCachedData(statePath, ignoreCached);
     }
-
+    
     @Override
     CompletableFuture<Void> createCommitTxnRecordIfAbsent(byte[] committingTxns) {
         return Futures.toVoid(store.createZNodeIfNotExist(committingTxnsPath, committingTxns));
@@ -671,10 +600,10 @@ class ZKStream extends PersistentStreamBase {
 
         return Futures.toVoid(store.createZNodeIfNotExist(idPath, b));
     }
-
+    
     CompletableFuture<Integer> getStreamPosition() {
         return store.getData(idPath)
-                    .thenApply(data -> BitConverter.readInt(data.getData(), 0));
+                .thenApply(data -> BitConverter.readInt(data.getData(), 0));
     }
 
     private CompletableFuture<Integer> getId() {
@@ -684,10 +613,28 @@ class ZKStream extends PersistentStreamBase {
             return CompletableFuture.completedFuture(id);
         } else {
             return Futures.exceptionallyExpecting(getStreamPosition()
-                    .thenApply(pos -> {
+                    .thenCompose(pos -> {
                         idRef.compareAndSet(null, pos);
-                        return pos;
+                        return getId();
                     }), e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, null);
         }
+    }
+
+    private CompletableFuture<Data> getCachedData(String path) {
+        return getCachedData(path, false);
+    }
+    
+    private CompletableFuture<Data> getCachedData(String path, boolean ignoreCached) {
+        return getId()
+                .thenCompose(id -> {
+                    if (ignoreCached) {
+                        store.invalidateCache(path, id);
+                    }
+                    return store.getCachedData(path, id);
+                });
+    }
+
+    private CompletableFuture<Void> invalidateCache(String path) {
+        return getId().thenAccept(id -> store.invalidateCache(path, id));
     }
 }
