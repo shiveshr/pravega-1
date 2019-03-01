@@ -656,7 +656,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     }
 
     @Override
-    public CompletableFuture<Void> addTaskToIndex(String hostId, String id, ControllerEvent task) {
+    public CompletableFuture<Void> addRequestToIndex(String hostId, String id, ControllerEvent task) {
         return hostTaskIndex.addEntity(hostId, id, controllerEventSerializer.toByteBuffer(task).array());
     }
 

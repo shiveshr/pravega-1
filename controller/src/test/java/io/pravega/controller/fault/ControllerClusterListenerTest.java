@@ -30,7 +30,7 @@ import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
 import io.pravega.controller.task.Stream.TxnSweeper;
-import io.pravega.controller.task.TaskSweeper;
+import io.pravega.controller.task.Stream.RequestSweeper;
 import io.pravega.test.common.TestingServerStarter;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
@@ -39,8 +39,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
-
 import lombok.extern.slf4j.Slf4j;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
@@ -121,7 +119,7 @@ public class ControllerClusterListenerTest {
     public void clusterListenerTest() throws Exception {
         String hostName = "localhost";
         Host host = new Host(hostName, 10, "host1");
-
+        
         // Create txn sweeper.
         try (StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore(executor)) {
             HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
@@ -131,15 +129,11 @@ public class ControllerClusterListenerTest {
             txnTasks.initializeStreamWriters("commitStream", new EventStreamWriterMock<>(), "abortStream",
                     new EventStreamWriterMock<>());
             TxnSweeper txnSweeper = new TxnSweeper(streamStore, txnTasks, 100, executor);
-
-            // Create task sweeper.
-            StreamMetadataTasks metadataTasks = new StreamMetadataTasks(streamStore, mock(BucketStore.class), segmentHelper, 
-                    executor, host.getHostId(), new RequestTracker(true));
-            TaskSweeper taskSweeper = new TaskSweeper(streamStore, executor, metadataTasks);
+            RequestSweeper requestSweeper = new RequestSweeper(streamStore, executor, mock(StreamMetadataTasks.class));
 
             // Create ControllerClusterListener.
             ControllerClusterListener clusterListener = new ControllerClusterListener(host, clusterZK, executor,
-                    Lists.newArrayList(taskSweeper, txnSweeper));
+                    Lists.newArrayList(txnSweeper, requestSweeper));
             clusterListener.startAsync();
 
             clusterListener.awaitRunning();
@@ -179,28 +173,7 @@ public class ControllerClusterListenerTest {
         // Future for txnsweeper.failedProcess to be called the first time
         CompletableFuture<Void> txnHostSweepIgnore = new CompletableFuture<>();
         CompletableFuture<Void> txnHostSweep2 = new CompletableFuture<>();
-        // Create task sweeper.
-        TaskSweeper taskSweeper = spy(new TaskSweeper(mock(StreamMetadataStore.class), executor,
-                mock(StreamMetadataTasks.class)));
-
-        when(taskSweeper.sweepFailedProcesses(any(Supplier.class))).thenAnswer(invocation -> {
-            if (!taskSweep.isDone()) {
-                // we complete the future when this method is called for the first time.
-                taskSweep.complete(null);
-            }
-            return CompletableFuture.completedFuture(null);
-        });
-        when(taskSweeper.handleFailedProcess(anyString())).thenAnswer(invocation -> {
-            if (!taskHostSweep1.isDone()) {
-                // we complete this future when task sweeper for a failed host is called for the first time.
-                taskHostSweep1.complete(null);
-            } else if (!taskHostSweep2.isDone()) {
-                // we complete this future when task sweeper for a failed host is called for the second time
-                taskHostSweep2.complete(null);
-            }
-            return CompletableFuture.completedFuture(null);
-        });
-
+        
         // Create txn sweeper.
         StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore(executor);
         HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
@@ -208,7 +181,7 @@ public class ControllerClusterListenerTest {
         SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, AuthHelper.getDisabledAuthHelper());
         // create streamtransactionmetadatatasks but dont initialize it with writers. this will not be
         // ready until writers are supplied.
-        StreamTransactionMetadataTasks txnTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper, executor, 
+        StreamTransactionMetadataTasks txnTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper, executor,
                 host.getHostId());
 
         TxnSweeper txnSweeper = spy(new TxnSweeper(streamStore, txnTasks, 100, executor));
@@ -231,9 +204,38 @@ public class ControllerClusterListenerTest {
             return CompletableFuture.completedFuture(null);
         });
 
+        // Create request sweeper.
+        StreamMetadataTasks streamMetadataTasks = new StreamMetadataTasks(streamStore, mock(BucketStore.class), segmentHelper, executor,
+                host.getHostId(), new RequestTracker(true));
+
+        RequestSweeper requestSweeper = spy(new RequestSweeper(streamStore, executor, streamMetadataTasks));
+        // any attempt to sweep requests should have been ignored
+        CompletableFuture<Void> requestSweep = new CompletableFuture<>();
+        // Future for txnsweeper.failedProcess to be called the first time
+        CompletableFuture<Void> requestHostSweepIgnore = new CompletableFuture<>();
+        CompletableFuture<Void> requestHostSweep2 = new CompletableFuture<>();
+
+        doAnswer(invocation -> {
+            requestHostSweepIgnore.complete(null);
+            return false;
+        }).when(requestSweeper).isReady();
+
+        when(requestSweeper.sweepFailedProcesses(any())).thenAnswer(invocation -> {
+            if (!requestSweep.isDone()) {
+                requestSweep.complete(null);
+            }
+            return CompletableFuture.completedFuture(null);
+        });
+        when(requestSweeper.handleFailedProcess(anyString())).thenAnswer(invocation -> {
+            if (!requestHostSweep2.isDone()) {
+                requestHostSweep2.complete(null);
+            }
+            return CompletableFuture.completedFuture(null);
+        });
+
         // Create ControllerClusterListener.
         ControllerClusterListener clusterListener = new ControllerClusterListener(host, clusterZK, executor,
-                Lists.newArrayList(taskSweeper, txnSweeper));
+                Lists.newArrayList(txnSweeper, requestSweeper));
 
         clusterListener.startAsync();
         clusterListener.awaitRunning();
@@ -242,11 +244,10 @@ public class ControllerClusterListenerTest {
         assertTrue(Futures.await(taskSweep, 3000));
         log.info("task sweeper completed");
 
-        // ensure only tasks are swept
-        verify(taskSweeper, times(1)).sweepFailedProcesses(any(Supplier.class));
         verify(txnSweeper, times(0)).sweepFailedProcesses(any());
-        verify(taskSweeper, times(0)).handleFailedProcess(anyString());
+        verify(requestSweeper, times(0)).sweepFailedProcesses(any());
         verify(txnSweeper, times(0)).handleFailedProcess(anyString());
+        verify(requestSweeper, times(0)).handleFailedProcess(anyString());
         validateAddedNode(host.getHostId());
 
         log.info("adding new host");
@@ -265,14 +266,18 @@ public class ControllerClusterListenerTest {
         log.info("task sweep for new host done");
 
         // verify that all tasks are not swept again.
-        verify(taskSweeper, times(1)).sweepFailedProcesses(any(Supplier.class));
-        // verify that host specific sweep happens once.
-        verify(taskSweeper, atLeast(1)).handleFailedProcess(anyString());
         // verify that txns are not yet swept as txnsweeper is not yet ready.
         verify(txnSweeper, times(0)).sweepFailedProcesses(any());
         verify(txnSweeper, times(0)).handleFailedProcess(anyString());
         // verify that txn sweeper was checked to be ready. It would have found it not ready at this point
         verify(txnSweeper, atLeast(1)).isReady();
+
+        // request sweeper 
+        // verify that txns are not yet swept as txnsweeper is not yet ready.
+        verify(requestSweeper, times(0)).sweepFailedProcesses(any());
+        verify(requestSweeper, times(0)).handleFailedProcess(anyString());
+        // verify that txn sweeper was checked to be ready. It would have found it not ready at this point
+        verify(requestSweeper, atLeast(1)).isReady();
 
         // Reset the mock to call real method on txnsweeper.isReady.
         doCallRealMethod().when(txnSweeper).isReady();
@@ -287,6 +292,17 @@ public class ControllerClusterListenerTest {
         // verify that post initialization txns are swept. And host specific txn sweep is also performed.
         verify(txnSweeper, times(1)).sweepFailedProcesses(any());
 
+        // Reset the mock to call real method on requestSweeper.isReady.
+        doCallRealMethod().when(requestSweeper).isReady();
+
+        // Complete requestSweeper initialization by adding event writers.
+        streamMetadataTasks.setRequestEventWriter(new EventStreamWriterMock<>());
+
+        assertTrue(Futures.await(requestSweep, 3000));
+
+        // verify that post initialization requests are swept. And host specific request sweep is also performed.
+        verify(requestSweeper, times(1)).sweepFailedProcesses(any());
+
         // now add another host
         newHost = new Host(hostName, 20, "newHost2");
         clusterZK.registerHost(newHost);
@@ -297,9 +313,10 @@ public class ControllerClusterListenerTest {
         validateRemovedNode(newHost.getHostId());
         assertTrue(Futures.await(taskHostSweep2, 3000));
         assertTrue(Futures.await(txnHostSweep2, 3000));
+        assertTrue(Futures.await(requestHostSweep2, 3000));
 
-        verify(taskSweeper, atLeast(2)).handleFailedProcess(anyString());
         verify(txnSweeper, atLeast(1)).handleFailedProcess(anyString());
+        verify(requestSweeper, atLeast(1)).handleFailedProcess(anyString());
 
         clusterListener.stopAsync();
         clusterListener.awaitTerminated();

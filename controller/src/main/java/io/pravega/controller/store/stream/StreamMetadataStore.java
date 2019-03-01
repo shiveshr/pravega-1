@@ -811,15 +811,15 @@ public interface StreamMetadataStore extends AutoCloseable {
     CompletableFuture<Set<String>> listHostsOwningTxn();
 
     /**
-     * Adds specified task in the host's task index. 
+     * Adds specified request in the host's task index. 
      * This is idempotent operation.
      *
      * @param hostId      Host identifier.
      * @param id          Unique id used while adding task to index.
-     * @param task        Task to index.
+     * @param request     Request to index.
      * @return            A future when completed will indicate that the task is indexed for the given host.
      */
-    CompletableFuture<Void> addTaskToIndex(final String hostId, final String id, final ControllerEvent task);
+    CompletableFuture<Void> addRequestToIndex(final String hostId, final String id, final ControllerEvent request);
 
     /**
      * Removes the index for task identified by `id` in host task index for host identified by `hostId`

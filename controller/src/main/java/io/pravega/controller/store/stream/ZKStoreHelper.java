@@ -33,13 +33,9 @@ public class ZKStoreHelper {
     @Getter(AccessLevel.PACKAGE)
     private final CuratorFramework client;
     private final Executor executor;
-    @Getter(AccessLevel.PACKAGE)
-    private final Cache<CacheKey> cache;
-    
     public ZKStoreHelper(final CuratorFramework cf, Executor executor) {
-        this.client = cf;
+        client = cf;
         this.executor = executor;
-        this.cache = new Cache<>(x -> getData(x.getPath()));
     }
     
     CompletableFuture<Void> addNode(final String path) {
@@ -335,19 +331,5 @@ public class ZKStoreHelper {
     
     PathChildrenCache getPathChildrenCache(String path, boolean cacheData) {
         return new PathChildrenCache(client, path, cacheData);
-    }
-
-    public CompletableFuture<Data> getCachedData(String path, Integer id) {
-        return cache.getCachedData(new CacheKey(path, id));
-    }
-
-    public void invalidateCache(String path, Integer id) {
-        cache.invalidateCache(new CacheKey(path, id));
-    }
-    
-    @lombok.Data
-    private class CacheKey {
-        private final String path;
-        private final Integer id;
     }
 }

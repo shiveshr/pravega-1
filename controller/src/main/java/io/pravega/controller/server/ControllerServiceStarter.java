@@ -46,7 +46,7 @@ import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
 import io.pravega.controller.task.Stream.TxnSweeper;
-import io.pravega.controller.task.TaskSweeper;
+import io.pravega.controller.task.Stream.RequestSweeper;
 import io.pravega.controller.util.Config;
 import java.net.InetAddress;
 import java.net.URI;
@@ -196,13 +196,7 @@ public class ControllerServiceStarter extends AbstractIdleService {
             retentionService.startAsync();
             retentionService.awaitRunning();
 
-            // Controller has a mechanism to track the currently active controller host instances. On detecting a failure of
-            // any controller instance, the failure detector stores the failed HostId in a failed hosts directory (FH), and
-            // invokes the taskSweeper.sweepOrphanedTasks for each failed host. When all resources under the failed hostId
-            // are processed and deleted, that failed HostId is removed from FH folder.
-            // Moreover, on controller process startup, it detects any hostIds not in the currently active set of
-            // controllers and starts sweeping tasks orphaned by those hostIds.
-            TaskSweeper taskSweeper = new TaskSweeper(streamStore, controllerExecutor,
+            RequestSweeper requestSweeper = new RequestSweeper(streamStore, controllerExecutor,
                     streamMetadataTasks);
 
             TxnSweeper txnSweeper = new TxnSweeper(streamStore, streamTransactionMetadataTasks,
@@ -237,7 +231,7 @@ public class ControllerServiceStarter extends AbstractIdleService {
             // Setup and start controller cluster listener after all sweepers have been initialized.
             if (serviceConfig.isControllerClusterListenerEnabled()) {
                 List<FailoverSweeper> failoverSweepers = new ArrayList<>();
-                failoverSweepers.add(taskSweeper);
+                failoverSweepers.add(requestSweeper);
                 failoverSweepers.add(txnSweeper);
                 if (serviceConfig.getEventProcessorConfig().isPresent()) {
                     assert controllerEventProcessors != null;

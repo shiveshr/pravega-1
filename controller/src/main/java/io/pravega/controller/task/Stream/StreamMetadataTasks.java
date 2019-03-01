@@ -101,7 +101,8 @@ public class StreamMetadataTasks implements Closeable {
     private final RequestTracker requestTracker;
     private final String hostId;
     private final ScheduledExecutorService executor;
-    
+    private final AtomicBoolean ready;
+
     public StreamMetadataTasks(final StreamMetadataStore streamMetadataStore,
                                BucketStore bucketStore, 
                                final SegmentHelper segmentHelper, final ScheduledExecutorService executor, final String hostId,
@@ -112,14 +113,20 @@ public class StreamMetadataTasks implements Closeable {
         this.requestTracker = requestTracker;
         this.hostId = hostId;
         this.executor = executor;
+        this.ready = new AtomicBoolean(false);
     }
-
+    
     public void initializeStreamWriters(final EventStreamClientFactory clientFactory,
                                         final String streamName) {
         this.requestStreamName = streamName;
         this.clientFactory = clientFactory;
+        ready.set(true);
     }
-    
+
+    boolean isReady() {
+        return ready.get();
+    }
+
     /**
      * Update stream's configuration.
      *
@@ -522,10 +529,25 @@ public class StreamMetadataTasks implements Closeable {
                         });
     }
 
+    /**
+     * This method takes an event and a future supplier and guarantees that if future supplier has been executed then event will 
+     * be posted in request stream. It does it by following approach:
+     * 1. it first adds the index for the event to be posted to the current host. 
+     * 2. it then invokes future. 
+     * 3. it then posts event. 
+     * 4. removes the index. 
+     *
+     * If controller fails after step 2, a replacement controller will failover all indexes and {@link RequestSweeper} will 
+     * post events for any index that is found.  
+     *
+     * Upon failover, an index can be found if failure occurred in any step before 3. It is safe to post duplicate events 
+     * because event processing is idempotent. It is also safe to post event even if step 2 was not performed because the 
+     * event will be ignored by the processor after a while.
+     */
     @VisibleForTesting
     <T> CompletableFuture<T> addIndexAndSubmitTask(ControllerEvent event, Supplier<CompletableFuture<T>> futureSupplier) {
         String id = UUID.randomUUID().toString();
-        return streamMetadataStore.addTaskToIndex(hostId, id, event)
+        return streamMetadataStore.addRequestToIndex(hostId, id, event)
                            .thenCompose(v -> futureSupplier.get())
                            .thenCompose(t -> RetryHelper.withIndefiniteRetriesAsync(() -> writeEvent(event), e -> {}, executor)
                                    .thenCompose(v -> streamMetadataStore.removeTaskFromIndex(hostId, id))
@@ -556,6 +578,7 @@ public class StreamMetadataTasks implements Closeable {
     @VisibleForTesting
     public void setRequestEventWriter(EventStreamWriter<ControllerEvent> requestEventWriter) {
         requestEventWriterRef.set(requestEventWriter);
+        ready.set(true);
     }
 
     private EventStreamWriter<ControllerEvent> getRequestWriter() {

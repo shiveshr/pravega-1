@@ -26,7 +26,6 @@ import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.State;
 import io.pravega.controller.stream.api.grpc.v1.Controller.CreateStreamStatus;
-import io.pravega.controller.task.TaskSweeper;
 import io.pravega.shared.controller.event.ControllerEvent;
 import io.pravega.test.common.TestingServerStarter;
 import java.net.URI;
@@ -34,7 +33,6 @@ import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -50,7 +48,6 @@ import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
@@ -59,7 +56,7 @@ import static org.mockito.Mockito.spy;
  * Task test cases.
  */
 @Slf4j
-public abstract class TaskSweeperTest {
+public abstract class RequestSweeperTest {
     private static final String HOSTNAME = "host-1234";
     private static final String SCOPE = "scope";
     protected final ScheduledExecutorService executor = Executors.newScheduledThreadPool(10);
@@ -155,8 +152,8 @@ public abstract class TaskSweeperTest {
         
         
         
-        TaskSweeper taskSweeper = new TaskSweeper(streamStore, executor, streamMetadataTasks);
-        taskSweeper.handleFailedProcess(deadHost).get();
+        RequestSweeper requestSweeper = new RequestSweeper(streamStore, executor, streamMetadataTasks);
+        requestSweeper.handleFailedProcess(deadHost).get();
         
         // verify that the event is posted for all methods of interest. 
     }

@@ -7,12 +7,11 @@
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
-package io.pravega.controller.task;
+package io.pravega.controller.task.Stream;
 import io.jsonwebtoken.lang.Collections;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.fault.FailoverSweeper;
 import io.pravega.controller.store.stream.StreamMetadataStore;
-import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -28,22 +27,30 @@ import static io.pravega.controller.util.RetryHelper.withRetries;
 import static io.pravega.controller.util.RetryHelper.withRetriesAsync;
 
 @Slf4j
-public class TaskSweeper implements FailoverSweeper {
+/**
+ * This method implements a failover sweeper for requests posted via {@link StreamMetadataTasks} into request stream.
+ * Stream metadata task indexes the request in hostRequestIndex before initiating the work in metadata store. 
+ * If controller fails before the event is posted, the sweeper will be invoked upon failover. 
+ * The sweeper fetches indexed requests and posts corresponding event into request stream. 
+ * 
+ * This class wait before becoming ready until {@link StreamMetadataTasks} has its event writer set up.  
+ */
+public class RequestSweeper implements FailoverSweeper {
 
     private final StreamMetadataStore metadataStore;
     private final ScheduledExecutorService executor;
-    private final StreamMetadataTasks metadataTasks;
+    private final StreamMetadataTasks streamMetadataTasks;
     
-    public TaskSweeper(final StreamMetadataStore metadataStore, 
-                       final ScheduledExecutorService executor, final StreamMetadataTasks metadataTasks) {
+    public RequestSweeper(final StreamMetadataStore metadataStore,
+                          final ScheduledExecutorService executor, final StreamMetadataTasks streamMetadataTasks) {
         this.metadataStore = metadataStore;
         this.executor = executor;
-        this.metadataTasks = metadataTasks;
+        this.streamMetadataTasks = streamMetadataTasks;
     }
-
+    
     @Override
     public boolean isReady() {
-        return true;
+        return streamMetadataTasks.isReady();
     }
 
     @Override
@@ -70,20 +77,20 @@ public class TaskSweeper implements FailoverSweeper {
     public CompletableFuture<Void> handleFailedProcess(final String oldHostId) {
         log.info("Sweeping orphaned tasks for host {}", oldHostId);
         return withRetriesAsync(() -> Futures.doWhileLoop(
-                () -> executeHostTask(oldHostId),
+                () -> postRequest(oldHostId),
                 Collections::isEmpty, executor).whenCompleteAsync((result, ex) ->
                                                      log.info("Sweeping orphaned tasks for host {} complete", oldHostId), executor),
                 RETRYABLE_PREDICATE, Integer.MAX_VALUE, executor);
     }
 
-    private CompletableFuture<List<String>> executeHostTask(final String oldHostId) {
+    private CompletableFuture<List<String>> postRequest(final String oldHostId) {
         return metadataStore.getPendingsTaskForHost(oldHostId, 100)
                                 .thenComposeAsync(tasks -> Futures.allOfWithResults(
                                         tasks.entrySet().stream().map(entry ->
-                                                metadataTasks.writeEvent(entry.getValue())
-                                                             .thenCompose(v ->
+                                                streamMetadataTasks.writeEvent(entry.getValue())
+                                                                   .thenCompose(v ->
                                                                      metadataStore.removeTaskFromIndex(oldHostId, entry.getKey()))
-                                                             .thenApply(v -> entry.getKey()))
+                                                                   .thenApply(v -> entry.getKey()))
                                              .collect(Collectors.toList())), executor);
     }
 }
