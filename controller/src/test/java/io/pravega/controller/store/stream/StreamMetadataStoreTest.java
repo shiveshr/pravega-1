@@ -71,7 +71,7 @@ import static org.mockito.Mockito.spy;
 public abstract class StreamMetadataStoreTest {
 
     //Ensure each test completes within 10 seconds.
-    @Rule 
+    @Rule
     public Timeout globalTimeout = new Timeout(30, TimeUnit.SECONDS);
     protected StreamMetadataStore store;
     protected BucketStore bucketStore;
@@ -85,10 +85,10 @@ public abstract class StreamMetadataStoreTest {
     protected final StreamConfiguration configuration2 = StreamConfiguration.builder().scalingPolicy(policy2).build();
 
     @Before
-    public abstract void setupStore() throws Exception;
+    public abstract void setupTaskStore() throws Exception;
 
     @After
-    public abstract void cleanupStore() throws Exception;
+    public abstract void cleanupTaskStore() throws Exception;
 
     @After
     public void tearDown() {
@@ -174,8 +174,11 @@ public abstract class StreamMetadataStoreTest {
         assertEquals(0, store.getActiveSegments(scope, stream1, null, executor).get().size());
 
         // seal a non-existent stream.
-        AssertExtensions.assertFutureThrows("streamNonExistent", store.setSealed(scope, "streamNonExistent", null, executor),
-                e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException);
+        try {
+            store.setSealed(scope, "streamNonExistent", null, executor).join();
+        } catch (CompletionException e) {
+            assertEquals(StoreException.DataNotFoundException.class, e.getCause().getClass());
+        }
         // endregion
 
         // region delete scope and stream
@@ -226,7 +229,7 @@ public abstract class StreamMetadataStoreTest {
                     se instanceof StoreException.DataNotFoundException);
         } catch (CompletionException ce) {
             assertTrue("List streams in non-existent scope Scope1",
-                    Exceptions.unwrap(ce) instanceof StoreException.DataNotFoundException);
+                    ce.getCause() instanceof StoreException.DataNotFoundException);
         }
     }
 
@@ -376,7 +379,7 @@ public abstract class StreamMetadataStoreTest {
         Assert.assertEquals(1, store.listHostsOwningTxn().join().size());
         // Test remove is idempotent operation.
         store.removeTxnFromIndex(host1, txn2, true).join();
-        Assert.assertTrue(store.listHostsOwningTxn().join().size() <= 1);
+        Assert.assertEquals(0, store.listHostsOwningTxn().join().size());
         // Test removal of txn that was never added.
         store.removeTxnFromIndex(host1, new TxnResource(scope, stream1, UUID.randomUUID()), true).join();
 
@@ -550,7 +553,7 @@ public abstract class StreamMetadataStoreTest {
     @Test
     public void concurrentStartScaleTest() throws Exception {
         final String scope = "ScopeScale";
-        final String stream = "StreamScale1";
+        final String stream = "StreamScale";
         final ScalingPolicy policy = ScalingPolicy.fixed(2);
         final StreamConfiguration configuration = StreamConfiguration.builder().scalingPolicy(policy).build();
 
@@ -848,7 +851,7 @@ public abstract class StreamMetadataStoreTest {
     @Test
     public void scaleWithTxnForInconsistentScanerios() throws Exception {
         final String scope = "ScopeScaleWithTx";
-        final String stream = "StreamScaleWithTx1";
+        final String stream = "StreamScaleWithTx";
         final ScalingPolicy policy = ScalingPolicy.fixed(2);
         final StreamConfiguration configuration = StreamConfiguration.builder().scalingPolicy(policy).build();
 

@@ -22,6 +22,7 @@ import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.controller.stream.api.grpc.v1.Controller.CreateScopeStatus;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteScopeStatus;
+import io.pravega.shared.controller.event.ControllerEvent;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.AbstractMap.SimpleEntry;
@@ -808,6 +809,53 @@ public interface StreamMetadataStore extends AutoCloseable {
      * @return set of hosts owning some txn.
      */
     CompletableFuture<Set<String>> listHostsOwningTxn();
+
+    // TODO: shivesh update javadoc
+    /**
+     * Adds specified resource as a child of current host's hostId node.
+     * This is idempotent operation.
+     *
+     * @param hostId      Host identifier.
+     * @param txn         Tracked transaction resource.
+     * @param version     Version of tracked transaction's node.
+     * @return            A future that completes on completion of the operation.
+     */
+    CompletableFuture<Void> addTaskToIndex(final String hostId, final String id, final ControllerEvent task);
+
+    /**
+     * Removes the specified child node from the specified parent node.
+     * This is idempotent operation.
+     * If deleteEmptyParent is true and parent has no child after deletion of given child then parent is also deleted.
+     *
+     * @param hostId            Node whose child is to be removed.
+     * @param txn               Transaction resource to remove.
+     * @param deleteEmptyParent To delete or not to delete.
+     * @return void in future.
+     */
+    CompletableFuture<Void> removeTaskFromIndex(final String hostId, final String id);
+
+    /**
+     * Returns a transaction managed by specified host, if one exists.
+     *
+     * @param hostId Host identifier.
+     * @return A transaction managed by specified host, if one exists.
+     */
+    CompletableFuture<Map<String, ControllerEvent>> getPendingsTaskForHost(final String hostId, final int limit);
+
+    /**
+     * Remove the specified host from the index.
+     *
+     * @param hostId Host identifier.
+     * @return A future indicating completion of removal of the host from index.
+     */
+    CompletableFuture<Void> removeHostFromTaskIndex(String hostId);
+
+    /**
+     * Fetches set of hosts that own some txn.
+     *
+     * @return set of hosts owning some txn.
+     */
+    CompletableFuture<Set<String>> listHostsWithPendingTask();
 
     /**
      * Returns the currently active epoch of the specified stream.
