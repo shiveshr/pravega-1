@@ -202,7 +202,7 @@ public class ControllerServiceStarter extends AbstractIdleService {
             // are processed and deleted, that failed HostId is removed from FH folder.
             // Moreover, on controller process startup, it detects any hostIds not in the currently active set of
             // controllers and starts sweeping tasks orphaned by those hostIds.
-            TaskSweeper taskSweeper = new TaskSweeper(streamStore, host.getHostId(), controllerExecutor,
+            TaskSweeper taskSweeper = new TaskSweeper(streamStore, controllerExecutor,
                     streamMetadataTasks);
 
             TxnSweeper txnSweeper = new TxnSweeper(streamStore, streamTransactionMetadataTasks,

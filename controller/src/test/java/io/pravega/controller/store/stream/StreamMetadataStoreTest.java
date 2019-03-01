@@ -85,10 +85,10 @@ public abstract class StreamMetadataStoreTest {
     protected final StreamConfiguration configuration2 = StreamConfiguration.builder().scalingPolicy(policy2).build();
 
     @Before
-    public abstract void setupTaskStore() throws Exception;
+    public abstract void setupStore() throws Exception;
 
     @After
-    public abstract void cleanupTaskStore() throws Exception;
+    public abstract void cleanupStore() throws Exception;
 
     @After
     public void tearDown() {
