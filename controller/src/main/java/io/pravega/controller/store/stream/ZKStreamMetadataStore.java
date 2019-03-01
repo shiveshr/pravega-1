@@ -51,7 +51,7 @@ class ZKStreamMetadataStore extends AbstractStreamMetadataStore {
 
     private final ZKGarbageCollector completedTxnGC;
     private final ZkInt96Counter counter;
-    
+
     @VisibleForTesting
     ZKStreamMetadataStore(CuratorFramework client, Executor executor) {
         this(client, executor, Duration.ofHours(Config.COMPLETED_TRANSACTION_TTL_IN_HOURS));
@@ -64,7 +64,7 @@ class ZKStreamMetadataStore extends AbstractStreamMetadataStore {
         this.completedTxnGC = new ZKGarbageCollector(COMPLETED_TXN_GC_NAME, storeHelper, this::gcCompletedTxn, gcPeriod);
         this.completedTxnGC.startAsync();
         this.completedTxnGC.awaitRunning();
-        this.counter = new ZkInt96Counter(storeHelper);    
+        this.counter = new ZkInt96Counter(storeHelper);
     }
 
     private CompletableFuture<Void> gcCompletedTxn() {
@@ -114,7 +114,7 @@ class ZKStreamMetadataStore extends AbstractStreamMetadataStore {
     Version parseVersionData(byte[] data) {
         return Version.IntVersion.fromBytes(data);
     }
-    
+
     @Override
     ZKScope newScope(final String scopeName) {
         return new ZKScope(scopeName, storeHelper);

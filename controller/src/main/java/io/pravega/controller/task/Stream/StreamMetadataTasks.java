@@ -115,7 +115,7 @@ public class StreamMetadataTasks implements Closeable {
         this.executor = executor;
         this.ready = new AtomicBoolean(false);
     }
-    
+
     public void initializeStreamWriters(final EventStreamClientFactory clientFactory,
                                         final String streamName) {
         this.requestStreamName = streamName;
@@ -573,6 +573,7 @@ public class StreamMetadataTasks implements Closeable {
         });
 
         return result;
+
     }
 
     @VisibleForTesting
