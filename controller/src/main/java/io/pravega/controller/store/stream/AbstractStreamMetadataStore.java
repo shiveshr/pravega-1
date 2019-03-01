@@ -668,14 +668,11 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     @Override
     public CompletableFuture<Map<String, ControllerEvent>> getPendingsTaskForHost(String hostId, int limit) {
         return hostTaskIndex.getEntities(hostId)
-                .thenCompose(list -> {
-                    // todo: shivesh: take n random entries from this
-                    return Futures.allOfWithResults(
-                            list.stream()
-                                .limit(limit)
-                                .collect(Collectors.toMap(id -> id,
-                                        id -> getControllerTask(hostId, id))));
-                });
+                .thenCompose(list ->
+                        Futures.allOfWithResults(list.stream()
+                                                     .limit(limit)
+                                                     .collect(Collectors.toMap(id -> id,
+                                                             id -> getControllerTask(hostId, id)))));
     }
 
     private CompletableFuture<ControllerEvent> getControllerTask(String hostId, String id) {

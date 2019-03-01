@@ -46,6 +46,7 @@ import io.pravega.controller.stream.api.grpc.v1.Controller.ScaleStatusResponse;
 import io.pravega.controller.stream.api.grpc.v1.Controller.SegmentRange;
 import io.pravega.controller.stream.api.grpc.v1.Controller.UpdateStreamStatus;
 import io.pravega.controller.util.Config;
+import io.pravega.controller.util.RetryHelper;
 import io.pravega.shared.controller.event.ControllerEvent;
 import io.pravega.shared.controller.event.DeleteStreamEvent;
 import io.pravega.shared.controller.event.ScaleOpEvent;
@@ -521,11 +522,12 @@ public class StreamMetadataTasks implements Closeable {
                         });
     }
 
-    public <T> CompletableFuture<T> addIndexAndSubmitTask(ControllerEvent event, Supplier<CompletableFuture<T>> futureSupplier) {
+    @VisibleForTesting
+    <T> CompletableFuture<T> addIndexAndSubmitTask(ControllerEvent event, Supplier<CompletableFuture<T>> futureSupplier) {
         String id = UUID.randomUUID().toString();
         return streamMetadataStore.addTaskToIndex(hostId, id, event)
                            .thenCompose(v -> futureSupplier.get())
-                           .thenCompose(t -> writeEvent(event)
+                           .thenCompose(t -> RetryHelper.withIndefiniteRetriesAsync(() -> writeEvent(event), e -> {}, executor)
                                    .thenCompose(v -> streamMetadataStore.removeTaskFromIndex(hostId, id))
                                    .thenApply(v -> t));
     }
