@@ -196,11 +196,16 @@ public class ControllerServiceStarter extends AbstractIdleService {
             retentionService.startAsync();
             retentionService.awaitRunning();
 
-            RequestSweeper requestSweeper = new RequestSweeper(streamStore, controllerExecutor,
-                    streamMetadataTasks);
-
+            // Controller has a mechanism to track the currently active controller host instances. On detecting a failure of
+            // any controller instance, the failure detector stores the failed HostId in a failed hosts directory (FH), and
+            // invokes the taskSweeper.sweepOrphanedTasks for each failed host. When all resources under the failed hostId
+            // are processed and deleted, that failed HostId is removed from FH folder.
+            // Moreover, on controller process startup, it detects any hostIds not in the currently active set of
+            // controllers and starts sweeping tasks orphaned by those hostIds.
             TxnSweeper txnSweeper = new TxnSweeper(streamStore, streamTransactionMetadataTasks,
                     serviceConfig.getTimeoutServiceConfig().getMaxLeaseValue(), controllerExecutor);
+            RequestSweeper requestSweeper = new RequestSweeper(streamStore, controllerExecutor,
+                    streamMetadataTasks);
 
             if (serviceConfig.isControllerClusterListenerEnabled()) {
                 cluster = new ClusterZKImpl((CuratorFramework) storeClient.getClient(), ClusterType.CONTROLLER);
