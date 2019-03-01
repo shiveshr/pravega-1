@@ -8,20 +8,14 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 package io.pravega.controller.task;
-import io.pravega.common.Exceptions;
+import io.jsonwebtoken.lang.Collections;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.fault.FailoverSweeper;
-import com.google.common.base.Preconditions;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
-import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Method;
-import java.time.Duration;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
@@ -37,14 +31,12 @@ import static io.pravega.controller.util.RetryHelper.withRetriesAsync;
 public class TaskSweeper implements FailoverSweeper {
 
     private final StreamMetadataStore metadataStore;
-    private final String hostId;
     private final ScheduledExecutorService executor;
     private final StreamMetadataTasks metadataTasks;
     
-    public TaskSweeper(final StreamMetadataStore metadataStore, final String hostId,
+    public TaskSweeper(final StreamMetadataStore metadataStore, 
                        final ScheduledExecutorService executor, final StreamMetadataTasks metadataTasks) {
         this.metadataStore = metadataStore;
-        this.hostId = hostId;
         this.executor = executor;
         this.metadataTasks = metadataTasks;
     }
@@ -76,34 +68,22 @@ public class TaskSweeper implements FailoverSweeper {
      */
     @Override
     public CompletableFuture<Void> handleFailedProcess(final String oldHostId) {
-
         log.info("Sweeping orphaned tasks for host {}", oldHostId);
         return withRetriesAsync(() -> Futures.doWhileLoop(
                 () -> executeHostTask(oldHostId),
-                x -> x != null, executor).whenCompleteAsync((result, ex) ->
+                Collections::isEmpty, executor).whenCompleteAsync((result, ex) ->
                                                      log.info("Sweeping orphaned tasks for host {} complete", oldHostId), executor),
-                RETRYABLE_PREDICATE),
-                Integer.MAX_VALUE, executor);
+                RETRYABLE_PREDICATE, Integer.MAX_VALUE, executor);
     }
 
-    private CompletableFuture<Void> executeHostTask(final String oldHostId) {
+    private CompletableFuture<List<String>> executeHostTask(final String oldHostId) {
         return metadataStore.getPendingsTaskForHost(oldHostId, 100)
-                                .thenComposeAsync(tasks -> Futures.allOf(
-                                        tasks.entrySet().stream().map(entry -> 
+                                .thenComposeAsync(tasks -> Futures.allOfWithResults(
+                                        tasks.entrySet().stream().map(entry ->
                                                 metadataTasks.writeEvent(entry.getValue())
-                                                             .thenCompose(v -> 
-                                                                     metadataStore.removeTaskFromIndex(oldHostId, entry.getKey())))
+                                                             .thenCompose(v ->
+                                                                     metadataStore.removeTaskFromIndex(oldHostId, entry.getKey()))
+                                                             .thenApply(v -> entry.getKey()))
                                              .collect(Collectors.toList())), executor);
-    }
-
-    /**
-     * Internal key used in mapping tables.
-     *
-     * @param taskName    method name.
-     * @param taskVersion method version.,
-     * @return key
-     */
-    private String getKey(final String taskName, final String taskVersion) {
-        return taskName + "--" + taskVersion;
     }
 }

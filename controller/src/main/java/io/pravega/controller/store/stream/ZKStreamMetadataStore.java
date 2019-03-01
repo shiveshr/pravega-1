@@ -210,7 +210,7 @@ class ZKStreamMetadataStore extends AbstractStreamMetadataStore {
         return Futures.exceptionallyExpecting(zkStream.getStreamPosition()
                 .thenCompose(id -> zkScope.removeStreamFromScope(name, id)),
                 e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, null)
-                .thenCompose(v -> super.deleteStream(scope, name, context, executor)); 
+                .thenCompose(v -> super.deleteStream(scope, name, context, executor));
     }
 
     @VisibleForTesting

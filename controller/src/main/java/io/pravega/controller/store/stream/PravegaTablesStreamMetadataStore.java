@@ -17,7 +17,7 @@ import io.pravega.common.concurrent.Futures;
 import io.pravega.common.lang.Int96;
 import io.pravega.common.util.BitConverter;
 import io.pravega.controller.server.SegmentHelper;
-import io.pravega.controller.store.index.PravegaTablesHostIndex;
+import io.pravega.controller.store.index.ZKHostIndex;
 import io.pravega.controller.util.Config;
 import io.pravega.shared.NameUtils;
 import lombok.AccessLevel;
@@ -53,7 +53,6 @@ public class PravegaTablesStreamMetadataStore extends AbstractStreamMetadataStor
     @VisibleForTesting
     @Getter(AccessLevel.PACKAGE)
     private final PravegaTablesStoreHelper storeHelper;
-    private final ScheduledExecutorService executor;
 
     @VisibleForTesting
     PravegaTablesStreamMetadataStore(SegmentHelper segmentHelper, CuratorFramework client, ScheduledExecutorService executor) {
@@ -62,14 +61,13 @@ public class PravegaTablesStreamMetadataStore extends AbstractStreamMetadataStor
     
     @VisibleForTesting
     PravegaTablesStreamMetadataStore(SegmentHelper segmentHelper, CuratorFramework curatorClient, ScheduledExecutorService executor, Duration gcPeriod) {
-        super(new PravegaTablesHostIndex("hostTxnIndex", new PravegaTablesStoreHelper(segmentHelper, executor)));
+        super(new ZKHostIndex(curatorClient, "hostTxnIndex", executor), new ZKHostIndex(curatorClient, "/hostTaskIndex", executor));
         ZKStoreHelper zkStoreHelper = new ZKStoreHelper(curatorClient, executor);
         this.completedTxnGC = new ZKGarbageCollector(COMPLETED_TXN_GC_NAME, zkStoreHelper, this::gcCompletedTxn, gcPeriod);
         this.completedTxnGC.startAsync();
         this.completedTxnGC.awaitRunning();
         this.counter = new ZkInt96Counter(zkStoreHelper);
         this.storeHelper = new PravegaTablesStoreHelper(segmentHelper, executor);
-        this.executor = executor;
     }
 
     private CompletableFuture<Void> gcCompletedTxn() {

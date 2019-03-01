@@ -138,10 +138,10 @@ public class StreamMetadataTasks implements Closeable {
                 .thenCompose(configProperty -> {
                     // 2. post event to start update workflow
                     if (!configProperty.getObject().isUpdating()) {
-                        return writeEvent(new UpdateStreamEvent(scope, stream, requestId))
+                        return addIndexAndSubmitTask(new UpdateStreamEvent(scope, stream, requestId), 
                                 // 3. update new configuration in the store with updating flag = true
                                 // if attempt to update fails, we bail out with no harm done
-                                .thenCompose(x -> streamMetadataStore.startUpdateConfiguration(scope, stream, newConfig,
+                                () -> streamMetadataStore.startUpdateConfiguration(scope, stream, newConfig,
                                         context, executor))
                                 // 4. wait for update to complete
                                 .thenCompose(x -> checkDone(() -> isUpdated(scope, stream, newConfig, context))
@@ -329,9 +329,9 @@ public class StreamMetadataTasks implements Closeable {
                 .thenCompose(property -> {
                     if (!property.getObject().isUpdating()) {
                         // 2. post event with new stream cut if no truncation is ongoing
-                        return writeEvent(new TruncateStreamEvent(scope, stream, requestId))
+                        return addIndexAndSubmitTask(new TruncateStreamEvent(scope, stream, requestId), 
                                 // 3. start truncation by updating the metadata
-                                .thenCompose(x -> streamMetadataStore.startTruncation(scope, stream, streamCut,
+                                () -> streamMetadataStore.startTruncation(scope, stream, streamCut,
                                         context, executor))
                                 .thenApply(x -> {
                                     log.debug(requestId, "Started truncation request for stream {}/{}", scope, stream);
@@ -363,16 +363,16 @@ public class StreamMetadataTasks implements Closeable {
 
         // 1. post event for seal.
         SealStreamEvent event = new SealStreamEvent(scope, stream, requestId);
-        return writeEvent(event)
+        return addIndexAndSubmitTask(event, 
                 // 2. set state to sealing
-                .thenCompose(x -> streamMetadataStore.getVersionedState(scope, stream, context, executor))
+                () -> streamMetadataStore.getVersionedState(scope, stream, context, executor)
                 .thenCompose(state -> {
                     if (state.getObject().equals(State.SEALED)) {
                         return CompletableFuture.completedFuture(state);
                     } else {
                         return streamMetadataStore.updateVersionedState(scope, stream, State.SEALING, state, context, executor);
                     }
-                })
+                }))
                 // 3. return with seal initiated.
                 .thenCompose(result -> {
                     if (result.getObject().equals(State.SEALED) || result.getObject().equals(State.SEALING)) {
@@ -455,8 +455,8 @@ public class StreamMetadataTasks implements Closeable {
         final long requestId = requestTracker.getRequestIdFor("scaleStream", scope, stream, String.valueOf(scaleTimestamp));
         ScaleOpEvent event = new ScaleOpEvent(scope, stream, segmentsToSeal, newRanges, true, scaleTimestamp, requestId);
 
-        return writeEvent(event)
-                .thenCompose(x -> streamMetadataStore.submitScale(scope, stream, segmentsToSeal, new ArrayList<>(newRanges),
+        return addIndexAndSubmitTask(event,
+                () -> streamMetadataStore.submitScale(scope, stream, segmentsToSeal, new ArrayList<>(newRanges),
                         scaleTimestamp, null, context, executor)
                         .handle((startScaleResponse, e) -> {
                             ScaleResponse.Builder response = ScaleResponse.newBuilder();
@@ -521,6 +521,15 @@ public class StreamMetadataTasks implements Closeable {
                         });
     }
 
+    public <T> CompletableFuture<T> addIndexAndSubmitTask(ControllerEvent event, Supplier<CompletableFuture<T>> futureSupplier) {
+        String id = UUID.randomUUID().toString();
+        return streamMetadataStore.addTaskToIndex(hostId, id, event)
+                           .thenCompose(v -> futureSupplier.get())
+                           .thenCompose(t -> writeEvent(event)
+                                   .thenCompose(v -> streamMetadataStore.removeTaskFromIndex(hostId, id))
+                                   .thenApply(v -> t));
+    }
+    
     public CompletableFuture<Void> writeEvent(ControllerEvent event) {
         CompletableFuture<Void> result = new CompletableFuture<>();
 
@@ -540,7 +549,6 @@ public class StreamMetadataTasks implements Closeable {
         });
 
         return result;
-
     }
 
     @VisibleForTesting

@@ -810,27 +810,24 @@ public interface StreamMetadataStore extends AutoCloseable {
      */
     CompletableFuture<Set<String>> listHostsOwningTxn();
 
-    // TODO: shivesh update javadoc
     /**
-     * Adds specified resource as a child of current host's hostId node.
+     * Adds specified task in the host's task index. 
      * This is idempotent operation.
      *
      * @param hostId      Host identifier.
-     * @param txn         Tracked transaction resource.
-     * @param version     Version of tracked transaction's node.
-     * @return            A future that completes on completion of the operation.
+     * @param id          Unique id used while adding task to index.
+     * @param task        Task to index.
+     * @return            A future when completed will indicate that the task is indexed for the given host.
      */
     CompletableFuture<Void> addTaskToIndex(final String hostId, final String id, final ControllerEvent task);
 
     /**
-     * Removes the specified child node from the specified parent node.
+     * Removes the index for task identified by `id` in host task index for host identified by `hostId`
      * This is idempotent operation.
-     * If deleteEmptyParent is true and parent has no child after deletion of given child then parent is also deleted.
      *
-     * @param hostId            Node whose child is to be removed.
-     * @param txn               Transaction resource to remove.
-     * @param deleteEmptyParent To delete or not to delete.
-     * @return void in future.
+     * @param hostId Node whose child is to be removed.
+     * @param id     Unique id used while adding task to index.
+     * @return Future which when completed will indicate that the task has been removed from index.
      */
     CompletableFuture<Void> removeTaskFromIndex(final String hostId, final String id);
 
