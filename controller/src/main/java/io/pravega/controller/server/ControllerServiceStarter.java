@@ -43,12 +43,9 @@ import io.pravega.controller.store.host.HostStoreFactory;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
 import io.pravega.controller.task.Stream.TxnSweeper;
-import io.pravega.controller.task.TaskSweeper;
 import io.pravega.controller.util.Config;
 import java.net.InetAddress;
 import java.net.URI;
@@ -120,7 +117,6 @@ public class ControllerServiceStarter extends AbstractIdleService {
 
         final StreamMetadataStore streamStore;
         final BucketStore bucketStore;
-        final TaskMetadataStore taskMetadataStore;
         final HostControllerStore hostStore;
         final CheckpointStore checkpointStore;
 
@@ -137,10 +133,7 @@ public class ControllerServiceStarter extends AbstractIdleService {
 
             log.info("Creating the bucket store");
             bucketStore = StreamStoreFactory.createBucketStore(storeClient, controllerExecutor);
-
-            log.info("Creating the task store");
-            taskMetadataStore = TaskStoreFactory.createStore(storeClient, controllerExecutor);
-
+            
             log.info("Creating the host store");
             hostStore = HostStoreFactory.createStore(serviceConfig.getHostMonitorConfig(), storeClient);
 
@@ -176,7 +169,7 @@ public class ControllerServiceStarter extends AbstractIdleService {
 
             AuthHelper authHelper = new AuthHelper(serviceConfig.getGRPCServerConfig().get().isAuthorizationEnabled(),
                     serviceConfig.getGRPCServerConfig().get().getTokenSigningKey());
-            streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, hostStore, taskMetadataStore,
+            streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, hostStore, 
                     segmentHelper, controllerExecutor, host.getHostId(), connectionFactory, authHelper, requestTracker);
             streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore,
                     hostStore, segmentHelper, controllerExecutor, host.getHostId(), serviceConfig.getTimeoutServiceConfig(),
@@ -198,9 +191,6 @@ public class ControllerServiceStarter extends AbstractIdleService {
             // are processed and deleted, that failed HostId is removed from FH folder.
             // Moreover, on controller process startup, it detects any hostIds not in the currently active set of
             // controllers and starts sweeping tasks orphaned by those hostIds.
-            TaskSweeper taskSweeper = new TaskSweeper(taskMetadataStore, host.getHostId(), controllerExecutor,
-                    streamMetadataTasks);
-
             TxnSweeper txnSweeper = new TxnSweeper(streamStore, streamTransactionMetadataTasks,
                     serviceConfig.getTimeoutServiceConfig().getMaxLeaseValue(), controllerExecutor);
 
@@ -233,7 +223,6 @@ public class ControllerServiceStarter extends AbstractIdleService {
             // Setup and start controller cluster listener after all sweepers have been initialized.
             if (serviceConfig.isControllerClusterListenerEnabled()) {
                 List<FailoverSweeper> failoverSweepers = new ArrayList<>();
-                failoverSweepers.add(taskSweeper);
                 failoverSweepers.add(txnSweeper);
                 if (serviceConfig.getEventProcessorConfig().isPresent()) {
                     assert controllerEventProcessors != null;

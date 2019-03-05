@@ -26,8 +26,6 @@ import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.ZookeeperBucketStore;
-import io.pravega.controller.store.task.TaskMetadataStore;
-import io.pravega.controller.store.task.TaskStoreFactory;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.controller.util.RetryHelper;
 import io.pravega.test.common.TestingServerStarter;
@@ -138,14 +136,13 @@ public class ZkStoreRetentionTest extends BucketServiceTest {
         BucketStore bucketStore2 = StreamStoreFactory.createZKBucketStore(1, zkClient2, executor2);
         StreamMetadataStore streamMetadataStore2 = StreamStoreFactory.createZKStore(zkClient2, executor2);
 
-        TaskMetadataStore taskMetadataStore = TaskStoreFactory.createInMemoryStore(executor2);
         HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
 
         SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock();
         ConnectionFactoryImpl connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
 
         StreamMetadataTasks streamMetadataTasks2 = new StreamMetadataTasks(streamMetadataStore2, bucketStore2, 
-                hostStore, taskMetadataStore, segmentHelper, executor2, hostId, connectionFactory, AuthHelper.getDisabledAuthHelper(), 
+                hostStore, segmentHelper, executor2, hostId, connectionFactory, AuthHelper.getDisabledAuthHelper(), 
                 requestTracker);
 
         String scope = "scope1";
