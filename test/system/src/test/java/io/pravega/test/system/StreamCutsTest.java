@@ -52,6 +52,7 @@ import mesosphere.marathon.client.MarathonException;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
@@ -62,6 +63,7 @@ import static org.junit.Assert.assertTrue;
 
 @Slf4j
 @RunWith(SystemTestRunner.class)
+@Ignore
 public class StreamCutsTest extends AbstractReadWriteTest {
 
     private static final String STREAM_ONE = "testStreamcutsStreamOne";
