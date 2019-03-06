@@ -14,10 +14,12 @@ import io.pravega.client.netty.impl.ConnectionFactoryImpl;
 import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.client.stream.EventWriterConfig;
 import io.pravega.client.stream.ScalingPolicy;
+import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.impl.ClientFactoryImpl;
 import io.pravega.client.stream.impl.Controller;
 import io.pravega.client.stream.impl.JavaSerializer;
+import io.pravega.client.stream.impl.StreamImpl;
 import io.pravega.client.stream.mock.MockClientFactory;
 import io.pravega.common.util.Retry;
 import io.pravega.controller.util.Config;
@@ -33,8 +35,13 @@ import io.pravega.shared.NameUtils;
 import io.pravega.test.common.TestingServerStarter;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+
 import lombok.Cleanup;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.curator.test.TestingServer;
@@ -42,7 +49,7 @@ import org.apache.curator.test.TestingServer;
 @Slf4j
 public class EndToEndAutoScaleUpTest {
     static final StreamConfiguration CONFIG = StreamConfiguration.builder()
-                                                                 .scalingPolicy(ScalingPolicy.byEventRate(10, 2, 3))
+                                                                 .scalingPolicy(ScalingPolicy.byEventRate(10, 2, 1))
                                                                  .build();
 
     public static void main(String[] args) throws Exception {
@@ -77,6 +84,15 @@ public class EndToEndAutoScaleUpTest {
             controllerWrapper.getControllerService().createScope("test").get();
 
             controller.createStream("test", "test", CONFIG).get();
+
+            Stream stream = new StreamImpl("test", "test");
+            Map<Double, Double> map = new HashMap<>();
+            map.put(0.0, 0.33);
+            map.put(0.33, 0.66);
+            map.put(0.66, 1.0);
+            ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+            controller.scaleStream(stream, Collections.singletonList(0L), map, executor).getFuture().get();
+
             @Cleanup
             MockClientFactory clientFactory = new MockClientFactory("test", controller);
 

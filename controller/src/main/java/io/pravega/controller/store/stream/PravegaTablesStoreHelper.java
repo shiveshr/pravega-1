@@ -268,7 +268,7 @@ public class PravegaTablesStoreHelper {
                 log.warn("Host Store exception {}", cause.getMessage());
                 toThrow = StoreException.create(StoreException.Type.CONNECTION_ERROR, cause, errorMessage);
             } else {
-                log.warn("error {} {}", errorMessage, cause.getClass());
+                log.error("Unexpected error {} {}", errorMessage, cause.getClass());
                 toThrow = StoreException.create(StoreException.Type.UNKNOWN, cause, errorMessage);
             }
 
@@ -277,7 +277,11 @@ public class PravegaTablesStoreHelper {
     }
 
     private <T> CompletableFuture<T> withRetries(Supplier<CompletableFuture<T>> futureSupplier, String errorMessage) {
-        return RetryHelper.withRetriesAsync(exceptionallCallback(futureSupplier, errorMessage), 
-                e -> Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException, NUM_OF_TRIES, executor);
+        return RetryHelper.withRetriesAsync(exceptionallCallback(futureSupplier, errorMessage),
+                e -> {
+                    Throwable unwrap = Exceptions.unwrap(e);
+                    return unwrap instanceof StoreException.StoreConnectionException ||
+                            unwrap instanceof StoreException.UnknownException;
+                }, NUM_OF_TRIES, executor);
     }
 }
