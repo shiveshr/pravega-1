@@ -32,6 +32,7 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.concurrent.NotThreadSafe;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * This is an internal class that embeds the following.
@@ -56,7 +57,7 @@ class EventProcessorCell<T extends ControllerEvent> {
     private final String readerGroupName;
     private final String readerId;
     private final String objectId;
-
+    private final AtomicReference<Position> checkpoint;
     @VisibleForTesting
     @Getter(value = AccessLevel.PACKAGE)
     private EventProcessor<T> actor;
@@ -244,6 +245,7 @@ class EventProcessorCell<T extends ControllerEvent> {
         this.objectId = String.format("EventProcessor[%s:%s]", this.readerGroupName, index);
         this.actor = createEventProcessor(eventProcessorConfig);
         this.delegate = new Delegate(eventProcessorConfig);
+        this.checkpoint = new AtomicReference<>();
     }
 
     final void startAsync() {
@@ -285,8 +287,10 @@ class EventProcessorCell<T extends ControllerEvent> {
 
     private EventProcessor<T> createEventProcessor(final EventProcessorConfig<T> eventProcessorConfig) {
         EventProcessor<T> eventProcessor = eventProcessorConfig.getSupplier().get();
-        eventProcessor.checkpointer = (Position position) ->
-        checkpointStore.setPosition(process, readerGroupName, readerId, position);
+        eventProcessor.checkpointer = (Position position) -> {
+            checkpointStore.setPosition(process, readerGroupName, readerId, position);
+            checkpoint.set(position);
+        };
         eventProcessor.selfWriter = selfWriter::writeEvent;
         return eventProcessor;
     }

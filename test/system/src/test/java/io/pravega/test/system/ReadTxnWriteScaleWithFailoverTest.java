@@ -138,7 +138,7 @@ public class ReadTxnWriteScaleWithFailoverTest extends AbstractFailoverTests {
     @Test
     public void readTxnWriteScaleWithFailoverTest() throws Exception {
         try {
-            createWriters(clientFactory, NUM_WRITERS, scope, stream);
+            createWriters(clientFactory, NUM_WRITERS, scope, stream, true);
             createReaders(clientFactory, readerGroupName, scope, readerGroupManager, stream, NUM_READERS);
 
             //run the failover test before scaling

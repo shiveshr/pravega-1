@@ -331,12 +331,20 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
     }
 
     void createWriters(EventStreamClientFactory clientFactory, final int writers, String scope, String stream) {
-        createWritersInternal(clientFactory, writers, scope, stream, testState.writersComplete);
+        createWriters(clientFactory, writers, scope, stream, false);
+    }
+    
+    void createWriters(EventStreamClientFactory clientFactory, final int writers, String scope, String stream, boolean transactionWriter) {
+        createWritersInternal(clientFactory, writers, scope, stream, testState.writersComplete, transactionWriter);
     }
 
     void addNewWriters(EventStreamClientFactory clientFactory, final int writers, String scope, String stream) {
+        addNewWriters(clientFactory, writers, scope, stream, false);
+    }
+    
+    void addNewWriters(EventStreamClientFactory clientFactory, final int writers, String scope, String stream, boolean transactionWriter) {
         Preconditions.checkNotNull(testState.writersListComplete.get(0));
-        createWritersInternal(clientFactory, writers, scope, stream, testState.newWritersComplete);
+        createWritersInternal(clientFactory, writers, scope, stream, testState.newWritersComplete, transactionWriter);
     }
 
     void waitForTxnsToComplete() {
@@ -382,7 +390,7 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
             log.info("Unable to read events:", testState.getReadException.get());
             fail("Unable to read events. Test failure");
         }
-    }
+    } 
 
     void validateResults() {
         log.info("All writers and readers have stopped. Event Written Count:{}, Event Read " +
@@ -420,7 +428,8 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
 
     // Private methods region
 
-    private void createWritersInternal(EventStreamClientFactory clientFactory, final int writers, String scope, String stream, CompletableFuture<Void> writersComplete) {
+    private void createWritersInternal(EventStreamClientFactory clientFactory, final int writers, String scope, String stream, 
+                                       CompletableFuture<Void> writersComplete, boolean txnWriters) {
         testState.writersListComplete.add(writersComplete);
         log.info("Client factory details {}", clientFactory.toString());
         log.info("Creating {} writers", writers);
@@ -429,8 +438,14 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
         CompletableFuture.runAsync(() -> {
             for (int i = 0; i < writers; i++) {
                 log.info("Starting writer{}", i);
-                final EventStreamWriter<String> tmpWriter = instantiateWriter(clientFactory, stream);
-                final CompletableFuture<Void> writerFuture = startWriting(tmpWriter);
+                final CompletableFuture<Void> writerFuture;
+                if (!txnWriters) {
+                    final EventStreamWriter<String> tmpWriter = instantiateWriter(clientFactory, stream);
+                    writerFuture = startWriting(tmpWriter);
+                } else {
+                    final TransactionalEventStreamWriter tmpWriter = instantiateTransactionalWriter(clientFactory, stream);
+                    writerFuture = startWritingIntoTxn(tmpWriter, testState.stopWriteFlag);
+                }
                 Futures.exceptionListener(writerFuture, t -> log.error("Error while writing events:", t));
                 writerFutureList.add(writerFuture);
             }
@@ -440,7 +455,7 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
             Futures.exceptionListener(writersComplete, t -> log.error("Exception while waiting for writers to complete", t));
         });
     }
-
+    
     private <T extends Serializable> EventStreamWriter<T> instantiateWriter(EventStreamClientFactory clientFactory, String stream) {
         EventWriterConfig writerConfig = EventWriterConfig.builder()
                                                           .maxBackoffMillis(WRITER_MAX_BACKOFF_MILLIS)
@@ -448,6 +463,15 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
                                                           .transactionTimeoutTime(TRANSACTION_TIMEOUT)
                                                           .build();
         return clientFactory.createEventWriter(stream, new JavaSerializer<>(), writerConfig);
+    }
+
+    private <T extends Serializable> TransactionalEventStreamWriter<T> instantiateTransactionalWriter(EventStreamClientFactory clientFactory, String stream) {
+        EventWriterConfig writerConfig = EventWriterConfig.builder()
+                                                          .maxBackoffMillis(WRITER_MAX_BACKOFF_MILLIS)
+                                                          .retryAttempts(WRITER_MAX_RETRY_ATTEMPTS)
+                                                          .transactionTimeoutTime(TRANSACTION_TIMEOUT)
+                                                          .build();
+        return clientFactory.createTransactionalEventWriter(stream, new JavaSerializer<>(), writerConfig);
     }
 
     private <T> void closeWriter(EventStreamWriter<T> writer) {
