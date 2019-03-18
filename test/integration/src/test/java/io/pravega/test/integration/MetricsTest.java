@@ -63,7 +63,6 @@ import org.junit.Test;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.junit.Assert.assertTrue;
 
-
 @Slf4j
 public class MetricsTest extends ThreadPooledTestSuite {
 
@@ -105,7 +104,7 @@ public class MetricsTest extends ThreadPooledTestSuite {
         TableStore tableStore = serviceBuilder.createTableStoreService();
 
         this.server = new PravegaConnectionListener(false, "localhost", servicePort, store, tableStore,
-                monitor.getRecorder(), new PassingTokenVerifier(), null, null, true);
+                monitor.getStatsRecorder(), monitor.getTableSegmentStatsRecorder(), new PassingTokenVerifier(), null, null, true);
         this.server.startListening();
 
         // 3. Start Pravega Controller service
