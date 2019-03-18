@@ -174,6 +174,6 @@ public class MetadataScalabilityTest extends AbstractScaleTests {
                     }, executorService);
                 });
 
-        Futures.await(result);
+        result.join();
     }
 }
