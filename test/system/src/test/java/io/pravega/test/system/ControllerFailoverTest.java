@@ -39,6 +39,7 @@ import mesosphere.marathon.client.MarathonException;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
@@ -47,6 +48,7 @@ import org.junit.runner.RunWith;
 /**
  * Controller fail over system test.
  */
+@Ignore
 @Slf4j
 @RunWith(SystemTestRunner.class)
 public class ControllerFailoverTest extends AbstractSystemTest {
