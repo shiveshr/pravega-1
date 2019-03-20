@@ -130,9 +130,9 @@ class EventProcessorCell<T extends ControllerEvent> {
                 // If exception is thrown in any of the following operations, it is just logged.
                 // Some other controller process is responsible for cleaning up reader and its position object
 
-                // First close the reader, which implicitly notifies reader position to the reader group
+                // First close the reader, which notifies reader position to the reader group
                 log.info("Closing reader for {}", objectId);
-                reader.close();
+                reader.close(getCheckpoint());
 
                 // Next, clean up the reader and its position from checkpoint store
                 log.info("Cleaning up checkpoint store for {}", objectId);
