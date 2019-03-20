@@ -174,7 +174,7 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
                     try {
                         cell.awaitTerminated();
                     } catch (IllegalStateException e) {
-                        log.warn(String.format("Failed terminating %s", cell), e.getMessage());
+                        log.warn("Failed terminating event processor cell {}", cell, e);
                     }
                 }
 
