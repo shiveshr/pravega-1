@@ -44,6 +44,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
+import org.junit.Ignore;
+
+@Ignore
 
 /**
  * Test cases for deploying multiple segment stores.
