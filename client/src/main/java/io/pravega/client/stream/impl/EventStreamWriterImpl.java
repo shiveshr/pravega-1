@@ -68,6 +68,7 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
     private final Object writeSealLock = new Object();
 
     private final Stream stream;
+    private final String writerId;
     private final Serializer<Type> serializer;
     private final SegmentOutputStreamFactory outputStreamFactory;
     private final Controller controller;
@@ -79,8 +80,9 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
     private final ExecutorService retransmitPool;
     private final Pinger pinger;
     
-    EventStreamWriterImpl(Stream stream, Controller controller, SegmentOutputStreamFactory outputStreamFactory,
+    EventStreamWriterImpl(Stream stream, String writerId, Controller controller, SegmentOutputStreamFactory outputStreamFactory,
             Serializer<Type> serializer, EventWriterConfig config, ExecutorService retransmitPool) {
+        this.writerId = writerId;
         this.stream = Preconditions.checkNotNull(stream);
         this.controller = Preconditions.checkNotNull(controller);
         this.segmentSealedCallBack = this::handleLogSealed;
@@ -193,7 +195,7 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
     }
 
     private static class TransactionImpl<Type> implements Transaction<Type> {
-
+        private final String writerId;
         private final Map<Segment, SegmentTransaction<Type>> inner;
         private final UUID txId;
         private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -202,8 +204,9 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
         private final Pinger pinger;
         private StreamSegments segments;
 
-        TransactionImpl(UUID txId, Map<Segment, SegmentTransaction<Type>> transactions, StreamSegments segments,
+        TransactionImpl(String writerId, UUID txId, Map<Segment, SegmentTransaction<Type>> transactions, StreamSegments segments,
                 Controller controller, Stream stream, Pinger pinger) {
+            this.writerId = writerId;
             this.txId = txId;
             this.inner = transactions;
             this.segments = segments;
@@ -215,7 +218,8 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
         /**
          * Create closed transaction
          */
-        TransactionImpl(UUID txId, Controller controller, Stream stream) {
+        TransactionImpl(String writerId, UUID txId, Controller controller, Stream stream) {
+            this.writerId = writerId;
             this.txId = txId;
             this.inner = null;
             this.segments = null;
@@ -248,7 +252,18 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
             for (SegmentTransaction<Type> tx : inner.values()) {
                 tx.close();
             }
-            getAndHandleExceptions(controller.commitTransaction(stream, txId), TxnFailedException::new);
+            getAndHandleExceptions(controller.commitTransaction(stream, writerId, null, txId), TxnFailedException::new);
+            pinger.stopPing(txId);
+            closed.set(true);
+        }
+        
+        @Override
+        public void commit(long timestamp) throws TxnFailedException {
+            throwIfClosed();
+            for (SegmentTransaction<Type> tx : inner.values()) {
+                tx.close();
+            }
+            getAndHandleExceptions(controller.commitTransaction(stream, writerId, timestamp, txId), TxnFailedException::new);
             pinger.stopPing(txId);
             closed.set(true);
         }
@@ -313,7 +328,7 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
             transactions.put(s, impl);
         }
         pinger.startPing(txnId);
-        return new TransactionImpl<Type>(txnId, transactions, txnSegments.getSteamSegments(), controller, stream, pinger);
+        return new TransactionImpl<Type>(writerId, txnId, transactions, txnSegments.getSteamSegments(), controller, stream, pinger);
     }
     
     /**
@@ -327,7 +342,7 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
                 controller.getCurrentSegments(stream.getScope(), stream.getStreamName()), RuntimeException::new);
         Status status = getAndHandleExceptions(controller.checkTransactionStatus(stream, txId), RuntimeException::new);
         if (status != Status.OPEN) {
-            return new TransactionImpl<>(txId, controller, stream);
+            return new TransactionImpl<>(writerId, txId, controller, stream);
         }
         
         Map<Segment, SegmentTransaction<Type>> transactions = new HashMap<>();
@@ -336,7 +351,7 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
             SegmentTransactionImpl<Type> impl = new SegmentTransactionImpl<>(txId, out, serializer);
             transactions.put(s, impl);
         }
-        return new TransactionImpl<Type>(txId, transactions, segments, controller, stream, pinger);
+        return new TransactionImpl<Type>(writerId, txId, transactions, segments, controller, stream, pinger);
         
     }
 
@@ -393,6 +408,12 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
     @Override
     public EventWriterConfig getConfig() {
         return config;
+    }
+
+    @Override
+    public void noteTime(long timestamp) {
+        //TODO watermarking : Pass timestamp to controller.
+        
     }
 
 }
