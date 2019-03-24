@@ -20,6 +20,8 @@ import io.pravega.client.tables.impl.TableEntryImpl;
 import io.pravega.client.tables.impl.TableKey;
 import io.pravega.client.tables.impl.TableKeyImpl;
 import io.pravega.client.tables.impl.TableSegment;
+import io.pravega.client.ClientConfig;
+import io.pravega.client.netty.impl.ConnectionFactoryImpl;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.BitConverter;
 import io.pravega.controller.server.SegmentHelper;

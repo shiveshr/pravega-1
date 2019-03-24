@@ -9,7 +9,9 @@
  */
 package io.pravega.controller.store.host;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 import io.pravega.common.cluster.Host;
 import io.pravega.controller.util.ZKUtils;
 import io.pravega.shared.segment.SegmentToContainerMapper;
@@ -18,12 +20,15 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 import io.pravega.shared.segment.StreamSegmentNameUtils;
+import lombok.SneakyThrows;
 import lombok.Synchronized;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.SerializationUtils;
 import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.recipes.cache.NodeCache;
 import org.apache.curator.utils.ZKPaths;
 
 /**
@@ -43,6 +48,13 @@ public class ZKHostStore implements HostControllerStore {
 
     private final SegmentToContainerMapper segmentMapper;
 
+    private final NodeCache hostContainerMapNode;
+
+    private AtomicReference<ImmutableMap<Host, Set<Integer>>> hostContainerMap;
+    /**
+     * The tests can add listeners to get notification when the update has happed in the store. 
+     */
+    private final AtomicReference<Listener> listenerRef;
     /**
      * Zookeeper based host store implementation.
      *
@@ -53,16 +65,32 @@ public class ZKHostStore implements HostControllerStore {
 
         zkClient = client;
         zkPath = ZKPaths.makePath("cluster", "segmentContainerHostMapping");
+        hostContainerMapNode = new NodeCache(zkClient, zkPath);
+        hostContainerMap = new AtomicReference<>(ImmutableMap.of());
         segmentMapper = new SegmentToContainerMapper(containerCount);
+        listenerRef = new AtomicReference<>();
     }
 
     //Ensure required zk node is present in zookeeper.
     @Synchronized
+    @SneakyThrows(Exception.class)
     private void tryInit() {
         if (!zkInit) {
             ZKUtils.createPathIfNotExists(zkClient, zkPath, SerializationUtils.serialize(new HashMap<Host,
                     Set<Integer>>()));
+            this.hostContainerMapNode.getListenable().addListener(this::updateMap);
+            hostContainerMapNode.start(true);
+
             zkInit = true;
+        }
+    }
+
+    @Synchronized
+    private void updateMap() {
+        hostContainerMap.set(ImmutableMap.copyOf(getCurrentHostMap()));
+        Listener consumer = listenerRef.get();
+        if (consumer != null) {
+            consumer.signal();
         }
     }
 
@@ -76,7 +104,7 @@ public class ZKHostStore implements HostControllerStore {
     @SuppressWarnings("unchecked")
     private Map<Host, Set<Integer>> getCurrentHostMap() {
         try {
-            return (Map<Host, Set<Integer>>) SerializationUtils.deserialize(zkClient.getData().forPath(zkPath));
+            return (Map<Host, Set<Integer>>) SerializationUtils.deserialize(hostContainerMapNode.getCurrentData().getData());
         } catch (Exception e) {
             throw new HostStoreException("Failed to fetch segment container map from zookeeper", e);
         }
@@ -103,8 +131,7 @@ public class ZKHostStore implements HostControllerStore {
     private Host getHostForContainer(int containerId) {
         tryInit();
 
-        Map<Host, Set<Integer>> mapping = getCurrentHostMap();
-        Optional<Host> host = mapping.entrySet().stream()
+        Optional<Host> host = hostContainerMap.get().entrySet().stream()
                 .filter(x -> x.getValue().contains(containerId)).map(x -> x.getKey()).findAny();
         if (host.isPresent()) {
             log.debug("Found owning host: {} for containerId: {}", host.get(), containerId);
@@ -123,5 +150,15 @@ public class ZKHostStore implements HostControllerStore {
     public Host getHostForSegment(String scope, String stream, long segmentId) {
         String qualifiedName = StreamSegmentNameUtils.getQualifiedStreamSegmentName(scope, stream, segmentId);
         return getHostForContainer(segmentMapper.getContainerId(qualifiedName));
+    }
+    
+    @VisibleForTesting
+    public void addListener(Listener listener) {
+        this.listenerRef.set(listener);
+    }
+    
+    @FunctionalInterface
+    public interface Listener {
+        void signal();
     }
 }

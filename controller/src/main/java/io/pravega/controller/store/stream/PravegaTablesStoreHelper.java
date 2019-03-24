@@ -31,6 +31,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.curator.shaded.com.google.common.base.Charsets;
+import org.checkerframework.checker.units.qual.C;
 
 import java.util.AbstractMap;
 import java.util.Collections;
@@ -41,6 +42,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -49,32 +51,63 @@ public class PravegaTablesStoreHelper {
     private static final int NUM_OF_TRIES = Integer.MAX_VALUE;
     private final SegmentHelper segmentHelper;
     private final ScheduledExecutorService executor;
-    private final Cache<CacheKey> cache;
+    private final Cache cache;
     private final AtomicReference<String> authToken;
     @lombok.Data
-    private class CacheKey {
+    private class TableCacheKey<T> implements Cache.CacheKey {
         private final String scope;
         private final String table;
         private final String key;
+
+        private final Function<byte[], T> fromBytesFunc;
+
+        @Override
+        public int hashCode() {
+            int result = 17;
+            result = 31 * result + scope.hashCode();
+            result = 31 * result + table.hashCode();
+            result = 31 * result + key.hashCode();
+            return result;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            return obj instanceof TableCacheKey
+                    && scope.equals(((TableCacheKey) obj).scope)
+                    && table.equals(((TableCacheKey) obj).table)
+                    && key.equals(((TableCacheKey) obj).key);
+        }
+
     }
     
     public PravegaTablesStoreHelper(SegmentHelper segmentHelper, ScheduledExecutorService executor) {
         this.segmentHelper = segmentHelper;
         this.executor = executor;
 
-        cache = new Cache<>(entryKey -> {
+        cache = new Cache(x -> {
+            TableCacheKey<?> entryKey = (TableCacheKey<?>) x;
+
             // Since there are be multiple tables, we will cache `table+key` in our cache
-            return getEntry(entryKey.getScope(), entryKey.getTable(), entryKey.getKey());
+            return getEntry(entryKey.getScope(), entryKey.getTable(), entryKey.getKey(), entryKey.fromBytesFunc)
+                                   .thenApply(v -> new VersionedMetadata<>(v.getObject(), v.getVersion()));
         });
         this.authToken = new AtomicReference<>(segmentHelper.retrieveMasterToken());
     }
 
-    CompletionStage<Data> getCachedData(String scope, String table, String key) {
-        return cache.getCachedData(new CacheKey(scope, table, key));
+    <T> CompletableFuture<VersionedMetadata<T>> getCachedData(String scope, String table, String key, Function<byte[], T> fromBytes) {
+        return cache.getCachedData(new TableCacheKey<>(scope, table, key, fromBytes))
+                    .thenApply(this::getVersionedMetadata);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <T> VersionedMetadata<T> getVersionedMetadata(VersionedMetadata v) {
+        // Since cache is untyped and holds all types of deserialized objects, we typecast it to the requested object type
+        // based on the type in caller's supplied Deserialization function. 
+        return new VersionedMetadata<>((T) v.getObject(), v.getVersion());
     }
 
     void invalidateCache(String scope, String table, String key) {
-        cache.invalidateCache(new CacheKey(scope, table, key));
+        cache.invalidateCache(new TableCacheKey<>(scope, table, key, x -> null));
     }
 
     public CompletableFuture<Void> createTable(String scope, String tableName) {
@@ -128,14 +161,13 @@ public class PravegaTablesStoreHelper {
                 e -> Exceptions.unwrap(e) instanceof StoreException.DataExistsException, null);
     }
 
-    public CompletableFuture<Version> updateEntry(String scope, String tableName, String key, Data value) {
-        log.debug("updateEntry entry called for : {}/{} key : {} version {}", scope, tableName, key, value.getVersion().asLongVersion().getLongValue());
+    public CompletableFuture<Version> updateEntry(String scope, String tableName, String key, byte[] data, Version v) {
+        log.debug("updateEntry entry called for : {}/{} key : {} version {}", scope, tableName, key, v.asLongVersion().getLongValue());
 
-        KeyVersionImpl version = value.getVersion() == null ? null :
-                new KeyVersionImpl(value.getVersion().asLongVersion().getLongValue());
+        KeyVersionImpl version = v == null ? null : new KeyVersionImpl(v.asLongVersion().getLongValue());
 
         List<TableEntry<byte[], byte[]>> entries = Collections.singletonList(
-                new TableEntryImpl<>(new TableKeyImpl<>(key.getBytes(Charsets.UTF_8), version), value.getData()));
+                new TableEntryImpl<>(new TableKeyImpl<>(key.getBytes(Charsets.UTF_8), version), data));
         return withRetries(() -> segmentHelper.updateTableEntries(scope, tableName, entries, authToken.get(), RequestTag.NON_EXISTENT_ID),
                 String.format("updateEntry: key: %s table: %s/%s", key, scope, tableName))
                 .thenApplyAsync(x -> {
@@ -145,10 +177,10 @@ public class PravegaTablesStoreHelper {
                 }, executor);
     }
 
-    public CompletableFuture<Data> getEntry(String scope, String tableName, String key) {
+    public <T> CompletableFuture<VersionedMetadata<T>> getEntry(String scope, String tableName, String key, Function<byte[], T> fromBytes) {
         log.debug("get entry called for : {}/{} key : {}", scope, tableName, key);
         List<TableKey<byte[]>> keys = Collections.singletonList(new TableKeyImpl<>(key.getBytes(Charsets.UTF_8), null));
-        CompletableFuture<Data> result = new CompletableFuture<>();
+        CompletableFuture<VersionedMetadata<T>> result = new CompletableFuture<>();
         withRetries(() -> segmentHelper.readTable(scope, tableName, keys, authToken.get(), RequestTag.NON_EXISTENT_ID),
                 String.format("get entry: key: %s table: %s/%s", key, scope, tableName))
                 .thenApplyAsync(x -> {
@@ -156,7 +188,9 @@ public class PravegaTablesStoreHelper {
                     log.debug("returning entry for : {}/{} key : {} with version {}", scope, tableName, key, 
                             first.getKey().getVersion().getSegmentVersion());
 
-                    return new Data(first.getValue(), new Version.LongVersion(first.getKey().getVersion().getSegmentVersion()));
+                    T deserialized = fromBytes.apply(first.getValue());
+
+                    return new VersionedMetadata<>(deserialized, new Version.LongVersion(first.getKey().getVersion().getSegmentVersion()));
                 }, executor)
                 .whenCompleteAsync((r, e) -> {
                    if (e != null) {
@@ -200,17 +234,18 @@ public class PravegaTablesStoreHelper {
                              }, executor);
     }
 
-    public CompletableFuture<Map.Entry<ByteBuf, List<Pair<String, Data>>>> getEntriesPaginated(String scope, String tableName, 
-                                                                                               ByteBuf continuationToken, int limit) {
+    public <T> CompletableFuture<Map.Entry<ByteBuf, List<Pair<String, VersionedMetadata<T>>>>> getEntriesPaginated(String scope, String tableName, 
+                                                                                               ByteBuf continuationToken, int limit, Function<byte[], T> fromBytes) {
         log.debug("get entries paginated called for : {}/{}", scope, tableName);
 
         return withRetries(() -> segmentHelper.readTableEntries(scope, tableName, limit,
                 IteratorState.fromBytes(continuationToken), authToken.get(), RequestTag.NON_EXISTENT_ID),
                 String.format("get entries paginated for table: %s/%s", scope, tableName))
                 .thenApplyAsync(result -> {
-                    List<Pair<String, Data>> items = result.getItems().stream().map(x -> {
+                    List<Pair<String, VersionedMetadata<T>>> items = result.getItems().stream().map(x -> {
                         String key = new String(x.getKey().getKey(), Charsets.UTF_8);
-                        Data value = new Data(x.getValue(), new Version.LongVersion(x.getKey().getVersion().getSegmentVersion()));
+                        T deserialized = fromBytes.apply(x.getValue());
+                        VersionedMetadata<T> value = new VersionedMetadata<>(deserialized, new Version.LongVersion(x.getKey().getVersion().getSegmentVersion()));
                         return new ImmutablePair<>(key, value);
                     }).collect(Collectors.toList());
                     log.debug("get keys paginated on table {}/{} returned number of items {}", scope, tableName, items.size());
@@ -224,8 +259,8 @@ public class PravegaTablesStoreHelper {
                 IteratorState.EMPTY.toBytes());
     }
 
-    public AsyncIterator<Pair<String, Data>> getAllEntries(String scope, String tableName) {
-        return new ContinuationTokenAsyncIterator<>(token -> getEntriesPaginated(scope, tableName, token, 100)
+    public <T> AsyncIterator<Pair<String, VersionedMetadata<T>>> getAllEntries(String scope, String tableName, Function<byte[], T> fromBytes) {
+        return new ContinuationTokenAsyncIterator<>(token -> getEntriesPaginated(scope, tableName, token, 100, fromBytes)
                 .thenApplyAsync(result -> new AbstractMap.SimpleEntry<>(result.getKey(), result.getValue()), executor),
                 IteratorState.EMPTY.toBytes());
     }
