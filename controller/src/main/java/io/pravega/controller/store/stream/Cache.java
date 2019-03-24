@@ -34,18 +34,17 @@ public class Cache {
                     @ParametersAreNonnullByDefault
                     @Override
                     public CompletableFuture<Data> load(final String key) {
-                        CompletableFuture<Data> result = loader.get(key);
-                        result.exceptionally(ex -> {
-                            invalidateCache(key);
-                            return null;
-                        });
-                        return result;
+                        return loader.get(key);
                     }
                 });
     }
 
     public CompletableFuture<Data> getCachedData(final String key) {
-        return cache.getUnchecked(key);
+        return cache.getUnchecked(key)
+                    .exceptionally(ex -> {
+                        invalidateCache(key);
+                        return null;
+                    });
     }
 
     public Void invalidateCache(final String key) {
