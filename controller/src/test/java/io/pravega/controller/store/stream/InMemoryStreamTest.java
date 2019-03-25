@@ -13,11 +13,12 @@ public class InMemoryStreamTest extends StreamTestBase {
     InMemoryStreamMetadataStore store;
     @Override
     public void setup() throws Exception {
-        store = new InMemoryStreamMetadataStore(1, executor);
+        store = new InMemoryStreamMetadataStore(executor);
     }
 
     @Override
     public void tearDown() throws Exception {
+        store.close();
     }
 
     @Override

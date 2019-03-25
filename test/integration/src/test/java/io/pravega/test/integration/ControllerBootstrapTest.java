@@ -11,6 +11,7 @@ package io.pravega.test.integration;
 
 import io.pravega.common.Exceptions;
 import io.pravega.segmentstore.contracts.tables.TableStore;
+import io.pravega.segmentstore.storage.DurableDataLogException;
 import io.pravega.test.common.TestingServerStarter;
 import io.pravega.test.integration.demo.ControllerWrapper;
 import io.pravega.segmentstore.contracts.StreamSegmentStore;
@@ -33,8 +34,6 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import static org.mockito.Mockito.mock;
-
 /**
  * Collection of tests to validate controller bootstrap sequence.
  */
@@ -48,9 +47,10 @@ public class ControllerBootstrapTest {
     private TestingServer zkTestServer;
     private ControllerWrapper controllerWrapper;
     private PravegaConnectionListener server;
-
+    private ServiceBuilder serviceBuilder;
+    
     @Before
-    public void setup() {
+    public void setup() throws DurableDataLogException {
         final String serviceHost = "localhost";
         final int containerCount = 4;
 
@@ -60,6 +60,12 @@ public class ControllerBootstrapTest {
         } catch (Exception e) {
             Assert.fail("Failed starting ZK test server");
         }
+        serviceBuilder = ServiceBuilder.newInMemoryBuilder(ServiceBuilderConfig.getDefaultConfig());
+        serviceBuilder.initialize();
+        StreamSegmentStore store = serviceBuilder.createStreamSegmentService();
+        TableStore tableStore = serviceBuilder.createTableStoreService();
+        server = new PravegaConnectionListener(false, servicePort, store, tableStore);
+        server.startListening();
 
         // 2. Start controller
         try {
@@ -77,6 +83,9 @@ public class ControllerBootstrapTest {
         }
         if (server != null) {
             server.close();
+        }
+        if (serviceBuilder != null) {
+            serviceBuilder.close();
         }
         if (zkTestServer != null) {
             zkTestServer.close();
@@ -114,8 +123,9 @@ public class ControllerBootstrapTest {
         ServiceBuilder serviceBuilder = ServiceBuilder.newInMemoryBuilder(ServiceBuilderConfig.getDefaultConfig());
         serviceBuilder.initialize();
         StreamSegmentStore store = serviceBuilder.createStreamSegmentService();
+        TableStore tableStore = serviceBuilder.createTableStoreService();
 
-        server = new PravegaConnectionListener(false, servicePort, store, mock(TableStore.class));
+        server = new PravegaConnectionListener(false, servicePort, store, tableStore);
         server.startListening();
 
         // Ensure that create stream succeeds.

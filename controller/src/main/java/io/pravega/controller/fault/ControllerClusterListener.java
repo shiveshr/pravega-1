@@ -124,6 +124,7 @@ public class ControllerClusterListener extends AbstractIdleService {
             if (sweeper.isReady()) {
                 // Note: if we find sweeper to be ready, it is possible that this processes can be swept by both
                 // sweepFailedProcesses and handleFailedProcess. A sweep is safe and idempotent operation.
+                log.info("{} sweeper: handle host {} removed", sweeper.getClass(), host.getHostId());
                 return RetryHelper.withIndefiniteRetriesAsync(() -> sweeper.handleFailedProcess(host.getHostId()),
                         e -> log.warn(e.getMessage()), executor);
             } else {
@@ -136,8 +137,10 @@ public class ControllerClusterListener extends AbstractIdleService {
         return Futures.allOf(sweepers.stream().map(sweeper -> RetryHelper.withIndefiniteRetriesAsync(() -> {
             if (!sweeper.isReady()) {
                 log.trace("sweeper not ready, retrying with exponential backoff");
-                throw new RuntimeException("sweeper not ready");
+                String errorMessage = String.format("%s sweeper not ready", sweeper.getClass());
+                throw new RuntimeException(errorMessage);
             }
+            log.info("{} sweeping failing processes", sweeper.getClass());
             return sweeper.sweepFailedProcesses(processes);
         }, e -> log.warn(e.getMessage()), executor)).collect(Collectors.toList()));
     }

@@ -9,10 +9,7 @@
  */
 package io.pravega.controller.store.stream;
 
-import io.pravega.client.stream.RetentionPolicy;
 import io.pravega.client.stream.StreamConfiguration;
-import io.pravega.controller.server.retention.BucketChangeListener;
-import io.pravega.controller.server.retention.BucketOwnershipListener;
 import io.pravega.controller.store.stream.records.ActiveTxnRecord;
 import io.pravega.controller.store.stream.records.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.records.EpochRecord;
@@ -25,6 +22,8 @@ import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.controller.stream.api.grpc.v1.Controller.CreateScopeStatus;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteScopeStatus;
+import io.pravega.shared.controller.event.ControllerEvent;
+import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.AbstractMap.SimpleEntry;
 import java.util.List;
@@ -39,7 +38,7 @@ import java.util.concurrent.ScheduledExecutorService;
 /**
  * Stream Metadata.
  */
-public interface StreamMetadataStore {
+public interface StreamMetadataStore extends AutoCloseable {
 
     /**
      * Method to create an operation context. A context ensures that multiple calls to store for the same data are avoided
@@ -191,6 +190,19 @@ public interface StreamMetadataStore {
      * @return A map of streams in scope to their configurations
      */
     CompletableFuture<Map<String, StreamConfiguration>> listStreamsInScope(final String scopeName);
+
+    /**
+     * List existing streams in scopes with pagination. This api continues listing streams from the supplied continuation token
+     * and returns a count limited list of streams and a new continuation token.
+     *
+     * @param scopeName Name of the scope
+     * @param continuationToken continuation token
+     * @param limit limit on number of streams to return.
+     * @param executor 
+     * @return A pair of list of streams in scope with the continuation token. 
+     */
+    CompletableFuture<Pair<List<String>, String>> listStream(final String scopeName, final String continuationToken,
+                                                             final int limit, final Executor executor);
 
     /**
      * List Scopes in cluster.
@@ -799,6 +811,51 @@ public interface StreamMetadataStore {
     CompletableFuture<Set<String>> listHostsOwningTxn();
 
     /**
+     * Adds specified request in the host's task index. 
+     * This is idempotent operation.
+     *
+     * @param hostId      Host identifier.
+     * @param id          Unique id used while adding task to index.
+     * @param request     Request to index.
+     * @return            A future when completed will indicate that the task is indexed for the given host.
+     */
+    CompletableFuture<Void> addRequestToIndex(final String hostId, final String id, final ControllerEvent request);
+
+    /**
+     * Removes the index for task identified by `id` in host task index for host identified by `hostId`
+     * This is idempotent operation.
+     *
+     * @param hostId Node whose child is to be removed.
+     * @param id     Unique id used while adding task to index.
+     * @return Future which when completed will indicate that the task has been removed from index.
+     */
+    CompletableFuture<Void> removeTaskFromIndex(final String hostId, final String id);
+
+    /**
+     * Returns a map of pending tasks that were created by the host but their corresponding event was probably not posted.
+     *
+     * @param hostId Host identifier.
+     * @param limit number of tasks to retrieve from store
+     * @return A CompletableFuture which when completed will have a map of tasks to events that should be posted.
+     */
+    CompletableFuture<Map<String, ControllerEvent>> getPendingsTaskForHost(final String hostId, final int limit);
+
+    /**
+     * Remove the specified host from the index.
+     *
+     * @param hostId Host identifier.
+     * @return A future indicating completion of removal of the host from index.
+     */
+    CompletableFuture<Void> removeHostFromTaskIndex(String hostId);
+
+    /**
+     * Fetches set of hosts that own some tasks for which events have to be posted.
+     *
+     * @return set of hosts owning some pending tasks.
+     */
+    CompletableFuture<Set<String>> listHostsWithPendingTask();
+
+    /**
      * Returns the currently active epoch of the specified stream.
      *
      * @param scope    scope.
@@ -880,77 +937,7 @@ public interface StreamMetadataStore {
      */
     CompletableFuture<List<ScaleMetadata>> getScaleMetadata(final String scope, final String name, final long from, 
                                                             final long to, final OperationContext context, final Executor executor);
-
-    /**
-     * Method to register listener for changes to bucket's ownership.
-     *
-     * @param listener listener
-     */
-    void registerBucketOwnershipListener(BucketOwnershipListener listener);
-
-    /**
-     * Unregister listeners for bucket ownership.
-     */
-    void unregisterBucketOwnershipListener();
-
-    /**
-     * Method to register listeners for changes to streams under the bucket.
-     *
-     * @param bucket   bucket
-     * @param listener listener
-     */
-    void registerBucketChangeListener(int bucket, BucketChangeListener listener);
-
-    /**
-     * Method to unregister listeners for changes to streams under the bucket.
-     *
-     * @param bucket bucket
-     */
-    void unregisterBucketListener(int bucket);
-
-    /**
-     * Method to take ownership of a bucket.
-     *
-     * @param bucket   bucket id
-     * @param processId process id
-     *@param executor executor  @return future boolean which tells if ownership attempt succeeded or failed.
-     */
-    CompletableFuture<Boolean> takeBucketOwnership(int bucket, String processId, final Executor executor);
-
-    /**
-     * Return all streams in the bucket.
-     *
-     * @param bucket   bucket id.
-     * @param executor executor
-     * @return List of scopedStreamName (scope/stream)
-     */
-    CompletableFuture<List<String>> getStreamsForBucket(final int bucket, final Executor executor);
-
-    /**
-     * Add the given stream to appropriate bucket for auto-retention.
-     *
-     * @param scope           scope
-     * @param stream          stream
-     * @param retentionPolicy retention policy
-     * @param context         operation context
-     * @param executor        executor
-     * @return future
-     */
-    CompletableFuture<Void> addUpdateStreamForAutoStreamCut(final String scope, final String stream, final RetentionPolicy retentionPolicy,
-                                                            final OperationContext context, final Executor executor);
-
-    /**
-     * Remove stream from auto retention bucket.
-     *
-     * @param scope    scope
-     * @param stream   stream
-     * @param context  context
-     * @param executor executor
-     * @return future
-     */
-    CompletableFuture<Void> removeStreamFromAutoStreamCut(final String scope, final String stream,
-                                                          final OperationContext context, final Executor executor);
-
+    
     /**
      * Add stream cut to retention set of the given stream.
      *
@@ -1098,9 +1085,4 @@ public interface StreamMetadataStore {
      * @return CompletableFuture which indicates completion of processing.
      */
     CompletableFuture<Void> deleteWaitingRequestConditionally(String scope, String stream, String processorName, OperationContext context, ScheduledExecutorService executor);
-
-    /**
-     * This method performs initialization tasks for the correct operation of services working on Stream buckets.
-     */
-    CompletableFuture<Void> createBucketsRoot();
 }

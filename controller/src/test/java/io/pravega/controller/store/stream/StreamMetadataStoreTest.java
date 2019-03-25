@@ -9,6 +9,7 @@
  */
 package io.pravega.controller.store.stream;
 
+import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
 import io.pravega.client.stream.RetentionPolicy;
 import io.pravega.client.stream.ScalingPolicy;
@@ -16,7 +17,6 @@ import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.ExecutorServiceHelpers;
 import io.pravega.common.concurrent.Futures;
-import io.pravega.controller.server.retention.BucketChangeListener;
 import io.pravega.controller.store.stream.records.CommittingTransactionsRecord;
 import io.pravega.controller.store.stream.records.EpochRecord;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
@@ -27,6 +27,7 @@ import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.task.TxnResource;
 import io.pravega.controller.stream.api.grpc.v1.Controller.DeleteScopeStatus;
 import io.pravega.test.common.AssertExtensions;
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -43,6 +44,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -50,7 +52,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
@@ -70,9 +71,10 @@ import static org.mockito.Mockito.spy;
 public abstract class StreamMetadataStoreTest {
 
     //Ensure each test completes within 10 seconds.
-    @Rule
+    @Rule 
     public Timeout globalTimeout = new Timeout(30, TimeUnit.SECONDS);
     protected StreamMetadataStore store;
+    protected BucketStore bucketStore;
     protected final ScheduledExecutorService executor = Executors.newScheduledThreadPool(10);
     protected final String scope = "scope";
     protected final String stream1 = "stream1";
@@ -83,10 +85,10 @@ public abstract class StreamMetadataStoreTest {
     protected final StreamConfiguration configuration2 = StreamConfiguration.builder().scalingPolicy(policy2).build();
 
     @Before
-    public abstract void setupTaskStore() throws Exception;
+    public abstract void setupStore() throws Exception;
 
     @After
-    public abstract void cleanupTaskStore() throws Exception;
+    public abstract void cleanupStore() throws Exception;
 
     @After
     public void tearDown() {
@@ -172,11 +174,8 @@ public abstract class StreamMetadataStoreTest {
         assertEquals(0, store.getActiveSegments(scope, stream1, null, executor).get().size());
 
         // seal a non-existent stream.
-        try {
-            store.setSealed(scope, "streamNonExistent", null, executor).join();
-        } catch (CompletionException e) {
-            assertEquals(StoreException.DataNotFoundException.class, e.getCause().getClass());
-        }
+        AssertExtensions.assertFutureThrows("streamNonExistent", store.setSealed(scope, "streamNonExistent", null, executor),
+                e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException);
         // endregion
 
         // region delete scope and stream
@@ -227,8 +226,47 @@ public abstract class StreamMetadataStoreTest {
                     se instanceof StoreException.DataNotFoundException);
         } catch (CompletionException ce) {
             assertTrue("List streams in non-existent scope Scope1",
-                    ce.getCause() instanceof StoreException.DataNotFoundException);
+                    Exceptions.unwrap(ce) instanceof StoreException.DataNotFoundException);
         }
+    }
+
+    @Test
+    public void listStreamsInScopePaginated() throws Exception {
+        // list stream in scope
+        String scope = "scopeList";
+        store.createScope(scope).get();
+        String stream1 = "stream1";
+        String stream2 = "stream2";
+        String stream3 = "stream3";
+
+        store.createStream(scope, stream1, configuration1, System.currentTimeMillis(), null, executor).get();
+        store.setState(scope, stream1, State.ACTIVE, null, executor).get();
+        store.createStream(scope, stream2, configuration2, System.currentTimeMillis(), null, executor).get();
+        store.setState(scope, stream2, State.ACTIVE, null, executor).get();
+        store.createStream(scope, stream3, configuration2, System.currentTimeMillis(), null, executor).get();
+        store.setState(scope, stream3, State.ACTIVE, null, executor).get();
+        
+        Pair<List<String>, String> streamInScope = store.listStream(scope, "", 2, executor).get();
+        assertEquals("List streams in scope", 2, streamInScope.getKey().size());
+        assertFalse(Strings.isNullOrEmpty(streamInScope.getValue()));
+
+        streamInScope = store.listStream(scope, streamInScope.getValue(), 2, executor).get();
+        assertEquals("List streams in scope", 1, streamInScope.getKey().size());
+        assertFalse(Strings.isNullOrEmpty(streamInScope.getValue()));
+
+        streamInScope = store.listStream(scope, streamInScope.getValue(), 2, executor).get();
+        assertEquals("List streams in scope", 0, streamInScope.getKey().size());
+        assertFalse(Strings.isNullOrEmpty(streamInScope.getValue()));
+        
+        store.deleteStream(scope, stream1, null, executor).join();
+        
+        streamInScope = store.listStream(scope, "", 2, executor).get();
+        assertEquals("List streams in scope", 2, streamInScope.getKey().size());
+        assertFalse(Strings.isNullOrEmpty(streamInScope.getValue()));
+
+        streamInScope = store.listStream(scope, streamInScope.getValue(), 2, executor).get();
+        assertEquals("List streams in scope", 0, streamInScope.getKey().size());
+        assertFalse(Strings.isNullOrEmpty(streamInScope.getValue()));
     }
 
     @Test
@@ -338,7 +376,7 @@ public abstract class StreamMetadataStoreTest {
         Assert.assertEquals(1, store.listHostsOwningTxn().join().size());
         // Test remove is idempotent operation.
         store.removeTxnFromIndex(host1, txn2, true).join();
-        Assert.assertEquals(0, store.listHostsOwningTxn().join().size());
+        Assert.assertTrue(store.listHostsOwningTxn().join().size() <= 1);
         // Test removal of txn that was never added.
         store.removeTxnFromIndex(host1, new TxnResource(scope, stream1, UUID.randomUUID()), true).join();
 
@@ -512,7 +550,7 @@ public abstract class StreamMetadataStoreTest {
     @Test
     public void concurrentStartScaleTest() throws Exception {
         final String scope = "ScopeScale";
-        final String stream = "StreamScale";
+        final String stream = "StreamScale1";
         final ScalingPolicy policy = ScalingPolicy.fixed(2);
         final StreamConfiguration configuration = StreamConfiguration.builder().scalingPolicy(policy).build();
 
@@ -810,7 +848,7 @@ public abstract class StreamMetadataStoreTest {
     @Test
     public void scaleWithTxnForInconsistentScanerios() throws Exception {
         final String scope = "ScopeScaleWithTx";
-        final String stream = "StreamScaleWithTx";
+        final String stream = "StreamScaleWithTx1";
         final ScalingPolicy policy = ScalingPolicy.fixed(2);
         final StreamConfiguration configuration = StreamConfiguration.builder().scalingPolicy(policy).build();
 
@@ -958,14 +996,9 @@ public abstract class StreamMetadataStoreTest {
 
         store.createStream(scope, stream, configuration, start, null, executor).get();
         store.setState(scope, stream, State.ACTIVE, null, executor).get();
-
-        AtomicReference<BucketChangeListener.StreamNotification> notificationRef = new AtomicReference<>();
-
-        store.registerBucketChangeListener(0, notificationRef::set);
-        store.unregisterBucketListener(0);
-
-        store.addUpdateStreamForAutoStreamCut(scope, stream, retentionPolicy, null, executor).get();
-        List<String> streams = store.getStreamsForBucket(0, executor).get();
+        
+        bucketStore.addStreamToBucketStore(BucketStore.ServiceType.RetentionService, scope, stream, executor).get();
+        Set<String> streams = bucketStore.getStreamsForBucket(BucketStore.ServiceType.RetentionService, 0, executor).get();
         assertTrue(streams.contains(String.format("%s/%s", scope, stream)));
 
         Map<Long, Long> map1 = new HashMap<>();
@@ -1005,8 +1038,8 @@ public abstract class StreamMetadataStoreTest {
         assertTrue(!list.contains(streamCut2));
         assertTrue(list.contains(streamCut3));
 
-        store.removeStreamFromAutoStreamCut(scope, stream, null, executor).get();
-        streams = store.getStreamsForBucket(0, executor).get();
+        bucketStore.removeStreamFromBucketStore(BucketStore.ServiceType.RetentionService, scope, stream, executor).get();
+        streams = bucketStore.getStreamsForBucket(BucketStore.ServiceType.RetentionService, 0, executor).get();
         assertTrue(!streams.contains(String.format("%s/%s", scope, stream)));
     }
 
@@ -1026,8 +1059,8 @@ public abstract class StreamMetadataStoreTest {
         store.createStream(scope, stream, configuration, start, null, executor).get();
         store.setState(scope, stream, State.ACTIVE, null, executor).get();
 
-        store.addUpdateStreamForAutoStreamCut(scope, stream, retentionPolicy, null, executor).get();
-        List<String> streams = store.getStreamsForBucket(0, executor).get();
+        bucketStore.addStreamToBucketStore(BucketStore.ServiceType.RetentionService, scope, stream, executor).get();
+        Set<String> streams = bucketStore.getStreamsForBucket(BucketStore.ServiceType.RetentionService, 0, executor).get();
         assertTrue(streams.contains(String.format("%s/%s", scope, stream)));
 
         // region Size Computation on stream cuts on epoch 0

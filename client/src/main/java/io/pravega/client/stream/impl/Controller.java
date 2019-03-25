@@ -16,7 +16,9 @@ import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.StreamCut;
 import io.pravega.client.stream.Transaction;
 import io.pravega.client.stream.TxnFailedException;
+import io.pravega.common.util.AsyncIterator;
 import io.pravega.shared.protocol.netty.PravegaNodeUri;
+
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -43,12 +45,12 @@ public interface Controller extends AutoCloseable {
     CompletableFuture<Boolean> createScope(final String scopeName);
 
     /**
-     * Gets a map of all streams in scope with their current configuration.
+     * Gets an async iterator on streams in scope.
      *
      * @param scopeName The name of the scope for which to list streams in.
-     * @return A future which when completed will contain a map of Stream to Configuration for all streams in the scope. 
+     * @return An AsyncIterator which can be used to iterate over all Streams in the scope. 
      */
-    CompletableFuture<Map<Stream, StreamConfiguration>> listStreamsInScope(final String scopeName);
+    AsyncIterator<Stream> listStreams(final String scopeName);
 
     /**
      * API to delete a scope. Note that a scope can only be deleted in the case is it empty. If

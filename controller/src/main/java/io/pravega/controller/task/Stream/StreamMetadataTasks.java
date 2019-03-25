@@ -12,7 +12,6 @@ package io.pravega.controller.task.Stream;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import io.pravega.client.EventStreamClientFactory;
-import io.pravega.client.netty.impl.ConnectionFactory;
 import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.client.stream.EventWriterConfig;
 import io.pravega.client.stream.RetentionPolicy;
@@ -28,8 +27,7 @@ import io.pravega.controller.metrics.StreamMetrics;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.eventProcessor.ControllerEventProcessors;
 import io.pravega.controller.server.eventProcessor.requesthandlers.TaskExceptions;
-import io.pravega.controller.server.rpc.auth.AuthHelper;
-import io.pravega.controller.store.host.HostControllerStore;
+import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.CreateStreamResponse;
 import io.pravega.controller.store.stream.EpochTransitionOperationExceptions;
 import io.pravega.controller.store.stream.OperationContext;
@@ -52,6 +50,7 @@ import io.pravega.controller.stream.api.grpc.v1.Controller.UpdateStreamStatus;
 import io.pravega.controller.task.Task;
 import io.pravega.controller.task.TaskBase;
 import io.pravega.controller.util.Config;
+import io.pravega.controller.util.RetryHelper;
 import io.pravega.shared.controller.event.ControllerEvent;
 import io.pravega.shared.controller.event.DeleteStreamEvent;
 import io.pravega.shared.controller.event.ScaleOpEvent;
@@ -62,7 +61,6 @@ import io.pravega.shared.protocol.netty.WireCommands;
 import io.pravega.shared.segment.StreamSegmentNameUtils;
 import java.io.Serializable;
 import java.time.Duration;
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -97,35 +95,33 @@ public class StreamMetadataTasks extends TaskBase {
     private static final long RETENTION_FREQUENCY_IN_MINUTES = Duration.ofMinutes(Config.MINIMUM_RETENTION_FREQUENCY_IN_MINUTES).toMillis();
 
     private final StreamMetadataStore streamMetadataStore;
-    private final HostControllerStore hostControllerStore;
-    private final ConnectionFactory connectionFactory;
+    private final BucketStore bucketStore;
     private final SegmentHelper segmentHelper;
     private EventStreamClientFactory clientFactory;
     private String requestStreamName;
 
     private final AtomicReference<EventStreamWriter<ControllerEvent>> requestEventWriterRef = new AtomicReference<>();
-    private final AuthHelper authHelper;
     private final RequestTracker requestTracker;
+    private final AtomicBoolean streamWritersInitialized;
 
     public StreamMetadataTasks(final StreamMetadataStore streamMetadataStore,
-                               final HostControllerStore hostControllerStore, final TaskMetadataStore taskMetadataStore,
+                               BucketStore bucketStore, final TaskMetadataStore taskMetadataStore,
                                final SegmentHelper segmentHelper, final ScheduledExecutorService executor, final String hostId,
-                               final ConnectionFactory connectionFactory, AuthHelper authHelper, RequestTracker requestTracker) {
-        this(streamMetadataStore, hostControllerStore, taskMetadataStore, segmentHelper, executor, new Context(hostId),
-                connectionFactory, authHelper, requestTracker);
+                               RequestTracker requestTracker) {
+        this(streamMetadataStore, bucketStore, taskMetadataStore, segmentHelper, executor, new Context(hostId),
+                requestTracker);
     }
 
     private StreamMetadataTasks(final StreamMetadataStore streamMetadataStore,
-                                final HostControllerStore hostControllerStore, final TaskMetadataStore taskMetadataStore,
+                                BucketStore bucketStore, final TaskMetadataStore taskMetadataStore,
                                 final SegmentHelper segmentHelper, final ScheduledExecutorService executor, final Context context,
-                                ConnectionFactory connectionFactory, AuthHelper authHelper, RequestTracker requestTracker) {
+                                RequestTracker requestTracker) {
         super(taskMetadataStore, executor, context);
         this.streamMetadataStore = streamMetadataStore;
-        this.hostControllerStore = hostControllerStore;
+        this.bucketStore = bucketStore;
         this.segmentHelper = segmentHelper;
-        this.connectionFactory = connectionFactory;
-        this.authHelper = authHelper;
         this.requestTracker = requestTracker;
+        this.streamWritersInitialized = new AtomicBoolean(false);
         this.setReady();
     }
 
@@ -133,6 +129,7 @@ public class StreamMetadataTasks extends TaskBase {
                                         final String streamName) {
         this.requestStreamName = streamName;
         this.clientFactory = clientFactory;
+        this.streamWritersInitialized.set(true);
     }
 
     /**
@@ -171,10 +168,10 @@ public class StreamMetadataTasks extends TaskBase {
                 .thenCompose(configProperty -> {
                     // 2. post event to start update workflow
                     if (!configProperty.getObject().isUpdating()) {
-                        return writeEvent(new UpdateStreamEvent(scope, stream, requestId))
+                        return addIndexAndSubmitTask(new UpdateStreamEvent(scope, stream, requestId), 
                                 // 3. update new configuration in the store with updating flag = true
                                 // if attempt to update fails, we bail out with no harm done
-                                .thenCompose(x -> streamMetadataStore.startUpdateConfiguration(scope, stream, newConfig,
+                                () -> streamMetadataStore.startUpdateConfiguration(scope, stream, newConfig,
                                         context, executor))
                                 // 4. wait for update to complete
                                 .thenCompose(x -> checkDone(() -> isUpdated(scope, stream, newConfig, context))
@@ -364,9 +361,9 @@ public class StreamMetadataTasks extends TaskBase {
                 .thenCompose(property -> {
                     if (!property.getObject().isUpdating()) {
                         // 2. post event with new stream cut if no truncation is ongoing
-                        return writeEvent(new TruncateStreamEvent(scope, stream, requestId))
+                        return addIndexAndSubmitTask(new TruncateStreamEvent(scope, stream, requestId), 
                                 // 3. start truncation by updating the metadata
-                                .thenCompose(x -> streamMetadataStore.startTruncation(scope, stream, streamCut,
+                                () -> streamMetadataStore.startTruncation(scope, stream, streamCut,
                                         context, executor))
                                 .thenApply(x -> {
                                     log.debug(requestId, "Started truncation request for stream {}/{}", scope, stream);
@@ -398,16 +395,16 @@ public class StreamMetadataTasks extends TaskBase {
 
         // 1. post event for seal.
         SealStreamEvent event = new SealStreamEvent(scope, stream, requestId);
-        return writeEvent(event)
+        return addIndexAndSubmitTask(event, 
                 // 2. set state to sealing
-                .thenCompose(x -> streamMetadataStore.getVersionedState(scope, stream, context, executor))
+                () -> streamMetadataStore.getVersionedState(scope, stream, context, executor)
                 .thenCompose(state -> {
                     if (state.getObject().equals(State.SEALED)) {
                         return CompletableFuture.completedFuture(state);
                     } else {
                         return streamMetadataStore.updateVersionedState(scope, stream, State.SEALING, state, context, executor);
                     }
-                })
+                }))
                 // 3. return with seal initiated.
                 .thenCompose(result -> {
                     if (result.getObject().equals(State.SEALED) || result.getObject().equals(State.SEALING)) {
@@ -485,13 +482,13 @@ public class StreamMetadataTasks extends TaskBase {
      * @return returns the newly created segments.
      */
     public CompletableFuture<ScaleResponse> manualScale(String scope, String stream, List<Long> segmentsToSeal,
-                                                        List<AbstractMap.SimpleEntry<Double, Double>> newRanges, long scaleTimestamp,
+                                                        List<Map.Entry<Double, Double>> newRanges, long scaleTimestamp,
                                                         OperationContext context) {
         final long requestId = requestTracker.getRequestIdFor("scaleStream", scope, stream, String.valueOf(scaleTimestamp));
         ScaleOpEvent event = new ScaleOpEvent(scope, stream, segmentsToSeal, newRanges, true, scaleTimestamp, requestId);
 
-        return writeEvent(event)
-                .thenCompose(x -> streamMetadataStore.submitScale(scope, stream, segmentsToSeal, new ArrayList<>(newRanges),
+        return addIndexAndSubmitTask(event,
+                () -> streamMetadataStore.submitScale(scope, stream, segmentsToSeal, new ArrayList<>(newRanges),
                         scaleTimestamp, null, context, executor)
                         .handle((startScaleResponse, e) -> {
                             ScaleResponse.Builder response = ScaleResponse.newBuilder();
@@ -556,6 +553,31 @@ public class StreamMetadataTasks extends TaskBase {
                         });
     }
 
+    /**
+     * This method takes an event and a future supplier and guarantees that if future supplier has been executed then event will 
+     * be posted in request stream. It does it by following approach:
+     * 1. it first adds the index for the event to be posted to the current host. 
+     * 2. it then invokes future. 
+     * 3. it then posts event. 
+     * 4. removes the index. 
+     *
+     * If controller fails after step 2, a replacement controller will failover all indexes and {@link RequestSweeper} will 
+     * post events for any index that is found.  
+     *
+     * Upon failover, an index can be found if failure occurred in any step before 3. It is safe to post duplicate events 
+     * because event processing is idempotent. It is also safe to post event even if step 2 was not performed because the 
+     * event will be ignored by the processor after a while.
+     */
+    @VisibleForTesting
+    <T> CompletableFuture<T> addIndexAndSubmitTask(ControllerEvent event, Supplier<CompletableFuture<T>> futureSupplier) {
+        String id = UUID.randomUUID().toString();
+        return streamMetadataStore.addRequestToIndex(context.getHostId(), id, event)
+                           .thenCompose(v -> futureSupplier.get())
+                           .thenCompose(t -> RetryHelper.withIndefiniteRetriesAsync(() -> writeEvent(event), e -> { }, executor)
+                                                        .thenCompose(v -> streamMetadataStore.removeTaskFromIndex(context.getHostId(), id))
+                                                        .thenApply(v -> t));
+    }
+    
     public CompletableFuture<Void> writeEvent(ControllerEvent event) {
         CompletableFuture<Void> result = new CompletableFuture<>();
 
@@ -581,6 +603,7 @@ public class StreamMetadataTasks extends TaskBase {
     @VisibleForTesting
     public void setRequestEventWriter(EventStreamWriter<ControllerEvent> requestEventWriter) {
         requestEventWriterRef.set(requestEventWriter);
+        streamWritersInitialized.set(true);
     }
 
     private EventStreamWriter<ControllerEvent> getRequestWriter() {
@@ -621,8 +644,7 @@ public class StreamMetadataTasks extends TaskBase {
                                     return withRetries(() -> {
                                         CompletableFuture<Void> future;
                                         if (config.getRetentionPolicy() != null) {
-                                            future = streamMetadataStore.addUpdateStreamForAutoStreamCut(scope, stream,
-                                                    config.getRetentionPolicy(), context, executor);
+                                            future = bucketStore.addStreamToBucketStore(BucketStore.ServiceType.RetentionService, scope, stream, executor);
                                         } else {
                                             future = CompletableFuture.completedFuture(null);
                                         }
@@ -699,13 +721,13 @@ public class StreamMetadataTasks extends TaskBase {
     public CompletableFuture<Void> notifyNewSegment(String scope, String stream, long segmentId, ScalingPolicy policy,
                                                     String controllerToken) {
         return Futures.toVoid(withRetries(() -> segmentHelper.createSegment(scope, stream, segmentId, policy,
-                hostControllerStore, this.connectionFactory, controllerToken, RequestTag.NON_EXISTENT_ID), executor));
+                controllerToken, RequestTag.NON_EXISTENT_ID), executor));
     }
 
     public CompletableFuture<Void> notifyNewSegment(String scope, String stream, long segmentId, ScalingPolicy policy,
                                                     String controllerToken, long requestId) {
         return Futures.toVoid(withRetries(() -> segmentHelper.createSegment(scope,
-                stream, segmentId, policy, hostControllerStore, this.connectionFactory, controllerToken, requestId), executor));
+                stream, segmentId, policy, controllerToken, requestId), executor));
     }
 
     public CompletableFuture<Void> notifyDeleteSegments(String scope, String stream, Set<Long> segmentsToDelete,
@@ -720,13 +742,13 @@ public class StreamMetadataTasks extends TaskBase {
     public CompletableFuture<Void> notifyDeleteSegment(String scope, String stream, long segmentId, String delegationToken,
                                                        long requestId) {
         return Futures.toVoid(withRetries(() -> segmentHelper.deleteSegment(scope,
-                stream, segmentId, hostControllerStore, this.connectionFactory, delegationToken, requestId), executor));
+                stream, segmentId, delegationToken, requestId), executor));
     }
 
     public CompletableFuture<Void> notifyTruncateSegment(String scope, String stream, Map.Entry<Long, Long> segmentCut,
                                                          String delegationToken, long requestId) {
         return Futures.toVoid(withRetries(() -> segmentHelper.truncateSegment(scope, stream, segmentCut.getKey(),
-                segmentCut.getValue(), hostControllerStore, this.connectionFactory, delegationToken, requestId), executor));
+                segmentCut.getValue(), delegationToken, requestId), executor));
     }
 
     public CompletableFuture<Map<Long, Long>> getSealedSegmentsSize(String scope, String stream, List<Long> sealedSegments, String delegationToken) {
@@ -758,8 +780,7 @@ public class StreamMetadataTasks extends TaskBase {
                 scope,
                 stream,
                 sealedSegment,
-                hostControllerStore,
-                this.connectionFactory, delegationToken, requestId), executor));
+                delegationToken, requestId), executor));
     }
 
     public CompletableFuture<Void> notifyPolicyUpdates(String scope, String stream, List<Segment> activeSegments,
@@ -777,8 +798,7 @@ public class StreamMetadataTasks extends TaskBase {
                 scope,
                 stream,
                 segmentId,
-                hostControllerStore,
-                this.connectionFactory, delegationToken), executor)
+                delegationToken), executor)
                 .thenApply(WireCommands.StreamSegmentInfo::getWriteOffset);
     }
 
@@ -789,8 +809,7 @@ public class StreamMetadataTasks extends TaskBase {
                 stream,
                 policy,
                 segmentId,
-                hostControllerStore,
-                this.connectionFactory, delegationToken, requestId), executor);
+                delegationToken, requestId), executor);
     }
 
     private SegmentRange convert(String scope, String stream, Map.Entry<Long, Map.Entry<Double, Double>> segment) {
@@ -832,9 +851,7 @@ public class StreamMetadataTasks extends TaskBase {
                 stream,
                 segmentNumber,
                 segmentNumber,
-                txnId,
-                this.hostControllerStore,
-                this.connectionFactory, this.retrieveDelegationToken()), executor);
+                txnId, this.retrieveDelegationToken()), executor);
     }
 
     public CompletableFuture<Void> notifyTxnAbort(final String scope, final String stream,
@@ -851,28 +868,33 @@ public class StreamMetadataTasks extends TaskBase {
                 stream,
                 segmentNumber,
                 txnId,
-                this.hostControllerStore,
-                this.connectionFactory, this.retrieveDelegationToken()), executor);
+                this.retrieveDelegationToken()), executor);
+    }
+
+    boolean isStreamWriterInitialized() {
+        return streamWritersInitialized.get();    
     }
 
     @Override
     public TaskBase copyWithContext(Context context) {
         return new StreamMetadataTasks(streamMetadataStore,
-                hostControllerStore,
+                bucketStore, 
                 taskMetadataStore,
                 segmentHelper,
                 executor,
                 context,
-                connectionFactory,
-                authHelper,
                 requestTracker);
     }
 
     @Override
-    public void close() throws Exception {
+    public void close()  {
+        EventStreamWriter<ControllerEvent> writer = requestEventWriterRef.get();
+        if (writer != null) {
+            writer.close();
+        }
     }
 
     public String retrieveDelegationToken() {
-        return authHelper.retrieveMasterToken();
+        return segmentHelper.retrieveMasterToken();
     }
 }

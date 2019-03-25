@@ -21,10 +21,10 @@ import io.pravega.client.stream.Serializer;
 import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.impl.Controller;
-import io.pravega.client.stream.impl.JavaSerializer;
 import io.pravega.client.stream.impl.SegmentSelector;
 import io.pravega.common.concurrent.ExecutorServiceHelpers;
 import io.pravega.common.concurrent.Futures;
+import io.pravega.controller.eventProcessor.EventSerializer;
 import io.pravega.segmentstore.contracts.StreamSegmentStore;
 import io.pravega.segmentstore.contracts.tables.TableStore;
 import io.pravega.segmentstore.server.host.handler.PravegaConnectionListener;
@@ -61,11 +61,11 @@ public class DebugStreamSegmentsTest {
     private static final String STREAM = "testStream1";
     private static final int NUMBER_OF_WRITERS = 3;
     private final int controllerPort = TestUtils.getAvailableListenPort();
-    private final URI controllerUri = URI.create("tcp://localhost:" + String.valueOf(controllerPort));
+    private final URI controllerUri = URI.create("tcp://localhost:" + controllerPort);
     private final String serviceHost = "localhost";
     private final int servicePort = TestUtils.getAvailableListenPort();
     private final int containerCount = 4;
-    private final Serializer<AutoScaleEvent> autoScaleEventSerializer = new JavaSerializer<>();
+    private final Serializer<AutoScaleEvent> autoScaleEventSerializer = new EventSerializer<>();
     private final Random random = new Random();
     private TestingServer zkTestServer;
     private PravegaConnectionListener server;
@@ -87,8 +87,9 @@ public class DebugStreamSegmentsTest {
         serviceBuilder = ServiceBuilder.newInMemoryBuilder(ServiceBuilderConfig.getDefaultConfig());
         serviceBuilder.initialize();
         StreamSegmentStore store = serviceBuilder.createStreamSegmentService();
+        TableStore tableStore = serviceBuilder.createTableStoreService();
 
-        server = new PravegaConnectionListener(false, servicePort, store, mock(TableStore.class));
+        server = new PravegaConnectionListener(false, servicePort, store, tableStore);
         server.startListening();
 
         controllerWrapper = new ControllerWrapper(zkTestServer.getConnectString(), false, controllerPort, serviceHost,

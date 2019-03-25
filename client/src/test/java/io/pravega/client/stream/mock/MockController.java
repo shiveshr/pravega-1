@@ -24,12 +24,14 @@ import io.pravega.client.stream.TxnFailedException;
 import io.pravega.client.stream.impl.CancellableRequest;
 import io.pravega.client.stream.impl.ConnectionClosedException;
 import io.pravega.client.stream.impl.Controller;
+import io.pravega.client.stream.impl.SegmentWithRange;
 import io.pravega.client.stream.impl.StreamImpl;
 import io.pravega.client.stream.impl.StreamSegmentSuccessors;
 import io.pravega.client.stream.impl.StreamSegments;
 import io.pravega.client.stream.impl.StreamSegmentsWithPredecessors;
 import io.pravega.client.stream.impl.TxnSegments;
 import io.pravega.common.concurrent.Futures;
+import io.pravega.common.util.AsyncIterator;
 import io.pravega.shared.protocol.netty.FailingReplyProcessor;
 import io.pravega.shared.protocol.netty.PravegaNodeUri;
 import io.pravega.shared.protocol.netty.ReplyProcessor;
@@ -43,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -83,8 +86,26 @@ public class MockController implements Controller {
 
     @Override
     @Synchronized
-    public CompletableFuture<Map<Stream, StreamConfiguration>> listStreamsInScope(String scopeName) {
-        return CompletableFuture.completedFuture(createdScopes.get(scopeName).stream().collect(Collectors.toMap(x -> x, createdStreams::get)));
+    public AsyncIterator<Stream> listStreams(String scopeName) {
+        Set<Stream> collect = createdScopes.get(scopeName);
+        return new AsyncIterator<Stream>() {
+            Object lock = new Object();
+            @GuardedBy("lock")
+            Iterator<Stream> iterator = collect.iterator();
+            @Override
+            public CompletableFuture<Stream> getNext() {
+                Stream next;
+                synchronized (lock) {
+                    if (!iterator.hasNext()) {
+                        next = null;
+                    } else {
+                        next = iterator.next();
+                    }
+                }
+
+                return CompletableFuture.completedFuture(next);
+            }
+        };
     }
 
     @Override
@@ -268,10 +289,13 @@ public class MockController implements Controller {
     
     private StreamSegments getCurrentSegments(Stream stream) {
         List<Segment> segmentsInStream = getSegmentsForStream(stream);
-        TreeMap<Double, Segment> segments = new TreeMap<>();
+        TreeMap<Double, SegmentWithRange> segments = new TreeMap<>();
         double increment = 1.0 / segmentsInStream.size();
         for (int i = 0; i < segmentsInStream.size(); i++) {
-            segments.put((i + 1) * increment, new Segment(stream.getScope(), stream.getStreamName(), i));
+            segments.put((i + 1) * increment,
+                         new SegmentWithRange(new Segment(stream.getScope(), stream.getStreamName(), i),
+                                              i * increment,
+                                              (i + 1) * increment));
         }
         return new StreamSegments(segments, "");
     }

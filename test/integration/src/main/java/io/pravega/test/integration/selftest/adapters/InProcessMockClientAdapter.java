@@ -113,7 +113,7 @@ class InProcessMockClientAdapter extends ClientAdapterBase {
     public boolean isFeatureSupported(Feature feature) {
         // This uses MockStreamManager, which only supports Create and Append.
         // Also the MockStreamSegmentStore does not support any other features as well.
-        return feature == Feature.Create
+        return feature == Feature.CreateStream
                 || feature == Feature.Append;
     }
 
@@ -156,7 +156,7 @@ class InProcessMockClientAdapter extends ClientAdapterBase {
         }
 
         @Override
-        public CompletableFuture<SegmentProperties> getStreamSegmentInfo(String streamSegmentName, boolean waitForPendingOps, Duration timeout) {
+        public CompletableFuture<SegmentProperties> getStreamSegmentInfo(String streamSegmentName, Duration timeout) {
             if (this.segments.contains(streamSegmentName)) {
                 return CompletableFuture.completedFuture(StreamSegmentInformation.builder().name(streamSegmentName).build());
             } else {

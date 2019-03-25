@@ -34,9 +34,8 @@ import io.pravega.controller.util.Config;
 import io.pravega.segmentstore.contracts.StreamSegmentStore;
 import io.pravega.segmentstore.contracts.tables.TableStore;
 import io.pravega.segmentstore.server.host.handler.PravegaConnectionListener;
+import io.pravega.segmentstore.server.host.stat.AutoScaleMonitor;
 import io.pravega.segmentstore.server.host.stat.AutoScalerConfig;
-import io.pravega.segmentstore.server.host.stat.SegmentStatsFactory;
-import io.pravega.segmentstore.server.host.stat.SegmentStatsRecorder;
 import io.pravega.segmentstore.server.store.ServiceBuilder;
 import io.pravega.segmentstore.server.store.ServiceBuilderConfig;
 import io.pravega.shared.NameUtils;
@@ -81,15 +80,14 @@ public class EndToEndAutoScaleUpWithTxnTest {
             StreamSegmentStore store = serviceBuilder.createStreamSegmentService();
             TableStore tableStore = serviceBuilder.createTableStoreService();
             @Cleanup
-            SegmentStatsFactory segmentStatsFactory = new SegmentStatsFactory();
-            SegmentStatsRecorder statsRecorder = segmentStatsFactory.createSegmentStatsRecorder(store,
+            AutoScaleMonitor autoScaleMonitor = new AutoScaleMonitor(store,
                     internalCF,
                     AutoScalerConfig.builder().with(AutoScalerConfig.MUTE_IN_SECONDS, 0)
-                            .with(AutoScalerConfig.COOLDOWN_IN_SECONDS, 0).build());
+                                    .with(AutoScalerConfig.COOLDOWN_IN_SECONDS, 0).build());
 
             @Cleanup
             PravegaConnectionListener server = new PravegaConnectionListener(false, "localhost", 12345, store, tableStore,
-                    statsRecorder, null, null, null, true);
+                    autoScaleMonitor.getStatsRecorder(), autoScaleMonitor.getTableSegmentStatsRecorder(), null, null, null, true);
             server.startListening();
 
             controllerWrapper.awaitRunning();

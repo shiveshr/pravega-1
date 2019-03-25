@@ -15,46 +15,36 @@ import com.google.common.cache.LoadingCache;
 
 import javax.annotation.ParametersAreNonnullByDefault;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
-public class Cache {
+public class Cache<T> {
+    private static final int MAXIMUM_SIZE = 10000;
+    
+    private final LoadingCache<T, CompletableFuture<Data>> cache;
 
-    @FunctionalInterface
-    public interface Loader {
-        CompletableFuture<Data> get(final String key);
-    }
-
-    private final LoadingCache<String, CompletableFuture<Data>> cache;
-
-    public Cache(final Loader loader) {
+    public Cache(final Function<T, CompletableFuture<Data>> loader) {
         cache = CacheBuilder.newBuilder()
-                .maximumSize(10000)
-                .expireAfterWrite(10, TimeUnit.MINUTES)
-                .build(new CacheLoader<String, CompletableFuture<Data>>() {
+                .maximumSize(MAXIMUM_SIZE)
+                .expireAfterAccess(2, TimeUnit.MINUTES)
+                .build(new CacheLoader<T, CompletableFuture<Data>>() {
                     @ParametersAreNonnullByDefault
                     @Override
-                    public CompletableFuture<Data> load(final String key) {
-                        CompletableFuture<Data> result = loader.get(key);
-                        result.exceptionally(ex -> {
-                            invalidateCache(key);
-                            return null;
-                        });
-                        return result;
+                    public CompletableFuture<Data> load(final T key) {
+                        return loader.apply(key);
                     }
                 });
     }
 
-    public CompletableFuture<Data> getCachedData(final String key) {
-        return cache.getUnchecked(key);
+    public CompletableFuture<Data> getCachedData(final T key) {
+        return cache.getUnchecked(key).exceptionally(ex -> {
+            invalidateCache(key);
+            throw new CompletionException(ex);
+        });
     }
 
-    public Void invalidateCache(final String key) {
+    public void invalidateCache(final T key) {
         cache.invalidate(key);
-        return null;
-    }
-
-    public Void invalidateAll() {
-        cache.invalidateAll();
-        return null;
     }
 }

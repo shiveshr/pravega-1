@@ -29,11 +29,11 @@ import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.Retry;
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -97,6 +97,9 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
 
         final AtomicLong writtenEvents = new AtomicLong();
         final AtomicLong readEvents = new AtomicLong();
+        // Due to segment rebalances across readers, any reader may read arbitrary sub-sequences of events for various
+        // routing keys. This calls for a global state across readers to check the correctness of event sequences.
+        final Map<String, Long> routingKeySeqNumber = new ConcurrentHashMap<>();
 
         TestState(boolean txnWrite) {
             this.txnWrite = txnWrite;
@@ -207,11 +210,14 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
         }, executorService);
     }
 
+    CompletableFuture<Void> startWritingIntoTxn(final TransactionalEventStreamWriter<String> writer) {
+        return startWritingIntoTxn(writer, testState.stopWriteFlag);
+    }
+
     CompletableFuture<Void> startWritingIntoTxn(final TransactionalEventStreamWriter<String> writer, AtomicBoolean stopFlag) {
         return CompletableFuture.runAsync(() -> {
             while (!stopFlag.get()) {
                 Transaction<String> transaction = null;
-                AtomicBoolean txnIsDone = new AtomicBoolean(false);
 
                 try {
                     transaction = writer.beginTxn();
@@ -234,7 +240,6 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
                     }
                     //commit Txn
                     transaction.commit();
-                    txnIsDone.set(true);
 
                     //wait for transaction to get committed
                     testState.txnStatusFutureList.add(checkTxnStatus(transaction, NUM_EVENTS_PER_TRANSACTION));
@@ -242,7 +247,6 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
                     // Given that we have retry logic both in the interaction with controller and
                     // segment store, we should fail the test case in the presence of any exception
                     // caught here.
-                    txnIsDone.set(true);
                     log.warn("Exception while writing events in the transaction: ", e);
                     if (transaction != null) {
                         log.debug("Transaction with id: {}  failed", transaction.getTxnId());
@@ -264,7 +268,6 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
         return CompletableFuture.runAsync(() -> {
             log.info("Exit flag status: {}, Read count: {}, Write count: {}", testState.stopReadFlag.get(),
                     testState.getEventReadCount(), testState.getEventWrittenCount());
-            final Map<String, Long> routingKeySeqNumber = new HashMap<>();
             while (!(stopFlag.get() && testState.getEventReadCount() == testState.getEventWrittenCount())) {
                 log.info("Entering read loop");
                 // Exit only if exitFlag is true  and read Count equals write count.
@@ -277,7 +280,7 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
                         // produced them and that there are no duplicate or missing events.
                         final String[] keyAndSeqNum = event.split(RK_VALUE_SEPARATOR);
                         final long seqNumber = Long.valueOf(keyAndSeqNum[1]);
-                        routingKeySeqNumber.compute(keyAndSeqNum[0], (rk, currentSeqNum) -> {
+                        testState.routingKeySeqNumber.compute(keyAndSeqNum[0], (rk, currentSeqNum) -> {
                             if (currentSeqNum != null && currentSeqNum + 1 != seqNumber) {
                                 throw new AssertionError("Event order violated at " + currentSeqNum + " by " + seqNumber);
                             }
@@ -332,12 +335,12 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
     }
 
     void createWriters(EventStreamClientFactory clientFactory, final int writers, String scope, String stream) {
-        createWritersInternal(clientFactory, writers, scope, stream, testState.writersComplete);
+        createWritersInternal(clientFactory, writers, scope, stream, testState.writersComplete, testState.txnWrite);
     }
 
     void addNewWriters(EventStreamClientFactory clientFactory, final int writers, String scope, String stream) {
         Preconditions.checkNotNull(testState.writersListComplete.get(0));
-        createWritersInternal(clientFactory, writers, scope, stream, testState.newWritersComplete);
+        createWritersInternal(clientFactory, writers, scope, stream, testState.newWritersComplete, testState.txnWrite);
     }
 
     void waitForTxnsToComplete() {
@@ -421,7 +424,8 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
 
     // Private methods region
 
-    private void createWritersInternal(EventStreamClientFactory clientFactory, final int writers, String scope, String stream, CompletableFuture<Void> writersComplete) {
+    private void createWritersInternal(EventStreamClientFactory clientFactory, final int writers, String scope, String stream,
+                                       CompletableFuture<Void> writersComplete, boolean isTransactionalWriter) {
         testState.writersListComplete.add(writersComplete);
         log.info("Client factory details {}", clientFactory.toString());
         log.info("Creating {} writers", writers);
@@ -429,9 +433,10 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
         log.info("Writers writing in the scope {}", scope);
         CompletableFuture.runAsync(() -> {
             for (int i = 0; i < writers; i++) {
-                log.info("Starting writer{}", i);
-                final EventStreamWriter<String> tmpWriter = instantiateWriter(clientFactory, stream);
-                final CompletableFuture<Void> writerFuture = startWriting(tmpWriter);
+                log.info("Starting writer: {} (is transactional? {})", i, isTransactionalWriter);
+                final CompletableFuture<Void> writerFuture = isTransactionalWriter ?
+                        startWritingIntoTxn(instantiateTransactionalWriter(clientFactory, stream)) :
+                        startWriting(instantiateWriter(clientFactory, stream));
                 Futures.exceptionListener(writerFuture, t -> log.error("Error while writing events:", t));
                 writerFutureList.add(writerFuture);
             }
@@ -443,12 +448,20 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
     }
 
     private <T extends Serializable> EventStreamWriter<T> instantiateWriter(EventStreamClientFactory clientFactory, String stream) {
-        EventWriterConfig writerConfig = EventWriterConfig.builder()
-                                                          .maxBackoffMillis(WRITER_MAX_BACKOFF_MILLIS)
-                                                          .retryAttempts(WRITER_MAX_RETRY_ATTEMPTS)
-                                                          .transactionTimeoutTime(TRANSACTION_TIMEOUT)
-                                                          .build();
-        return clientFactory.createEventWriter(stream, new JavaSerializer<>(), writerConfig);
+        return clientFactory.createEventWriter(stream, new JavaSerializer<>(), buildWriterConfig());
+    }
+
+    private <T extends Serializable> TransactionalEventStreamWriter<T> instantiateTransactionalWriter(EventStreamClientFactory clientFactory,
+                                                                                                      String stream) {
+        return clientFactory.createTransactionalEventWriter(stream, new JavaSerializer<>(), buildWriterConfig());
+    }
+
+    private EventWriterConfig buildWriterConfig() {
+        return EventWriterConfig.builder()
+                                .maxBackoffMillis(WRITER_MAX_BACKOFF_MILLIS)
+                                .retryAttempts(WRITER_MAX_RETRY_ATTEMPTS)
+                                .transactionTimeoutTime(TRANSACTION_TIMEOUT)
+                                .build();
     }
 
     private <T> void closeWriter(EventStreamWriter<T> writer) {

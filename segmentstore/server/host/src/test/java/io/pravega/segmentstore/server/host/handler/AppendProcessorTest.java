@@ -18,7 +18,7 @@ import io.pravega.segmentstore.contracts.AttributeUpdateType;
 import io.pravega.segmentstore.contracts.Attributes;
 import io.pravega.segmentstore.contracts.BadOffsetException;
 import io.pravega.segmentstore.contracts.StreamSegmentStore;
-import io.pravega.shared.metrics.DynamicLogger;
+import io.pravega.segmentstore.server.host.stat.SegmentStatsRecorder;
 import io.pravega.shared.protocol.netty.Append;
 import io.pravega.shared.protocol.netty.FailingRequestProcessor;
 import io.pravega.shared.protocol.netty.WireCommands.AppendSetup;
@@ -33,15 +33,12 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import lombok.Cleanup;
+import lombok.val;
 import org.junit.Test;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
 
 import static io.pravega.segmentstore.contracts.Attributes.EVENT_COUNT;
-import static io.pravega.shared.MetricsNames.SEGMENT_WRITE_BYTES;
-import static io.pravega.shared.MetricsNames.SEGMENT_WRITE_EVENTS;
-import static io.pravega.shared.MetricsNames.globalMetricName;
-import static io.pravega.shared.MetricsNames.nameFromSegment;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -57,6 +54,7 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 public class AppendProcessorTest {
+    private final long requestId = 1L;
 
     @Test
     public void testAppend() throws Exception {
@@ -65,8 +63,8 @@ public class AppendProcessorTest {
         byte[] data = new byte[] { 1, 2, 3, 4, 6, 7, 8, 9 };
         StreamSegmentStore store = mock(StreamSegmentStore.class);
         ServerConnection connection = mock(ServerConnection.class);
-        DynamicLogger mockedDynamicLogger = Mockito.mock(DynamicLogger.class);
-        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), null, mockedDynamicLogger);
+        val mockedRecorder = Mockito.mock(SegmentStatsRecorder.class);
+        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), mockedRecorder, null, false);
 
         setupGetAttributes(streamSegmentName, clientId, store);
         CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
@@ -74,7 +72,7 @@ public class AppendProcessorTest {
             .thenReturn(result);
 
         processor.setupAppend(new SetupAppend(1, clientId, streamSegmentName, ""));
-        processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null, requestId));
         verify(store).getAttributes(anyString(), eq(Collections.singleton(clientId)), eq(true), eq(AppendProcessor.TIMEOUT));
         verify(store).append(streamSegmentName,
                              data,
@@ -82,14 +80,11 @@ public class AppendProcessorTest {
                              AppendProcessor.TIMEOUT);
         verify(connection).send(new AppendSetup(1, streamSegmentName, clientId, 0));
         verify(connection, atLeast(0)).resumeReading();
-        verify(connection).send(new DataAppended(clientId, data.length, 0L));
+        verify(connection).send(new DataAppended(requestId, clientId, data.length, 0L));
         verifyNoMoreInteractions(connection);
         verifyNoMoreInteractions(store);
 
-        verify(mockedDynamicLogger).incCounterValue(globalMetricName(SEGMENT_WRITE_BYTES), 8);
-        verify(mockedDynamicLogger).incCounterValue(globalMetricName(SEGMENT_WRITE_EVENTS), 1);
-        verify(mockedDynamicLogger).incCounterValue(nameFromSegment(SEGMENT_WRITE_BYTES, streamSegmentName), 8);
-        verify(mockedDynamicLogger).incCounterValue(nameFromSegment(SEGMENT_WRITE_EVENTS, streamSegmentName), 1);
+        verify(mockedRecorder).recordAppend(eq(streamSegmentName), eq(8L), eq(1), any());
     }
 
     @Test
@@ -99,31 +94,28 @@ public class AppendProcessorTest {
         byte[] data = new byte[] { 1, 2, 3, 4, 6, 7, 8, 9 };
         StreamSegmentStore store = mock(StreamSegmentStore.class);
         ServerConnection connection = mock(ServerConnection.class);
-        DynamicLogger mockedDynamicLogger = Mockito.mock(DynamicLogger.class);
-        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), null, mockedDynamicLogger);
+        val mockedRecorder = Mockito.mock(SegmentStatsRecorder.class);
+        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), mockedRecorder, null, false);
 
         setupGetAttributes(streamSegmentName, clientId, store);
         CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
         when(store.append(streamSegmentName, data, updateEventNumber(clientId, data.length), AppendProcessor.TIMEOUT))
                 .thenReturn(result);
 
-        processor.setupAppend(new SetupAppend(1, clientId, streamSegmentName, ""));
-        processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null));
+        processor.setupAppend(new SetupAppend(requestId, clientId, streamSegmentName, ""));
+        processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null, requestId));
         verify(store).getAttributes(anyString(), eq(Collections.singleton(clientId)), eq(true), eq(AppendProcessor.TIMEOUT));
         verify(store).append(streamSegmentName,
                 data,
                 updateEventNumber(clientId, data.length),
                 AppendProcessor.TIMEOUT);
-        verify(connection).send(new AppendSetup(1, streamSegmentName, clientId, 0));
+        verify(connection).send(new AppendSetup(requestId, streamSegmentName, clientId, 0));
         verify(connection, atLeast(0)).resumeReading();
-        verify(connection).send(new DataAppended(clientId, data.length, 0L));
+        verify(connection).send(new DataAppended(requestId, clientId, data.length, 0L));
         verifyNoMoreInteractions(connection);
         verifyNoMoreInteractions(store);
 
-        verify(mockedDynamicLogger).incCounterValue(globalMetricName(SEGMENT_WRITE_BYTES), 8);
-        verify(mockedDynamicLogger).incCounterValue(globalMetricName(SEGMENT_WRITE_EVENTS), 1);
-        verify(mockedDynamicLogger, never()).incCounterValue(nameFromSegment(SEGMENT_WRITE_BYTES, streamSegmentName), 8);
-        verify(mockedDynamicLogger, never()).incCounterValue(nameFromSegment(SEGMENT_WRITE_EVENTS, streamSegmentName), 1);
+        verify(mockedRecorder).recordAppend(eq(streamSegmentName), eq(8L), eq(1), any());
     }
 
     @Test
@@ -144,7 +136,7 @@ public class AppendProcessorTest {
         CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
         when(store.append(streamSegmentName1, data, updateEventNumber(clientId, 10), AppendProcessor.TIMEOUT))
             .thenReturn(result);
-        processor.append(new Append(streamSegmentName1, clientId, 10, 1, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName1, clientId, 10, 1, Unpooled.wrappedBuffer(data), null, requestId));
         verifier.verify(store).append(streamSegmentName1, data, updateEventNumber(clientId, 10), AppendProcessor.TIMEOUT);
 
         setupGetAttributes(streamSegmentName2, clientId, store);
@@ -154,13 +146,13 @@ public class AppendProcessorTest {
         CompletableFuture<Void> result2 = CompletableFuture.completedFuture(null);
         when(store.append(streamSegmentName2, data, updateEventNumber(clientId, 2000), AppendProcessor.TIMEOUT))
             .thenReturn(result2);
-        processor.append(new Append(streamSegmentName2, clientId, 2000, 1, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName2, clientId, 2000, 1, Unpooled.wrappedBuffer(data), null, requestId));
         verifier.verify(store).append(streamSegmentName2, data, updateEventNumber(clientId, 2000), AppendProcessor.TIMEOUT);
 
         CompletableFuture<Void> result3 = CompletableFuture.completedFuture(null);
         when(store.append(streamSegmentName1, data, updateEventNumber(clientId, 20, 10, 1), AppendProcessor.TIMEOUT))
             .thenReturn(result3);
-        processor.append(new Append(streamSegmentName1, clientId, 20, 1, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName1, clientId, 20, 1, Unpooled.wrappedBuffer(data), null, requestId));
         verifier.verify(store).append(streamSegmentName1, data, updateEventNumber(clientId, 20, 10, 1), AppendProcessor.TIMEOUT);
 
         verifyNoMoreInteractions(store);
@@ -173,35 +165,32 @@ public class AppendProcessorTest {
         byte[] data = new byte[] { 1, 2, 3, 4, 6, 7, 8, 9 };
         StreamSegmentStore store = mock(StreamSegmentStore.class);
         ServerConnection connection = mock(ServerConnection.class);
-        DynamicLogger mockedDynamicLogger = Mockito.mock(DynamicLogger.class);
-        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), null, mockedDynamicLogger);
+        val mockedRecorder = Mockito.mock(SegmentStatsRecorder.class);
+        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), mockedRecorder, null, false);
 
         setupGetAttributes(streamSegmentName, clientId, store);
         CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
         when(store.append(streamSegmentName, data, updateEventNumber(clientId, 1),
                           AppendProcessor.TIMEOUT)).thenReturn(result);
         processor.setupAppend(new SetupAppend(1, clientId, streamSegmentName, ""));
-        processor.append(new Append(streamSegmentName, clientId, 1, 1, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName, clientId, 1, 1, Unpooled.wrappedBuffer(data), null, requestId));
 
         result = CompletableFuture.completedFuture(null);
         when(store.append(streamSegmentName, data.length, data, updateEventNumber(clientId, 2, 1, 1),
                           AppendProcessor.TIMEOUT)).thenReturn(result);
 
-        processor.append(new Append(streamSegmentName, clientId, 2, 1, Unpooled.wrappedBuffer(data), (long) data.length));
+        processor.append(new Append(streamSegmentName, clientId, 2, 1, Unpooled.wrappedBuffer(data), (long) data.length, requestId));
         verify(store).getAttributes(anyString(), eq(Collections.singleton(clientId)), eq(true), eq(AppendProcessor.TIMEOUT));
         verify(store).append(streamSegmentName, data, updateEventNumber(clientId, 1), AppendProcessor.TIMEOUT);
         verify(store).append(streamSegmentName, data.length, data, updateEventNumber(clientId, 2, 1, 1),
                              AppendProcessor.TIMEOUT);
         verify(connection).send(new AppendSetup(1, streamSegmentName, clientId, 0));
         verify(connection, atLeast(0)).resumeReading();
-        verify(connection).send(new DataAppended(clientId, 1, 0));
-        verify(connection).send(new DataAppended(clientId, 2, 1));
+        verify(connection).send(new DataAppended(requestId, clientId, 1, 0));
+        verify(connection).send(new DataAppended(requestId, clientId, 2, 1));
         verifyNoMoreInteractions(connection);
         verifyNoMoreInteractions(store);
-        verify(mockedDynamicLogger, times(2)).incCounterValue(globalMetricName(SEGMENT_WRITE_BYTES), 8);
-        verify(mockedDynamicLogger, times(2)).incCounterValue(globalMetricName(SEGMENT_WRITE_EVENTS), 1);
-        verify(mockedDynamicLogger, times(2)).incCounterValue(nameFromSegment(SEGMENT_WRITE_BYTES, streamSegmentName), 8);
-        verify(mockedDynamicLogger, times(2)).incCounterValue(nameFromSegment(SEGMENT_WRITE_EVENTS, streamSegmentName), 1);
+        verify(mockedRecorder, times(2)).recordAppend(eq(streamSegmentName), eq(8L), eq(1), any());
     }
 
     @Test
@@ -211,35 +200,31 @@ public class AppendProcessorTest {
         byte[] data = new byte[] { 1, 2, 3, 4, 6, 7, 8, 9 };
         StreamSegmentStore store = mock(StreamSegmentStore.class);
         ServerConnection connection = mock(ServerConnection.class);
-        DynamicLogger mockedDynamicLogger = Mockito.mock(DynamicLogger.class);
-        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), null, mockedDynamicLogger);
+        val mockedRecorder = Mockito.mock(SegmentStatsRecorder.class);
+        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), mockedRecorder, null, false);
 
         setupGetAttributes(streamSegmentName, clientId, store);
         CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
         when(store.append(streamSegmentName, data, updateEventNumber(clientId, 1),
                           AppendProcessor.TIMEOUT)).thenReturn(result);
         processor.setupAppend(new SetupAppend(1, clientId, streamSegmentName, ""));
-        processor.append(new Append(streamSegmentName, clientId, 1, 1, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName, clientId, 1, 1, Unpooled.wrappedBuffer(data), null, requestId));
 
         result = Futures.failedFuture(new BadOffsetException(streamSegmentName, data.length, 0));
         when(store.append(streamSegmentName, 0, data, updateEventNumber(clientId, 2, 1, 1),
                           AppendProcessor.TIMEOUT)).thenReturn(result);
 
-        processor.append(new Append(streamSegmentName, clientId, 2, 1, Unpooled.wrappedBuffer(data), 0L));
+        processor.append(new Append(streamSegmentName, clientId, 2, 1, Unpooled.wrappedBuffer(data), 0L, requestId));
         verify(store).getAttributes(anyString(), eq(Collections.singleton(clientId)), eq(true), eq(AppendProcessor.TIMEOUT));
         verify(store).append(streamSegmentName, data, updateEventNumber(clientId, 1), AppendProcessor.TIMEOUT);
         verify(store).append(streamSegmentName, 0L, data, updateEventNumber(clientId, 2, 1, 1), AppendProcessor.TIMEOUT);
         verify(connection).send(new AppendSetup(1, streamSegmentName, clientId, 0));
         verify(connection, atLeast(0)).resumeReading();
-        verify(connection).send(new DataAppended(clientId, 1, 0));
-        verify(connection).send(new ConditionalCheckFailed(clientId, 2));
+        verify(connection).send(new DataAppended(requestId, clientId, 1, 0));
+        verify(connection).send(new ConditionalCheckFailed(clientId, 2, requestId));
         verifyNoMoreInteractions(connection);
         verifyNoMoreInteractions(store);
-
-        verify(mockedDynamicLogger).incCounterValue(globalMetricName(SEGMENT_WRITE_BYTES), 8);
-        verify(mockedDynamicLogger).incCounterValue(globalMetricName(SEGMENT_WRITE_EVENTS), 1);
-        verify(mockedDynamicLogger).incCounterValue(nameFromSegment(SEGMENT_WRITE_BYTES, streamSegmentName), 8);
-        verify(mockedDynamicLogger).incCounterValue(nameFromSegment(SEGMENT_WRITE_EVENTS, streamSegmentName), 1);
+        verify(mockedRecorder).recordAppend(eq(streamSegmentName), eq(8L), eq(1), any());
     }
 
     @Test
@@ -254,7 +239,7 @@ public class AppendProcessorTest {
         setupGetAttributes(streamSegmentName, clientId, 100, store);
         processor.setupAppend(new SetupAppend(1, clientId, streamSegmentName, ""));
         try {
-            processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null));
+            processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null, requestId));
             fail();
         } catch (RuntimeException e) {
             //expected
@@ -275,7 +260,7 @@ public class AppendProcessorTest {
         ServerConnection connection = mock(ServerConnection.class);
         AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), null);
         try {
-            processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null));
+            processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null, requestId));
             fail();
         } catch (RuntimeException e) {
             //expected
@@ -305,10 +290,10 @@ public class AppendProcessorTest {
         when(store.append(segment2, data, updateEventNumber(clientId2, data.length), AppendProcessor.TIMEOUT))
             .thenReturn(result);
 
-        processor.setupAppend(new SetupAppend(1, clientId1, segment1, ""));
-        processor.append(new Append(segment1, clientId1, data.length, 1, Unpooled.wrappedBuffer(data), null));
-        processor.setupAppend(new SetupAppend(2, clientId2, segment2, ""));
-        processor.append(new Append(segment2, clientId2, data.length, 1, Unpooled.wrappedBuffer(data), null));
+        processor.setupAppend(new SetupAppend(requestId, clientId1, segment1, ""));
+        processor.append(new Append(segment1, clientId1, data.length, 1, Unpooled.wrappedBuffer(data), null, requestId));
+        processor.setupAppend(new SetupAppend(requestId, clientId2, segment2, ""));
+        processor.append(new Append(segment2, clientId2, data.length, 1, Unpooled.wrappedBuffer(data), null, requestId));
 
         verify(store).getAttributes(eq(segment1), eq(Collections.singleton(clientId1)), eq(true), eq(AppendProcessor.TIMEOUT));
         verify(store).append(segment1,
@@ -321,10 +306,10 @@ public class AppendProcessorTest {
                              updateEventNumber(clientId2, data.length),
                              AppendProcessor.TIMEOUT);
         verify(connection, atLeast(0)).resumeReading();
-        verify(connection).send(new AppendSetup(1, segment1, clientId1, 0));
-        verify(connection).send(new DataAppended(clientId1, data.length, 0));
-        verify(connection).send(new AppendSetup(2, segment2, clientId2, 0));
-        verify(connection).send(new DataAppended(clientId2, data.length, 0));
+        verify(connection).send(new AppendSetup(requestId, segment1, clientId1, 0));
+        verify(connection).send(new DataAppended(requestId, clientId1, data.length, 0));
+        verify(connection).send(new AppendSetup(requestId, segment2, clientId2, 0));
+        verify(connection).send(new DataAppended(requestId, clientId2, data.length, 0));
         verifyNoMoreInteractions(connection);
         verifyNoMoreInteractions(store);
     }
@@ -336,8 +321,8 @@ public class AppendProcessorTest {
         byte[] data = new byte[] { 1, 2, 3, 4, 6, 7, 8, 9 };
         StreamSegmentStore store = mock(StreamSegmentStore.class);
         ServerConnection connection = mock(ServerConnection.class);
-        DynamicLogger mockedDynamicLogger = Mockito.mock(DynamicLogger.class);
-        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), null, mockedDynamicLogger);
+        val mockedRecorder = mock(SegmentStatsRecorder.class);
+        AppendProcessor processor = new AppendProcessor(store, connection, new FailingRequestProcessor(), mockedRecorder, null, false);
 
         setupGetAttributes(streamSegmentName, clientId, store);
         CompletableFuture<Void> result = new CompletableFuture<>();
@@ -346,9 +331,9 @@ public class AppendProcessorTest {
             .thenReturn(result);
 
         processor.setupAppend(new SetupAppend(1, clientId, streamSegmentName, ""));
-        processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null, requestId));
         try {
-            processor.append(new Append(streamSegmentName, clientId, data.length * 2, 1, Unpooled.wrappedBuffer(data), null));
+            processor.append(new Append(streamSegmentName, clientId, data.length * 2, 1, Unpooled.wrappedBuffer(data), null, requestId));
             fail();
         } catch (IllegalStateException e) {
             // Expected
@@ -359,10 +344,7 @@ public class AppendProcessorTest {
         verify(store, atMost(1)).append(any(), any(), any(), any());
         verifyNoMoreInteractions(connection);
 
-        verify(mockedDynamicLogger, never()).incCounterValue(globalMetricName(SEGMENT_WRITE_BYTES), 8);
-        verify(mockedDynamicLogger, never()).incCounterValue(globalMetricName(SEGMENT_WRITE_EVENTS), 1);
-        verify(mockedDynamicLogger, never()).incCounterValue(nameFromSegment(SEGMENT_WRITE_BYTES, streamSegmentName), 8);
-        verify(mockedDynamicLogger, never()).incCounterValue(nameFromSegment(SEGMENT_WRITE_EVENTS, streamSegmentName), 1);
+        verify(mockedRecorder, never()).recordAppend(eq(streamSegmentName), eq(8L), eq(1), any());
     }
 
     @Test
@@ -384,14 +366,14 @@ public class AppendProcessorTest {
         when(store.append(streamSegmentName, data,
                           updateEventNumber(clientId, 100, Attributes.NULL_ATTRIBUTE_VALUE, eventCount),
                           AppendProcessor.TIMEOUT)).thenReturn(result);
-        processor.append(new Append(streamSegmentName, clientId, 100, eventCount, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName, clientId, 100, eventCount, Unpooled.wrappedBuffer(data), null, requestId));
         verify(store).append(streamSegmentName, data,
                              updateEventNumber(clientId, 100, Attributes.NULL_ATTRIBUTE_VALUE, eventCount),
                              AppendProcessor.TIMEOUT);
 
         when(store.append(streamSegmentName, data, updateEventNumber(clientId, 200, 100, eventCount),
                           AppendProcessor.TIMEOUT)).thenReturn(result);
-        processor.append(new Append(streamSegmentName, clientId, 200, eventCount, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName, clientId, 200, eventCount, Unpooled.wrappedBuffer(data), null, requestId));
         verify(store).append(streamSegmentName, data, updateEventNumber(clientId, 200, 100, eventCount),
                              AppendProcessor.TIMEOUT);
 
@@ -445,16 +427,14 @@ public class AppendProcessorTest {
 
         //Trigger the first append, here the sending of DataAppended ack will be delayed/hung.
         nettyExecutor.submit(() -> processor.append(new Append(streamSegmentName, clientId, 100, eventCount, Unpooled
-                .wrappedBuffer(data), null)));
+                .wrappedBuffer(data), null, requestId)));
         firstStoreAppendInvoked.await();
         verify(store).append(streamSegmentName, data, updateEventNumber(clientId, 100, Attributes
                 .NULL_ATTRIBUTE_VALUE, eventCount), AppendProcessor.TIMEOUT);
 
         /* Trigger the next append. This should be completed immediately and should not cause a store.append to be
         invoked as the previous DataAppended ack is still not sent. */
-        processor.append(new Append(streamSegmentName, clientId, 200, eventCount, Unpooled
-                .wrappedBuffer(data),
-                null));
+        processor.append(new Append(streamSegmentName, clientId, 200, eventCount, Unpooled.wrappedBuffer(data), null, requestId));
 
         //Since the first Ack was never sent the next append should not be written to the store.
         verifyNoMoreInteractions(store);
@@ -470,8 +450,8 @@ public class AppendProcessorTest {
                 AppendProcessor.TIMEOUT);
         //Verify two DataAppended acks are sent out.
         verify(connection, times(2)).send(any(DataAppended.class));
-        verify(connection).send(new DataAppended(clientId, 100, Long.MIN_VALUE));
-        verify(connection).send(new DataAppended(clientId, 200, 100));
+        verify(connection).send(new DataAppended(requestId, clientId, 100, Long.MIN_VALUE));
+        verify(connection).send(new DataAppended(requestId, clientId, 200, 100));
     }
 
     @Test
@@ -492,13 +472,13 @@ public class AppendProcessorTest {
         CompletableFuture<Void> result = CompletableFuture.completedFuture(null);
         when(store.append(streamSegmentName, data, updateEventNumber(clientId, 200, 100, eventCount),
                           AppendProcessor.TIMEOUT)).thenReturn(result);
-        processor.append(new Append(streamSegmentName, clientId, 200, eventCount, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName, clientId, 200, eventCount, Unpooled.wrappedBuffer(data), null, requestId));
         verify(store).append(streamSegmentName, data, updateEventNumber(clientId, 200, 100, eventCount),
                              AppendProcessor.TIMEOUT);
 
         when(store.append(streamSegmentName, data, updateEventNumber(clientId, 300, 200, eventCount),
                           AppendProcessor.TIMEOUT)).thenReturn(result);
-        processor.append(new Append(streamSegmentName, clientId, 300, eventCount, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName, clientId, 300, eventCount, Unpooled.wrappedBuffer(data), null, requestId));
         verify(store).append(streamSegmentName, data, updateEventNumber(clientId, 300, 200, eventCount),
                              AppendProcessor.TIMEOUT);
 
@@ -521,7 +501,7 @@ public class AppendProcessorTest {
                 .thenReturn(result);
 
         processor.setupAppend(new SetupAppend(1, clientId, streamSegmentName, ""));
-        processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null));
+        processor.append(new Append(streamSegmentName, clientId, data.length, 1, Unpooled.wrappedBuffer(data), null, requestId));
         verify(store).getAttributes(anyString(), eq(Collections.singleton(clientId)), eq(true), eq(AppendProcessor.TIMEOUT));
         verify(store).append(streamSegmentName,
                 data,
@@ -530,7 +510,7 @@ public class AppendProcessorTest {
 
         verify(connection).send(new AppendSetup(1, streamSegmentName, clientId, 0));
         verify(connection, atLeast(0)).resumeReading();
-        verify(connection).send(new OperationUnsupported(data.length, "appending data", ""));
+        verify(connection).send(new OperationUnsupported(requestId, "appending data", ""));
         verifyNoMoreInteractions(connection);
         verifyNoMoreInteractions(store);
     }

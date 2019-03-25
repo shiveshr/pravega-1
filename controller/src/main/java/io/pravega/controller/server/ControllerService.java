@@ -273,7 +273,7 @@ public class ControllerService {
 
         return CompletableFuture.completedFuture(
                 segmentHelper.getSegmentUri(segment.getStreamInfo().getScope(), segment.getStreamInfo().getStream(),
-                        segment.getSegmentId(), hostStore)
+                        segment.getSegmentId())
         );
     }
 
@@ -434,6 +434,19 @@ public class ControllerService {
     public CompletableFuture<Map<String, StreamConfiguration>> listStreamsInScope(final String scope) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         return streamStore.listStreamsInScope(scope);
+    }
+
+    /**
+     * List existing streams in scopes.
+     *
+     * @param scope Name of the scope.
+     * @param token continuation token
+     * @param limit limit for number of streams to return. 
+     * @return List of streams in scope.
+     */
+    public CompletableFuture<Pair<List<String>, String>> listStreams(final String scope, final String token, final int limit) {
+        Exceptions.checkNotNullOrEmpty(scope, "scope");
+        return streamStore.listStream(scope, token, limit, executor);
     }
 
     /**
