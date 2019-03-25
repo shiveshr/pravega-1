@@ -61,7 +61,8 @@ public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest
     private StreamMetadataStore streamStore;
     private SegmentHelper segmentHelper;
     private RequestTracker requestTracker;
-
+    private ConnectionFactoryImpl connectionFactory;
+    
     @Override
     public void setup() throws Exception {
         executorService = ExecutorServiceHelpers.newScheduledThreadPool(20, "testpool");
@@ -71,7 +72,7 @@ public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest
         BucketStore bucketStore = StreamStoreFactory.createInMemoryBucketStore();
         requestTracker = new RequestTracker(true);
 
-        ConnectionFactoryImpl connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
+        connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
                                                                                         .controllerURI(URI.create("tcp://localhost"))
                                                                                         .build());
         AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
@@ -111,5 +112,6 @@ public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest
             streamTransactionMetadataTasks.close();
         }
         streamStore.close();
+        connectionFactory.close();
     }
 }

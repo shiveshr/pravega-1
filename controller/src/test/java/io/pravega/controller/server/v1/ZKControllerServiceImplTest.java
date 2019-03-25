@@ -56,6 +56,8 @@ import org.apache.curator.test.TestingServer;
 import org.junit.Assert;
 import org.junit.Test;
 
+import javax.ws.rs.HEAD;
+
 import static org.junit.Assert.assertEquals;
 
 /**
@@ -73,6 +75,7 @@ public class ZKControllerServiceImplTest extends ControllerServiceImplTest {
     private StreamTransactionMetadataTasks streamTransactionMetadataTasks;
     private Cluster cluster;
     private StreamMetadataStore streamStore;
+    private ConnectionFactoryImpl connectionFactory;
 
     @Override
     public void setup() throws Exception {
@@ -94,7 +97,7 @@ public class ZKControllerServiceImplTest extends ControllerServiceImplTest {
         streamStore = StreamStoreFactory.createZKStore(zkClient, executorService);
         BucketStore bucketStore = StreamStoreFactory.createZKBucketStore(zkClient, executorService);
 
-        ConnectionFactoryImpl connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
+        connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
         AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
         segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, disabledAuthHelper);
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelper,
@@ -144,6 +147,7 @@ public class ZKControllerServiceImplTest extends ControllerServiceImplTest {
         storeClient.close();
         zkClient.close();
         zkServer.close();
+        connectionFactory.close();
     }
 
     @Test

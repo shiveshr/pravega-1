@@ -93,10 +93,13 @@ public abstract class TaskTest {
 
     private StreamMetadataTasks streamMetadataTasks;
     private SegmentHelper segmentHelperMock;
-    private final RequestTracker requestTracker = new RequestTracker(true);
     
     abstract StreamMetadataStore getStream();
 
+    private Map<Long, Map.Entry<Double, Double>> segmentsCreated;
+    private final RequestTracker requestTracker = new RequestTracker(true);
+    private ConnectionFactoryImpl connectionFactory;
+    
     @Before
     public void setUp() throws Exception {
         zkServer = new TestingServerStarter().start();
@@ -107,9 +110,10 @@ public abstract class TaskTest {
         streamStore = getStream();
         taskMetadataStore = TaskStoreFactory.createZKStore(cli, executor);
 
-        ConnectionFactoryImpl connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
-                                                                                        .controllerURI(URI.create("tcp://localhost"))
-                                                                                        .build());
+
+        connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
+                                                                  .controllerURI(URI.create("tcp://localhost"))
+                                                                  .build());
         segmentHelperMock = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, AuthHelper.getDisabledAuthHelper());
         streamMetadataTasks = new StreamMetadataTasks(streamStore, StreamStoreFactory.createInMemoryBucketStore(), taskMetadataStore, segmentHelperMock,
                 executor, HOSTNAME, requestTracker);
@@ -171,6 +175,7 @@ public abstract class TaskTest {
         zkServer.stop();
         zkServer.close();
         ExecutorServiceHelpers.shutdown(executor);
+        connectionFactory.close();
     }
 
     @Test
