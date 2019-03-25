@@ -72,6 +72,8 @@ public class StreamSegmentNameUtilsTests {
 
     @Test
     public void testSegmentId() {
+        System.err.println(StreamSegmentNameUtils.getEpoch(4144643450292L));
+        
         // compute segment id and then extract primary and secondary ids
         long segmentId = StreamSegmentNameUtils.computeSegmentId(10, 14);
         assertEquals(10, StreamSegmentNameUtils.getSegmentNumber(segmentId));

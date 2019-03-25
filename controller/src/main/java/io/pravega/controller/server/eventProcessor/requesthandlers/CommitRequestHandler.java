@@ -140,6 +140,9 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                     return CompletableFuture.completedFuture(versionedMetadata);
                                 } else {
                                     List<UUID> txnList = versionedMetadata.getObject().getTransactionsToCommit();
+                                    if (!txnList.isEmpty()) {
+                                        log.info("shivesh:: transactions picked for committment::{}", txnList);
+                                    }
                                     // Once state is set to committing, we are guaranteed that this will be the only processing that can happen on the stream
                                     // and we can proceed with committing outstanding transactions collected in the txnList step.
                                     CompletableFuture<Void> future;
@@ -271,6 +274,8 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
         for (UUID txnId : transactionsToCommit) {
+            
+            log.info("shivesh:: Committing transaction {} on stream {}/{}", txnId, scope, stream);
             log.debug("Committing transaction {} on stream {}/{}", txnId, scope, stream);
             // commit transaction in segment store
             future = future

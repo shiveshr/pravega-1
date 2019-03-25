@@ -239,6 +239,15 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                 return DeleteScopeStatus.newBuilder().setStatus(DeleteScopeStatus.Status.SCOPE_NOT_FOUND).build();
             } else if (ex.getCause() instanceof StoreException.DataNotEmptyException
                     || ex instanceof StoreException.DataNotEmptyException) {
+                // TODO: shivesh:: temporary logging added
+                try {
+                    Map<String, StreamConfiguration> streamsInScope = listStreamsInScope(scopeName).join();
+                    streamsInScope.keySet().forEach(x -> log.error("shivesh:: scope not empty with stream:" + x));
+                    
+                } catch (Exception t) {
+                    log.error("shivesh:: exception throwing in delete scope list streams in scope", e);
+                }
+                
                 return DeleteScopeStatus.newBuilder().setStatus(DeleteScopeStatus.Status.SCOPE_NOT_EMPTY).build();
             } else {
                 log.debug("DeleteScope failed due to {} ", ex);

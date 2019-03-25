@@ -900,7 +900,10 @@ public class ControllerImpl implements Controller {
                     callback);
             return callback.getFuture();
         }, this.executor);
-        return Futures.toVoidExpecting(result,
+        return Futures.toVoidExpecting(result.exceptionally(ex -> {
+                    log.error("shivesh:: txn commit failed:: reason::", ex);
+                    throw new CompletionException(ex);
+                }),
                 TxnStatus.newBuilder().setStatus(TxnStatus.Status.SUCCESS).build(), TxnFailedException::new)
                       .whenComplete((x, e) -> {
                     if (e != null) {

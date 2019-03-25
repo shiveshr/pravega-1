@@ -255,6 +255,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      */
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final OperationContext contextOpt) {
+        log.info("shivesh:: committxn called for txn {} on stream {}/{}", txId, scope, stream);
         return checkReady().thenComposeAsync(x -> {
             final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
             return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, context),
@@ -560,7 +561,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                     if (e != null) {
                         log.debug("Txn={}, failed sealing txn", txnId);
                     } else {
-                        log.debug("Txn={}, sealed successfully, commit={}", txnId, commit);
+                        log.info("shivesh:: Txn={}, sealed successfully, commit={}", txnId, commit);
                     }
                 });
 
@@ -585,13 +586,14 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         }, executor).thenComposeAsync(status -> {
             // Step 4. Remove txn from timeoutService, and from the index.
             timeoutService.removeTxn(scope, stream, txnId);
-            log.debug("Txn={}, removed from timeout service", txnId);
-            return streamMetadataStore.removeTxnFromIndex(host, resource, true).whenComplete((v, e) -> {
+            log.info("shivesh:: Txn={}, removed from timeout service", txnId);
+            return streamMetadataStore.removeTxnFromIndex(host, resource, true).handle((v, e) -> {
                 if (e != null) {
                     log.debug("Txn={}, failed removing txn from host-txn index of host={}", txnId, hostId);
                 } else {
                     log.debug("Txn={}, removed txn from host-txn index of host={}", txnId, hostId);
                 }
+                return null;
             }).thenApply(x -> status);
         }, executor);
     }
