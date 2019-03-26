@@ -31,7 +31,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.curator.shaded.com.google.common.base.Charsets;
-import org.checkerframework.checker.units.qual.C;
 
 import java.util.AbstractMap;
 import java.util.Collections;
@@ -39,7 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -265,7 +263,7 @@ public class PravegaTablesStoreHelper {
                 IteratorState.EMPTY.toBytes());
     }
 
-    private <T> Supplier<CompletableFuture<T>> exceptionallCallback(Supplier<CompletableFuture<T>> future, String errorMessage) {
+    private <T> Supplier<CompletableFuture<T>> exceptionalCallback(Supplier<CompletableFuture<T>> future, String errorMessage) {
         return () -> CompletableFuture.completedFuture(null).thenComposeAsync(v -> future.get(), executor).exceptionally(t -> {
             Throwable cause = Exceptions.unwrap(t);
             Throwable toThrow;
@@ -312,7 +310,7 @@ public class PravegaTablesStoreHelper {
     }
 
     private <T> CompletableFuture<T> withRetries(Supplier<CompletableFuture<T>> futureSupplier, String errorMessage) {
-        return RetryHelper.withRetriesAsync(exceptionallCallback(futureSupplier, errorMessage), 
+        return RetryHelper.withRetriesAsync(exceptionalCallback(futureSupplier, errorMessage), 
                 e -> {
                     boolean b = Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException;
                     if (b) {
