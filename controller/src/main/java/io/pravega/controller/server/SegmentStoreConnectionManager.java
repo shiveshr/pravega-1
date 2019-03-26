@@ -148,7 +148,6 @@ class SegmentStoreConnectionManager {
                 ConnectionObject obj = availableConnections.poll();
                 if (obj != null) {
                     log.debug("Returning existing connection for {}", uri);
-                    log.info("shivesh:: Returning existing connection for {}", uri);
                     // return the object from the queue
                     obj.reusableReplyProcessor.initialize(processor);
                     connectionFuture = CompletableFuture.completedFuture(obj);
@@ -176,8 +175,6 @@ class SegmentStoreConnectionManager {
          * @param connectionObject connection to return to the pool.
          */
         void returnConnection(ConnectionObject connectionObject) {
-            log.info("shivesh:: connection returned to connection manager{}", uri);
-
             connectionObject.reusableReplyProcessor.uninitialize();
             if (connectionObject.state.get().equals(ConnectionObject.ConnectionState.DISCONNECTED)) {
                 handleDisconnected(connectionObject);
@@ -229,6 +226,7 @@ class SegmentStoreConnectionManager {
                 if (connectionCount < maxConcurrentConnections) {
                     waiting = waitQueue.poll();
                     if (waiting != null) {
+                        log.debug("shivesh:: Creating new connection for {}. Total connection count = {}", uri, connectionCount);
                         connectionCount++;
                     }
                 }
@@ -250,12 +248,14 @@ class SegmentStoreConnectionManager {
         }
 
         private void handleDisconnected(ConnectionObject connectionObject) {
+
             connectionObject.connection.close();
             if (connectionListener != null) {
                 connectionListener.notify(ConnectionListener.ConnectionEvent.ConnectionClosed);
             }
             boolean tryCreateNewConnection;
             synchronized (lock) {
+                log.info("shivesh:: discarding disconnected connection for {}. count = {}", uri, connectionCount);
                 connectionCount--;
                 tryCreateNewConnection = !waitQueue.isEmpty();
             }

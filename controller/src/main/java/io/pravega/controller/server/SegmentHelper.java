@@ -805,7 +805,7 @@ public class SegmentHelper {
 
             @Override
             public void tableEntriesUpdated(WireCommands.TableEntriesUpdated tableEntriesUpdated) {
-                log.info(requestId, "updateTableEntries request for {} tableSegment completed.", qualifiedName);
+                log.debug(requestId, "updateTableEntries request for {} tableSegment completed.", qualifiedName);
                 result.complete(tableEntriesUpdated.getUpdatedVersions().stream().map(KeyVersionImpl::new).collect(Collectors.toList()));
             }
 
@@ -899,7 +899,7 @@ public class SegmentHelper {
 
             @Override
             public void tableKeysRemoved(WireCommands.TableKeysRemoved tableKeysRemoved) {
-                log.info(requestId, "removeTableKeys {} completed.", qualifiedName);
+                log.debug(requestId, "removeTableKeys {} completed.", qualifiedName);
                 result.complete(null);
             }
 
@@ -1262,8 +1262,8 @@ public class SegmentHelper {
                             (((WireCommandFailedException) unwrap).getReason().equals(WireCommandFailedException.Reason.ConnectionFailed) ||
                             (((WireCommandFailedException) unwrap).getReason().equals(WireCommandFailedException.Reason.ConnectionDropped))
                             )) {
-                        log.error("shivesh:: connection failed for our request" + request.getType());
                         connectionFuture.thenAccept(connectionObject -> {
+                            log.error("shivesh:: connection failed for our request.. returning failed connection" + request.getType());
                             connectionObject.failConnection();
                             pool.returnConnection(connectionObject);
                         });

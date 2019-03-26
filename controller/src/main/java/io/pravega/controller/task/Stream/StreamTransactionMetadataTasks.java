@@ -43,9 +43,11 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import io.pravega.shared.segment.StreamSegmentNameUtils;
@@ -91,7 +93,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
 
     private volatile boolean ready;
     private final CountDownLatch readyLatch;
-
+    
     @VisibleForTesting
     public StreamTransactionMetadataTasks(final StreamMetadataStore streamMetadataStore,
                                           final SegmentHelper segmentHelper,
@@ -559,7 +561,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 streamMetadataStore.sealTransaction(scope, stream, txnId, commit, versionOpt, ctx, executor), executor)
                 .whenComplete((v, e) -> {
                     if (e != null) {
-                        log.debug("Txn={}, failed sealing txn", txnId);
+                        log.info("Txn={}, failed sealing txn", txnId);
                     } else {
                         log.info("shivesh:: Txn={}, sealed successfully, commit={}", txnId, commit);
                     }
@@ -586,7 +588,6 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         }, executor).thenComposeAsync(status -> {
             // Step 4. Remove txn from timeoutService, and from the index.
             timeoutService.removeTxn(scope, stream, txnId);
-            log.info("shivesh:: Txn={}, removed from timeout service", txnId);
             return streamMetadataStore.removeTxnFromIndex(host, resource, true).handle((v, e) -> {
                 if (e != null) {
                     log.debug("Txn={}, failed removing txn from host-txn index of host={}", txnId, hostId);

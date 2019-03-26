@@ -588,7 +588,7 @@ public class StreamMetadataTasks extends TaskBase {
                                 } else if (activeEpoch.getEpoch() == epoch || activeEpoch.getReferenceEpoch() == epoch) {
                                     response.setStatus(ScaleStatusResponse.ScaleStatus.IN_PROGRESS);
                                 } else {
-                                    // active epoch > requested epoch. If state is scaling and etr matches current request 
+                                    // active.reference epoch > requested epoch. If state is scaling and etr matches current request 
                                     // then inprogress else success
                                     if (epoch == activeEpoch.getReferenceEpoch() + 1 && state.equals(State.SCALING)) {
                                         response.setStatus(ScaleStatusResponse.ScaleStatus.IN_PROGRESS);

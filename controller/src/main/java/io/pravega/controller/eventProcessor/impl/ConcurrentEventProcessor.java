@@ -30,6 +30,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -95,7 +96,6 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
         // and it could lead to memory overload.
         if (!stop.get()) {
             semaphore.acquireUninterruptibly();
-
             long next = counter.incrementAndGet();
             PositionCounter pc = new PositionCounter(position, next);
             running.add(pc);
@@ -191,6 +191,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
         try {
             if (checkpoint.get() != null && checkpoint.get().position != null) {
                 if (checkpointer != null) {
+                    log.info("shivesh:: concurrent event processor :: checkpointing at {}", checkpoint.get().position);
                     checkpointer.store(checkpoint.get().position);
                 } else if (getCheckpointer() != null) {
                     getCheckpointer().store(checkpoint.get().position);

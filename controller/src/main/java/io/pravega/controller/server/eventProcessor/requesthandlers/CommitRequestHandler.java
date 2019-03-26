@@ -141,7 +141,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                 } else {
                                     List<UUID> txnList = versionedMetadata.getObject().getTransactionsToCommit();
                                     if (!txnList.isEmpty()) {
-                                        log.info("shivesh:: transactions picked for committment::{}", txnList);
+                                        log.info("shivesh:: num of transactions picked for committment::{}", txnList.size());
                                     }
                                     // Once state is set to committing, we are guaranteed that this will be the only processing that can happen on the stream
                                     // and we can proceed with committing outstanding transactions collected in the txnList step.

@@ -170,6 +170,7 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
                 for (EventProcessorCell<T> cell : eventProcessorMap.values()) {
                     log.info("Stopping {}", cell);
                     // first report reader offline with the last position then shut it down.
+                    log.info("shivesh:: readerOffline {} at position {}", cell.getReaderId(), cell.getCheckpoint());
                     readerGroup.readerOffline(cell.getReaderId(), cell.getCheckpoint());
                     cell.stopAsync();
                     log.info("Awaiting termination of {}", cell);
@@ -224,6 +225,7 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
             // finally, remove reader group from checkpoint store
             log.info("Removing reader group {} from process {}", readerGroup.getGroupName(), process);
             checkpointStore.removeReaderGroup(process, readerGroup.getGroupName());
+
         } finally {
             LoggerHelpers.traceLeave(log, "notifyProcessFailure", traceId, process);
         }

@@ -39,6 +39,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -314,7 +315,7 @@ public class PravegaTablesStoreHelper {
                 e -> {
                     boolean b = Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException;
                     if (b) {
-                        log.error("shivesh:: got error in our infinite retry loop while trying to work", e);
+                        log.error("shivesh:: got store connection error in our infinite retry loop while trying to work");
                     }
                     return b;
                 }, NUM_OF_TRIES, executor);

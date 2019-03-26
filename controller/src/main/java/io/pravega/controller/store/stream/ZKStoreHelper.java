@@ -85,7 +85,6 @@ public class ZKStoreHelper {
     }
 
     // region curator client store access
-
     CompletableFuture<Void> deletePath(final String path, final boolean deleteEmptyContainer) {
         final CompletableFuture<Void> result = new CompletableFuture<>();
         final CompletableFuture<Void> deleteNode = new CompletableFuture<>();
