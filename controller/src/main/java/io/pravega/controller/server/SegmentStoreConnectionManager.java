@@ -148,6 +148,7 @@ class SegmentStoreConnectionManager {
                 ConnectionObject obj = availableConnections.poll();
                 if (obj != null) {
                     log.debug("Returning existing connection for {}", uri);
+                    log.info("shivesh:: Returning existing connection for {}", uri);
                     // return the object from the queue
                     obj.reusableReplyProcessor.initialize(processor);
                     connectionFuture = CompletableFuture.completedFuture(obj);
@@ -175,6 +176,8 @@ class SegmentStoreConnectionManager {
          * @param connectionObject connection to return to the pool.
          */
         void returnConnection(ConnectionObject connectionObject) {
+            log.info("shivesh:: connection returned to connection manager{}", uri);
+
             connectionObject.reusableReplyProcessor.uninitialize();
             if (connectionObject.state.get().equals(ConnectionObject.ConnectionState.DISCONNECTED)) {
                 handleDisconnected(connectionObject);
