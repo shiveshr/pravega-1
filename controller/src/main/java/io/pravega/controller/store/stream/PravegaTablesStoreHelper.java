@@ -314,8 +314,11 @@ public class PravegaTablesStoreHelper {
     private <T> CompletableFuture<T> withRetries(Supplier<CompletableFuture<T>> futureSupplier, String errorMessage) {
         return RetryHelper.withRetriesAsync(exceptionallCallback(futureSupplier, errorMessage), 
                 e -> {
-            log.error("shivesh:: got error in our infinite retry loop while trying to work", e);
-                        return Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException;
+                    boolean b = Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException;
+                    if (b) {
+                        log.error("shivesh:: got error in our infinite retry loop while trying to work", e);
+                    }
+                    return b;
                 }, NUM_OF_TRIES, executor);
     }
 }
