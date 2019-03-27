@@ -102,10 +102,8 @@ public class StreamMetadataTasks extends TaskBase {
     private final SegmentHelper segmentHelper;
     private EventStreamClientFactory clientFactory;
     private String requestStreamName;
-
-    private final AtomicReference<EventStreamWriter<ControllerEvent>> requestEventWriterRef = new AtomicReference<>();
+    private final CompletableFuture<EventStreamWriter<ControllerEvent>> requestWriterFuture;
     private final RequestTracker requestTracker;
-    private final AtomicBoolean streamWritersInitialized;
 
     public StreamMetadataTasks(final StreamMetadataStore streamMetadataStore,
                                BucketStore bucketStore, final TaskMetadataStore taskMetadataStore,
@@ -124,7 +122,7 @@ public class StreamMetadataTasks extends TaskBase {
         this.bucketStore = bucketStore;
         this.segmentHelper = segmentHelper;
         this.requestTracker = requestTracker;
-        this.streamWritersInitialized = new AtomicBoolean(false);
+        this.requestWriterFuture = new CompletableFuture<>();
         this.setReady();
     }
 
@@ -132,7 +130,10 @@ public class StreamMetadataTasks extends TaskBase {
                                         final String streamName) {
         this.requestStreamName = streamName;
         this.clientFactory = clientFactory;
-        this.streamWritersInitialized.set(true);
+        
+        requestWriterFuture.complete(clientFactory.createEventWriter(requestStreamName,
+                ControllerEventProcessors.CONTROLLER_EVENT_SERIALIZER,
+                EventWriterConfig.builder().build()));
     }
 
     /**
@@ -629,20 +630,16 @@ public class StreamMetadataTasks extends TaskBase {
     public CompletableFuture<Void> writeEvent(ControllerEvent event) {
         CompletableFuture<Void> result = new CompletableFuture<>();
 
-        getRequestWriter().writeEvent(event).whenComplete((r, e) -> {
+        requestWriterFuture.thenApply(writer -> writer.writeEvent(event).whenComplete((r, e) -> {
             if (e != null) {
                 log.warn("exception while posting event {} {}", e.getClass().getName(), e.getMessage());
-                if (e instanceof TaskExceptions.ProcessingDisabledException) {
-                    result.completeExceptionally(e);
-                } else {
-                    // transform any other event write exception to retryable exception
-                    result.completeExceptionally(new TaskExceptions.PostEventException("Failed to post event", e));
-                }
+                // transform any other event write exception to retryable exception
+                result.completeExceptionally(new TaskExceptions.PostEventException("Failed to post event", e));
             } else {
                 log.info("event posted successfully");
                 result.complete(null);
             }
-        });
+        }));
 
         return result;
 
@@ -650,24 +647,9 @@ public class StreamMetadataTasks extends TaskBase {
 
     @VisibleForTesting
     public void setRequestEventWriter(EventStreamWriter<ControllerEvent> requestEventWriter) {
-        requestEventWriterRef.set(requestEventWriter);
-        streamWritersInitialized.set(true);
+        requestWriterFuture.complete(requestEventWriter);
     }
-
-    private EventStreamWriter<ControllerEvent> getRequestWriter() {
-        if (requestEventWriterRef.get() == null) {
-            if (clientFactory == null || requestStreamName == null) {
-                throw new TaskExceptions.ProcessingDisabledException("RequestProcessing not enabled");
-            }
-
-            requestEventWriterRef.set(clientFactory.createEventWriter(requestStreamName,
-                    ControllerEventProcessors.CONTROLLER_EVENT_SERIALIZER,
-                    EventWriterConfig.builder().build()));
-        }
-
-        return requestEventWriterRef.get();
-    }
-
+    
     @VisibleForTesting
     CompletableFuture<CreateStreamStatus.Status> createStreamBody(String scope, String stream, StreamConfiguration config, long timestamp) {
         final long requestId = requestTracker.getRequestIdFor("createStream", scope, stream);
@@ -920,7 +902,7 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     boolean isStreamWriterInitialized() {
-        return streamWritersInitialized.get();    
+        return requestWriterFuture.isDone();    
     }
 
     @Override
@@ -935,10 +917,9 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     @Override
-    public void close()  {
-        EventStreamWriter<ControllerEvent> writer = requestEventWriterRef.get();
-        if (writer != null) {
-            writer.close();
+    public void close() {
+        if (requestWriterFuture.isDone()) {
+            requestWriterFuture.join().close();
         }
     }
 

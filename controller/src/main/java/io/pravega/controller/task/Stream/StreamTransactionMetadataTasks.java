@@ -76,10 +76,6 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      */
     private static final int MAX_EXECUTION_TIME_MULTIPLIER = 1000;
 
-    protected EventStreamWriter<CommitEvent> commitEventEventStreamWriter;
-    protected EventStreamWriter<AbortEvent> abortEventEventStreamWriter;
-    protected String commitStreamName;
-    protected String abortStreamName;
     protected final String hostId;
     protected final ScheduledExecutorService executor;
 
@@ -89,9 +85,11 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     @VisibleForTesting
     private final TimeoutService timeoutService;
 
-    private final CompletableFuture<Void> ready;
+    private volatile boolean ready;
     private final CountDownLatch readyLatch;
-    
+    private final CompletableFuture<EventStreamWriter<CommitEvent>> commitWriterFuture;
+    private final CompletableFuture<EventStreamWriter<AbortEvent>> abortWriterFuture;
+
     @VisibleForTesting
     public StreamTransactionMetadataTasks(final StreamMetadataStore streamMetadataStore,
                                           final SegmentHelper segmentHelper,
@@ -103,9 +101,12 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         this.executor = executor;
         this.streamMetadataStore = streamMetadataStore;
         this.segmentHelper = segmentHelper;
-        this.timeoutService = new TimerWheelTimeoutService(this, timeoutServiceConfig, taskCompletionQueue);
+        this.timeoutService = taskCompletionQueue == null ?
+                new TimerWheelTimeoutService(this, timeoutServiceConfig) :
+                new TimerWheelTimeoutService(this, timeoutServiceConfig, taskCompletionQueue);
         readyLatch = new CountDownLatch(1);
-        this.ready = new CompletableFuture<>();
+        this.commitWriterFuture = new CompletableFuture<>();
+        this.abortWriterFuture = new CompletableFuture<>();
     }
 
     public StreamTransactionMetadataTasks(final StreamMetadataStore streamMetadataStore,
@@ -113,13 +114,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                           final ScheduledExecutorService executor,
                                           final String hostId,
                                           final TimeoutServiceConfig timeoutServiceConfig) {
-        this.hostId = hostId;
-        this.executor = executor;
-        this.streamMetadataStore = streamMetadataStore;
-        this.segmentHelper = segmentHelper;
-        this.timeoutService = new TimerWheelTimeoutService(this, timeoutServiceConfig);
-        readyLatch = new CountDownLatch(1);
-        this.ready = new CompletableFuture<>();
+        this(streamMetadataStore, segmentHelper, executor, hostId, timeoutServiceConfig, null);
     }
 
     public StreamTransactionMetadataTasks(final StreamMetadataStore streamMetadataStore,
@@ -129,13 +124,13 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         this(streamMetadataStore, segmentHelper, executor, hostId, TimeoutServiceConfig.defaultConfig());
     }
 
-    private void setReady() {
-        ready.complete(null);
+    protected void setReady() {
+        ready = true;
         readyLatch.countDown();
     }
 
     boolean isReady() {
-        return ready.isDone();
+        return ready;
     }
 
     @VisibleForTesting
@@ -143,7 +138,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         return readyLatch.await(timeout, timeUnit);
     }
 
-    void awaitInitialization() throws InterruptedException {
+    public void awaitInitialization() throws InterruptedException {
         readyLatch.await();
     }
 
@@ -156,17 +151,15 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      */
     public Void initializeStreamWriters(final EventStreamClientFactory clientFactory,
                                         final ControllerEventProcessorConfig config) {
-        this.commitStreamName = config.getCommitStreamName();
-        this.commitEventEventStreamWriter = clientFactory.createEventWriter(
+        commitWriterFuture.complete(clientFactory.createEventWriter(
                 config.getCommitStreamName(),
                 ControllerEventProcessors.COMMIT_EVENT_SERIALIZER,
-                EventWriterConfig.builder().build());
+                EventWriterConfig.builder().build()));
 
-        this.abortStreamName = config.getAbortStreamName();
-        this.abortEventEventStreamWriter = clientFactory.createEventWriter(
+        abortWriterFuture.complete(clientFactory.createEventWriter(
                 config.getAbortStreamName(),
                 ControllerEventProcessors.ABORT_EVENT_SERIALIZER,
-                EventWriterConfig.builder().build());
+                EventWriterConfig.builder().build()));
 
         this.setReady();
         return null;
@@ -175,10 +168,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     @VisibleForTesting
     public Void initializeStreamWriters(final String commitStreamName, final EventStreamWriter<CommitEvent> commitWriter,
                                         final String abortStreamName, final EventStreamWriter<AbortEvent> abortWriter) {
-        this.commitStreamName = commitStreamName;
-        this.commitEventEventStreamWriter = commitWriter;
-        this.abortStreamName = abortStreamName;
-        this.abortEventEventStreamWriter = abortWriter;
+        this.commitWriterFuture.complete(commitWriter);
+        this.abortWriterFuture.complete(abortWriter);
         this.setReady();
         return null;
     }
@@ -235,11 +226,9 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                                  final UUID txId,
                                                  final Version version,
                                                  final OperationContext contextOpt) {
-        return ready.thenComposeAsync(x -> {
-            final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
-            return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, false, txId, version, context),
-                    RETRYABLE_PREDICATE, 3, executor);
-        }, executor);
+        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
+        return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, false, txId, version, context),
+                RETRYABLE_PREDICATE, 3, executor);
     }
 
     /**
@@ -254,11 +243,9 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final OperationContext contextOpt) {
         log.info("shivesh:: committxn called for txn {} on stream {}/{}", txId, scope, stream);
-        return ready.thenComposeAsync(x -> {
-            final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
-            return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, context),
-                    RETRYABLE_PREDICATE, 3, executor);
-        }, executor);
+        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
+        return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, context),
+                RETRYABLE_PREDICATE, 3, executor);
     }
 
     /**
@@ -569,9 +556,9 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
             TxnStatus status = pair.getKey();
             switch (status) {
                 case COMMITTING:
-                    return writeCommitEvent(scope, stream, pair.getValue(), txnId, status);
+                    return writeCommitEvent(scope, stream, pair.getValue()).thenApply(v -> status);
                 case ABORTING:
-                    return writeAbortEvent(scope, stream, pair.getValue(), txnId, status);
+                    return writeAbortEvent(scope, stream, pair.getValue(), txnId).thenApply(v -> status);
                 case ABORTED:
                 case COMMITTED:
                     return CompletableFuture.completedFuture(status);
@@ -597,40 +584,23 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     }
 
     public CompletableFuture<Void> writeCommitEvent(CommitEvent event) {
-        return TaskStepsRetryHelper.withRetries(() -> commitEventEventStreamWriter.writeEvent(event.getKey(), event), executor);
+        return commitWriterFuture
+                .thenCompose(commitWriter -> commitWriter.writeEvent(event.getKey(), event));
+    }
+    
+    public CompletableFuture<Void> writeAbortEvent(AbortEvent event) {
+        return abortWriterFuture
+                .thenCompose(abortWriter -> abortWriter.writeEvent(event.getKey(), event));
     }
 
-    CompletableFuture<TxnStatus> writeCommitEvent(String scope, String stream, int epoch, UUID txnId, TxnStatus status) {
+    CompletableFuture<Void> writeCommitEvent(String scope, String stream, int epoch) {
         CommitEvent event = new CommitEvent(scope, stream, epoch);
-        String key = event.getKey();
-        return RetryHelper.withIndefiniteRetriesAsync(() -> writeEvent(commitEventEventStreamWriter, commitStreamName,
-                key, event, txnId, status), e -> { }, executor);
+        return RetryHelper.withIndefiniteRetriesAsync(() -> writeCommitEvent(event), e -> { }, executor);
     }
 
-    CompletableFuture<TxnStatus> writeAbortEvent(String scope, String stream, int epoch, UUID txnId, TxnStatus status) {
-        String key = txnId.toString();
+    CompletableFuture<Void> writeAbortEvent(String scope, String stream, int epoch, UUID txnId) {
         AbortEvent event = new AbortEvent(scope, stream, epoch, txnId);
-        return RetryHelper.withIndefiniteRetriesAsync(() -> writeEvent(abortEventEventStreamWriter, abortStreamName,
-                key, event, txnId, status), e -> { }, executor);
-    }
-
-    private <T> CompletableFuture<TxnStatus> writeEvent(final EventStreamWriter<T> streamWriter,
-                                                        final String streamName,
-                                                        final String key,
-                                                        final T event,
-                                                        final UUID txnId,
-                                                        final TxnStatus txnStatus) {
-        log.debug("Txn={}, state={}, sending request to {}", txnId, txnStatus, streamName);
-        return streamWriter.writeEvent(key, event)
-                .thenApplyAsync(v -> {
-                    log.debug("Transaction {}, sent request to {}", txnId, streamName);
-                    return txnStatus;
-                }, executor)
-                .exceptionally(ex -> {
-                    log.debug("Transaction {}, failed sending {} to {}. Retrying...", txnId, event.getClass()
-                            .getSimpleName(), streamName);
-                    throw new WriteFailedException(ex);
-                });
+        return RetryHelper.withIndefiniteRetriesAsync(() -> writeAbortEvent(event), e -> { }, executor);
     }
 
     private CompletableFuture<Void> notifyTxnCreation(final String scope, final String stream,
@@ -664,11 +634,11 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     public void close() throws Exception {
         timeoutService.stopAsync();
         timeoutService.awaitTerminated();
-        if (commitEventEventStreamWriter != null) {
-            commitEventEventStreamWriter.close();
+        if (commitWriterFuture.isDone()) {
+            commitWriterFuture.join().close();
         }
-        if (abortEventEventStreamWriter != null) {
-            abortEventEventStreamWriter.close();
+        if (abortWriterFuture.isDone()) {
+            abortWriterFuture.join().close();
         }
     }
 }
