@@ -15,18 +15,28 @@ import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 
 @Builder
 @Data
 @AllArgsConstructor
+@Slf4j
 public class CommitEvent implements ControllerEvent {
     private static final long serialVersionUID = 1L;
+    private static final AtomicLong counterShivesh = new AtomicLong();
     private final String scope;
     private final String stream;
     private final int epoch;
+    private final long shivesh;
+
+    public CommitEvent(String scope, String stream, int epoch) {
+        this(scope, stream, epoch, counterShivesh.incrementAndGet());
+    }
 
     @Override
     public String getKey() {
@@ -35,6 +45,7 @@ public class CommitEvent implements ControllerEvent {
 
     @Override
     public CompletableFuture<Void> process(RequestProcessor processor) {
+        log.info("shivesh:: commit event {} processing started on abstract request processor", shivesh);
         return processor.processCommitTxnRequest(this);
     }
 
@@ -63,12 +74,14 @@ public class CommitEvent implements ControllerEvent {
             target.writeUTF(e.scope);
             target.writeUTF(e.stream);
             target.writeCompactInt(e.epoch);
+            target.writeLong(e.shivesh);
         }
 
         private void read00(RevisionDataInput source, CommitEventBuilder b) throws IOException {
             b.scope(source.readUTF());
             b.stream(source.readUTF());
             b.epoch(source.readCompactInt());
+            b.shivesh(source.readLong());
         }
     }
 

@@ -17,6 +17,7 @@ import io.pravega.common.Exceptions;
 import io.pravega.common.util.RetriesExhaustedException;
 import io.pravega.controller.eventProcessor.RequestHandler;
 import io.pravega.controller.retryable.RetryableException;
+import io.pravega.shared.controller.event.CommitEvent;
 import io.pravega.shared.controller.event.ControllerEvent;
 import lombok.AllArgsConstructor;
 import lombok.Synchronized;
@@ -96,6 +97,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
         // and it could lead to memory overload.
         if (!stop.get()) {
             log.info("shivesh:: picked event at position:: {}" , position);
+
             semaphore.acquireUninterruptibly();
             long next = counter.incrementAndGet();
             PositionCounter pc = new PositionCounter(position, next);

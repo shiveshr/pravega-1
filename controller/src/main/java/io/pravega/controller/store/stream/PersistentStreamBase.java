@@ -895,6 +895,7 @@ public abstract class PersistentStreamBase implements Stream {
     public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startRollingTxn(int activeEpoch,
                                                                                               VersionedMetadata<CommittingTransactionsRecord> existing) {
         CommittingTransactionsRecord record = existing.getObject();
+        log.info("shivesh:: rolling transaction {}", record.getTransactionsToCommit());
         if (record.isRollingTxnRecord()) {
             return CompletableFuture.completedFuture(existing);
         } else {
@@ -907,6 +908,7 @@ public abstract class PersistentStreamBase implements Stream {
     @Override
     public CompletableFuture<Void> rollingTxnCreateDuplicateEpochs(
             Map<Long, Long> sealedTxnEpochSegments, long time, VersionedMetadata<CommittingTransactionsRecord> record) {
+        log.info("shivesh:: rolling transaction:: creating duplicate epoch {} --> {}", record.getObject().getCurrentEpoch(), record.getObject().getNewActiveEpoch());
         Preconditions.checkArgument(record.getObject().isRollingTxnRecord());
         CommittingTransactionsRecord committingTxnRecord = record.getObject();
         return getActiveEpoch(true)
@@ -968,11 +970,16 @@ public abstract class PersistentStreamBase implements Stream {
     @Override
     public CompletableFuture<Void> completeRollingTxn(Map<Long, Long> sealedActiveEpochSegments,
                                                       VersionedMetadata<CommittingTransactionsRecord> versionedMetadata) {
+        log.info("shivesh:: completing rolling txn");
         return getActiveEpoch(true)
                 .thenCompose(activeEpochRecord -> {
+                    log.info("shivesh:: completing rolling txn.. ");
+
                     CommittingTransactionsRecord committingTxnRecord = versionedMetadata.getObject();
                     int activeEpoch = committingTxnRecord.getCurrentEpoch();
                     if (activeEpochRecord.getEpoch() == activeEpoch) {
+                        log.info("shivesh:: setting new active epoch as {}", committingTxnRecord.getNewActiveEpoch());
+
                         return updateSealedSegmentSizes(sealedActiveEpochSegments)
                                 .thenCompose(x -> clearMarkers(sealedActiveEpochSegments.keySet()))
                                 .thenCompose(x -> updateCurrentEpochRecord(committingTxnRecord.getNewActiveEpoch()));
@@ -1306,11 +1313,14 @@ public abstract class PersistentStreamBase implements Stream {
 
     @Override
     public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(final int epoch) {
+        log.info("shivesh:: called startCommittingTransactions in epoch {}", epoch);
         return getVersionedCommitTransactionsRecord()
                 .thenCompose(versioned -> {
                     if (versioned.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
                         return getCommittingTxnsInEpoch(epoch, 1000)
                                 .thenCompose(list -> {
+                                    log.info("shivesh:: got #{} transactions in epoch {}", list.size(), epoch);
+
                                     if (list.isEmpty()) {
                                         return CompletableFuture.completedFuture(versioned);
                                     } else {
@@ -1321,12 +1331,18 @@ public abstract class PersistentStreamBase implements Stream {
                                     }
                                 });
                     } else if (epoch != versioned.getObject().getEpoch() ) {
+                        log.info("shivesh:: yeh kya hua.. exception thrown.. operation not allowed.. txns on different epoch are being committed");
+
                         // check if the epoch in record matches current epoch. if not throw OperationNotAllowed
                         throw StoreException.create(StoreException.Type.OPERATION_NOT_ALLOWED,
                                 "Transactions on different epoch are being committed");
                     } else {
                         return CompletableFuture.completedFuture(versioned);
                     }
+                })
+                .exceptionally(e -> {
+                    log.warn("shivesh:: lo beta.. exception while trying to start committing transcations", e);
+                    throw new CompletionException(e);
                 });
     }
 

@@ -541,11 +541,13 @@ class PravegaTablesStream extends PersistentStreamBase {
         Map<UUID, ActiveTxnRecord> result = new ConcurrentHashMap<>();
         AtomicBoolean canContinue = new AtomicBoolean(true);
         AtomicReference<ByteBuf> token = new AtomicReference<>(IteratorState.EMPTY.toBytes());
+        AtomicInteger shivesh = new AtomicInteger(0);
         return getTransactionsTable()
                 .thenCompose(epochTxnTable -> Futures.exceptionallyExpecting(
                         Futures.loop(canContinue::get,
                                 () -> storeHelper.getEntriesPaginated(scope, epochTxnTable, token.get(), limit, ActiveTxnRecord::fromBytes)
                                                  .thenAccept(v -> {
+                                                     log.info("shivesh:: found #txn {} in epoch page: {}", v.getValue().size(), shivesh.incrementAndGet());
                                                      // we exit if we have either received `limit` number of entries
                                                      List<Pair<String, VersionedMetadata<ActiveTxnRecord>>> pair = v.getValue();
                                                      for (Pair<String, VersionedMetadata<ActiveTxnRecord>> val : pair) {
@@ -554,11 +556,15 @@ class PravegaTablesStream extends PersistentStreamBase {
                                                          if (filter.apply(txnId, txnRecord)) {
                                                              result.put(txnId, txnRecord);
                                                              if (result.size() == limit) {
+                                                                 log.info("shivesh:: met our limit requirements of {}", limit);
+
                                                                  break;
                                                              }
                                                          }
                                                      }
-                                                     
+                                                     if (v.getValue().isEmpty()) {
+                                                         log.info("shivesh:: read all available keys.. nothing more to do.. total result = ", result.size());
+                                                     }
                                                      canContinue.set(!v.getValue().isEmpty() && result.size() < limit);
                                                      
                                                      token.set(v.getKey());

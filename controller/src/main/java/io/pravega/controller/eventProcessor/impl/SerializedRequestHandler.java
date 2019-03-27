@@ -12,9 +12,11 @@ package io.pravega.controller.eventProcessor.impl;
 import com.google.common.annotations.VisibleForTesting;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.eventProcessor.RequestHandler;
+import io.pravega.shared.controller.event.CommitEvent;
 import io.pravega.shared.controller.event.ControllerEvent;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 
@@ -37,6 +39,7 @@ import java.util.stream.Collectors;
  * Once all pending processing for a key ends, the key is removed from the work map the moment its queue becomes empty.
  */
 @AllArgsConstructor
+@Slf4j
 public abstract class SerializedRequestHandler<T extends ControllerEvent> implements RequestHandler<T> {
 
     protected final ScheduledExecutorService executor;
@@ -54,6 +57,9 @@ public abstract class SerializedRequestHandler<T extends ControllerEvent> implem
         final ConcurrentLinkedQueue<Work> queue;
 
         synchronized (lock) {
+            if (streamEvent instanceof CommitEvent) {
+                log.info("shivesh:: adding next event to the queue {}", ((CommitEvent) streamEvent).getShivesh());
+            }
             if (workers.containsKey(key)) {
                 workers.get(key).add(work);
                 queue = null;
@@ -62,9 +68,12 @@ public abstract class SerializedRequestHandler<T extends ControllerEvent> implem
                 queue.add(work);
                 workers.put(key, queue);
             }
+            log.info("shivesh:: queue size is {}", workers.get(streamEvent.getKey()).size());
         }
 
         if (queue != null) {
+            log.info("shivesh:: new work with null queue.. calling execute on the queue for stream", streamEvent.getKey());
+
             executor.execute(() -> run(key, queue));
         }
 
@@ -91,6 +100,7 @@ public abstract class SerializedRequestHandler<T extends ControllerEvent> implem
         try {
             future = processEvent(work.getEvent());
         } catch (Exception e) {
+            log.info("shivesh:: adding synchronous error catch actually helped");
             future = Futures.failedFuture(e);
         }
 
@@ -119,6 +129,8 @@ public abstract class SerializedRequestHandler<T extends ControllerEvent> implem
             workers.get(key).add(work);
         }
 
+        log.info("shivesh:: postponement:: calling execute on the queue for stream ", work.event.getKey());
+
         executor.execute(() -> run(key, workQueue));
     }
 
@@ -134,6 +146,7 @@ public abstract class SerializedRequestHandler<T extends ControllerEvent> implem
             }
 
             if (toExecute) {
+                log.info("shivesh:: work complete:: calling execute on the queue for stream ", work.event.getKey());
                 executor.execute(() -> run(key, workQueue));
             }
         });

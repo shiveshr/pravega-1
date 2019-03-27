@@ -243,13 +243,16 @@ public class PravegaTablesStoreHelper {
                 IteratorState.fromBytes(continuationToken), authToken.get(), RequestTag.NON_EXISTENT_ID),
                 String.format("get entries paginated for table: %s/%s", scope, tableName))
                 .thenApplyAsync(result -> {
+                    if (result == null || result.getItems() == null) {
+                        log.info("shivesh:: dont forget the null check bhai");
+                    }
                     List<Pair<String, VersionedMetadata<T>>> items = result.getItems().stream().map(x -> {
                         String key = new String(x.getKey().getKey(), Charsets.UTF_8);
                         T deserialized = fromBytes.apply(x.getValue());
                         VersionedMetadata<T> value = new VersionedMetadata<>(deserialized, new Version.LongVersion(x.getKey().getVersion().getSegmentVersion()));
                         return new ImmutablePair<>(key, value);
                     }).collect(Collectors.toList());
-                    log.debug("get keys paginated on table {}/{} returned number of items {}", scope, tableName, items.size());
+                    log.info("shivesh:: get keys paginated on table {}/{} returned number of items {}", scope, tableName, items.size());
                     return new AbstractMap.SimpleEntry<>(result.getState().toBytes(), items);
                 }, executor);
     }
