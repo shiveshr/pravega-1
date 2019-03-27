@@ -149,7 +149,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                     List<UUID> txnList = versionedMetadata.getObject().getTransactionsToCommit();
                                     if (!txnList.isEmpty()) {
                                         long timeAfterPicked = System.nanoTime();
-                                        log.info("shivesh:: num of transactions picked for committment::{}.. took time {}", txnList.size(), timeAfterPicked - startTime);
+                                        log.info("shivesh:: num of transactions picked for commitment::{}.. took time {}", txnList.size(), timeAfterPicked - startTime);
                                     }
                                     // Once state is set to committing, we are guaranteed that this will be the only processing that can happen on the stream
                                     // and we can proceed with committing outstanding transactions collected in the txnList step.
@@ -268,7 +268,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
 
         return createSegmentsFuture
                 .thenCompose(v -> {
-                    log.debug("Rolling transaction, successfully created duplicate txn epoch {} for stream {}/{}", segmentIds, scope, stream);
+                    log.info("Rolling transaction, successfully created duplicate txn epoch {} for stream {}/{}", segmentIds, scope, stream);
                     // now commit transactions into these newly created segments
                     return commitTransactions(scope, stream, segmentIds, transactionsToCommit);
                 })

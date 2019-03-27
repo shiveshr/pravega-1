@@ -89,6 +89,11 @@ class ZKCheckpointStore implements CheckpointStore {
             }
             map.put(child, position);
         }
+
+        map.forEach((x, y) -> {
+            log.info("shivesh:: checkpoints read back {} {} {} {}", process, readerGroup, x, y);
+        });
+
         return map;
     }
 
