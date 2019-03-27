@@ -43,11 +43,9 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import io.pravega.shared.segment.StreamSegmentNameUtils;
@@ -91,7 +89,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     @VisibleForTesting
     private final TimeoutService timeoutService;
 
-    private volatile boolean ready;
+    private final CompletableFuture<Void> ready;
     private final CountDownLatch readyLatch;
     
     @VisibleForTesting
@@ -107,6 +105,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         this.segmentHelper = segmentHelper;
         this.timeoutService = new TimerWheelTimeoutService(this, timeoutServiceConfig, taskCompletionQueue);
         readyLatch = new CountDownLatch(1);
+        this.ready = new CompletableFuture<>();
     }
 
     public StreamTransactionMetadataTasks(final StreamMetadataStore streamMetadataStore,
@@ -120,6 +119,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         this.segmentHelper = segmentHelper;
         this.timeoutService = new TimerWheelTimeoutService(this, timeoutServiceConfig);
         readyLatch = new CountDownLatch(1);
+        this.ready = new CompletableFuture<>();
     }
 
     public StreamTransactionMetadataTasks(final StreamMetadataStore streamMetadataStore,
@@ -130,12 +130,12 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     }
 
     private void setReady() {
-        ready = true;
+        ready.complete(null);
         readyLatch.countDown();
     }
 
     boolean isReady() {
-        return ready;
+        return ready.isDone();
     }
 
     @VisibleForTesting
@@ -197,10 +197,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                                                                       final String stream,
                                                                                       final long lease,
                                                                                       final OperationContext contextOpt) {
-        return checkReady().thenComposeAsync(x -> {
-            final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
-            return createTxnBody(scope, stream, lease, context);
-        }, executor);
+        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
+        return createTxnBody(scope, stream, lease, context);
     }
 
     /**
@@ -218,10 +216,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                                     final UUID txId,
                                                     final long lease,
                                                     final OperationContext contextOpt) {
-        return checkReady().thenComposeAsync(x -> {
-            final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
-            return pingTxnBody(scope, stream, txId, lease, context);
-        }, executor);
+        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
+        return pingTxnBody(scope, stream, txId, lease, context);
     }
 
     /**
@@ -239,7 +235,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                                  final UUID txId,
                                                  final Version version,
                                                  final OperationContext contextOpt) {
-        return checkReady().thenComposeAsync(x -> {
+        return ready.thenComposeAsync(x -> {
             final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
             return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, false, txId, version, context),
                     RETRYABLE_PREDICATE, 3, executor);
@@ -258,7 +254,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final OperationContext contextOpt) {
         log.info("shivesh:: committxn called for txn {} on stream {}/{}", txId, scope, stream);
-        return checkReady().thenComposeAsync(x -> {
+        return ready.thenComposeAsync(x -> {
             final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
             return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, context),
                     RETRYABLE_PREDICATE, 3, executor);
@@ -653,15 +649,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 txnId,
                 this.retrieveDelegationToken()), executor);
     }
-
-    private CompletableFuture<Void> checkReady() {
-        if (!ready) {
-            return Futures.failedFuture(new IllegalStateException(getClass().getName() + " not yet ready"));
-        } else {
-            return CompletableFuture.completedFuture(null);
-        }
-    }
-
+    
     private OperationContext getNonNullOperationContext(final String scope,
                                                         final String stream,
                                                         final OperationContext contextOpt) {
