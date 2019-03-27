@@ -139,6 +139,8 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                             streamMetadataStore.startCommitTransactions(scope, stream, txnEpoch, context, executor)
                             .thenComposeAsync(versionedMetadata -> {
                                 if (versionedMetadata.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
+                                    log.info("shivesh:: found nothing to commit for epoch {}", txnEpoch);
+
                                     // there are no transactions found to commit.
                                     // reset state conditionally in case we were left with stale committing state from a previous execution
                                     // that died just before updating the state back to ACTIVE but after having completed all the work.
@@ -232,7 +234,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                 .thenCompose(v -> streamMetadataTasks.notifyNewSegments(scope, stream, activeEpochDuplicate, context, delegationToken))
                 .thenCompose(v -> streamMetadataTasks.getSealedSegmentsSize(scope, stream, txnEpochDuplicate, delegationToken))
                 .thenCompose(sealedSegmentsMap -> {
-                    log.debug("Rolling transaction, created duplicate of active epoch {} for stream {}/{}", activeEpoch, scope, stream);
+                    log.info("Rolling transaction, created duplicate of active epoch {} for stream {}/{}", activeEpoch, scope, stream);
                     return streamMetadataStore.rollingTxnCreateDuplicateEpochs(scope, stream, sealedSegmentsMap,
                             timestamp, existing, context, executor);
                 })
@@ -241,7 +243,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                         .thenCompose(x -> streamMetadataTasks.getSealedSegmentsSize(scope, stream, activeEpochSegmentIds,
                                 delegationToken))
                         .thenCompose(sealedSegmentsMap -> {
-                            log.debug("Rolling transaction, sealed active epoch {} for stream {}/{}", activeEpoch, scope, stream);
+                            log.info("Rolling transaction, sealed active epoch {} for stream {}/{}", activeEpoch, scope, stream);
                             return streamMetadataStore.completeRollingTxn(scope, stream, sealedSegmentsMap, existing,
                                     context, executor);
                         }));
