@@ -40,6 +40,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -311,11 +313,15 @@ public class PravegaTablesStoreHelper {
     }
 
     private <T> CompletableFuture<T> withRetries(Supplier<CompletableFuture<T>> futureSupplier, String errorMessage) {
+        AtomicInteger retryCount = new AtomicInteger();
+        AtomicLong previous = new AtomicLong(System.nanoTime());
         return RetryHelper.withRetriesAsync(exceptionalCallback(futureSupplier, errorMessage), 
                 e -> {
                     boolean b = Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException;
                     if (b) {
-                        log.error("shivesh:: got store connection error in our infinite retry loop while trying to work");
+                        long time = System.nanoTime();
+                        log.warn("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
+                        previous.set(time);
                     }
                     return b;
                 }, NUM_OF_TRIES, executor);

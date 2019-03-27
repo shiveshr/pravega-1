@@ -85,11 +85,13 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
      */
     @Override
     public CompletableFuture<Void> execute(CommitEvent event) {
+        long time = System.nanoTime();
         String scope = event.getScope();
         String stream = event.getStream();
         int epoch = event.getEpoch();
         OperationContext context = streamMetadataStore.createContext(scope, stream);
         log.debug("Attempting to commit available transactions on epoch {} on stream {}/{}", event.getEpoch(), event.getScope(), event.getStream());
+        log.info("shivesh:: Attempting to commit available transactions on epoch {} on stream {}/{}", event.getEpoch(), event.getScope(), event.getStream());
 
         CompletableFuture<Void> future = new CompletableFuture<>();
 
@@ -106,6 +108,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                         future.completeExceptionally(cause);
                     } else {
                         log.debug("Successfully committed transactions on epoch {} on stream {}/{}", epoch, scope, stream);
+                        log.info("shivesh:: Successfully committed transactions on epoch {} on stream {}/{}. took time {}", epoch, scope, stream, System.nanoTime() - time);
                         if (processedEvents != null) {
                             processedEvents.offer(event);
                         }
@@ -126,6 +129,8 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                                           final String stream,
                                                           final int txnEpoch,
                                                           final OperationContext context) {
+        long startTime = System.nanoTime();
+        
         return streamMetadataStore.getVersionedState(scope, stream, context, executor)
                 .thenComposeAsync(state -> {
                     final AtomicReference<VersionedMetadata<State>> stateRecord = new AtomicReference<>(state);
@@ -141,7 +146,8 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                 } else {
                                     List<UUID> txnList = versionedMetadata.getObject().getTransactionsToCommit();
                                     if (!txnList.isEmpty()) {
-                                        log.info("shivesh:: num of transactions picked for committment::{}", txnList.size());
+                                        long timeAfterPicked = System.nanoTime();
+                                        log.info("shivesh:: num of transactions picked for committment::{}.. took time {}", txnList.size(), timeAfterPicked - startTime);
                                     }
                                     // Once state is set to committing, we are guaranteed that this will be the only processing that can happen on the stream
                                     // and we can proceed with committing outstanding transactions collected in the txnList step.

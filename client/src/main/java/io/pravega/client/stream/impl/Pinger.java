@@ -88,7 +88,8 @@ public class Pinger implements AutoCloseable {
      *  failure the particular transaction it is removed from the ping list.
      */
     private void pingTransactions() {
-        log.info("Start sending transaction pings.");
+        // shivesh
+        log.debug("Start sending transaction pings.");
         txnList.stream().forEach(uuid -> {
             try {
                 log.debug("Sending ping request for txn ID: {} with lease: {}", uuid, txnLeaseMillis);
