@@ -11,6 +11,7 @@ package io.pravega.controller.eventProcessor.impl;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.client.stream.Position;
 import io.pravega.common.Exceptions;
 import io.pravega.common.util.RetriesExhaustedException;
@@ -22,18 +23,14 @@ import lombok.Synchronized;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Comparator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -64,7 +61,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
     private final Semaphore semaphore;
     private final ScheduledFuture<?> periodicCheckpoint;
     private final Checkpointer checkpointer;
-    private final Writer<R> internalWriter;
+    private final EventStreamWriter<R> internalWriter;
     
     public ConcurrentEventProcessor(final H requestHandler,
                                     final ScheduledExecutorService executor) {
@@ -76,7 +73,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
                              final int maxConcurrent,
                              final ScheduledExecutorService executor,
                              final Checkpointer checkpointer,
-                             final Writer<R> writer,
+                             final EventStreamWriter<R> writer,
                              final long checkpointPeriod,
                              final TimeUnit timeUnit) {
         Preconditions.checkNotNull(requestHandler);
@@ -141,7 +138,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
         if (RetryableException.isRetryable(cause)) {
             log.info("ConcurrentEventProcessor Processing failed, Retryable Exception {}. Putting the event back.", cause.getClass().getName());
 
-            Writer<R> writer;
+            EventStreamWriter<R> writer;
             if (internalWriter != null) {
                 writer = internalWriter;
             } else if (getSelfWriter() != null) {
@@ -182,6 +179,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
         running.remove(pc);
         completed.add(pc);
 
+        running.forEach(x -> log.info("shivesh:: running positions" + x.position));
         final PositionCounter smallest = running.isEmpty() ? MAX : running.first();
         final List<PositionCounter> checkpointCandidates = completed.stream()
                 .filter(x -> positionCounterComparator.compare(x, smallest) < 0).collect(Collectors.toList());
@@ -199,7 +197,10 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
                     log.info("shivesh:: concurrent event processor :: checkpointing at {}", checkpoint.get().position);
                     checkpointer.store(checkpoint.get().position);
                 } else if (getCheckpointer() != null) {
+                    log.info("shivesh:: concurrent event processor :: checkpointing at {}", checkpoint.get().position);
                     getCheckpointer().store(checkpoint.get().position);
+                } else {
+                    log.info("why is checkpointer null??");
                 }
             }
         } catch (Exception e) {

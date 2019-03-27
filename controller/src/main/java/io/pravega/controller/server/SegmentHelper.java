@@ -126,8 +126,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "CreateSegment {} threw exception", qualifiedStreamSegmentName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "CreateSegment {} threw exception", qualifiedStreamSegmentName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -187,8 +191,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "truncateSegment {} error", qualifiedName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "truncateSegment {} error", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -244,8 +252,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "deleteSegment {} failed", qualifiedName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "deleteSegment {} failed", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -318,8 +330,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "sealSegment {} failed", qualifiedName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "sealSegment {} failed", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -374,8 +390,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error("createTransaction {} failed", transactionName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error("createTransaction {} failed", transactionName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -448,8 +468,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error("commitTransaction {} failed", transactionName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error("commitTransaction {} failed", transactionName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -504,8 +528,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.info("abortTransaction {} failed", transactionName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.info("abortTransaction {} failed", transactionName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -551,8 +579,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "updatePolicy {} failed", qualifiedName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "updatePolicy {} failed", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -600,8 +632,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error("getSegmentInfo {} failed", qualifiedName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error("getSegmentInfo {} failed", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -668,8 +704,12 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "CreateTableSegment {} threw exception", qualifiedStreamSegmentName, error);
-                handleError(error, result, type);
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "CreateTableSegment {} threw exception", qualifiedStreamSegmentName, error);
+                    result.completeExceptionally(error);
+                }
             }
 
             @Override
@@ -743,9 +783,14 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "deleteTableSegment {} failed.", qualifiedName, error);
-                handleError(error, result, type);            }
-
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "deleteTableSegment {} failed.", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
+            }
+            
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -822,9 +867,14 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "updateTableEntries {} failed", qualifiedName, error);
-                handleError(error, result, type);            }
-
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "updateTableEntries {} failed", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
+            }
+            
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -916,9 +966,14 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "removeTableKeys {} failed", qualifiedName, error);
-                handleError(error, result, type);            }
-
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "removeTableKeys {} failed", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
+            }
+            
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -1016,9 +1071,14 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "readTable {} failed", qualifiedName, error);
-                handleError(error, result, type);            }
-
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "readTable {} failed", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
+            }
+            
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -1105,8 +1165,13 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "readTableKeys {} failed", qualifiedName, error);
-                handleError(error, result, type);            }
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "readTableKeys {} failed", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
+            }
 
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
@@ -1191,9 +1256,14 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                log.error(requestId, "readTableEntries {} failed", qualifiedName, error);
-                handleError(error, result, type);            }
-
+                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+                } else {
+                    log.error(requestId, "readTableEntries {} failed", qualifiedName, error);
+                    result.completeExceptionally(error);
+                }
+            }
+            
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -1215,15 +1285,7 @@ public class SegmentHelper {
         buf.release();
         return bytes;
     }
-
-    private <T> void handleError(Exception error, CompletableFuture<T> result, WireCommandType type) {
-        if (Exceptions.unwrap(error) instanceof ConnectionFailedException) {
-            result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-        } else {
-            result.completeExceptionally(error);
-        }
-    }
-
+    
     private WireCommands.TableKey convertToWireCommand(final TableKey<byte[]> k) {
         WireCommands.TableKey key;
         if (k.getVersion() == null) {

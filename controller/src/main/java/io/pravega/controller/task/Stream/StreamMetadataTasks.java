@@ -630,7 +630,7 @@ public class StreamMetadataTasks extends TaskBase {
     public CompletableFuture<Void> writeEvent(ControllerEvent event) {
         CompletableFuture<Void> result = new CompletableFuture<>();
 
-        requestWriterFuture.thenApply(writer -> writer.writeEvent(event).whenComplete((r, e) -> {
+        requestWriterFuture.thenApply(writer -> writer.writeEvent(event.getKey(), event).whenComplete((r, e) -> {
             if (e != null) {
                 log.warn("exception while posting event {} {}", e.getClass().getName(), e.getMessage());
                 // transform any other event write exception to retryable exception

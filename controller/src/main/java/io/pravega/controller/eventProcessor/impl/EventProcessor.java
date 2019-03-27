@@ -10,6 +10,7 @@
 package io.pravega.controller.eventProcessor.impl;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.controller.store.checkpoint.CheckpointStoreException;
 import io.pravega.shared.controller.event.ControllerEvent;
 import io.pravega.client.stream.Position;
@@ -25,15 +26,10 @@ public abstract class EventProcessor<T extends ControllerEvent> {
     public interface Checkpointer {
         void store(Position position) throws CheckpointStoreException;
     }
-
-    @FunctionalInterface
-    public interface Writer<T extends ControllerEvent> {
-        CompletableFuture<Void> write(T event);
-    }
-
+    
     Checkpointer checkpointer;
 
-    Writer<T> selfWriter;
+    EventStreamWriter<T> selfWriter;
 
     /**
      * AbstractActor initialization hook that is called before actor starts receiving events.
@@ -74,7 +70,7 @@ public abstract class EventProcessor<T extends ControllerEvent> {
      * @return a stream writer that can be used to write events to the underlying event stream.
      */
     @VisibleForTesting
-    public Writer<T> getSelfWriter() {
+    public EventStreamWriter<T> getSelfWriter() {
         return selfWriter;
     }
 }
