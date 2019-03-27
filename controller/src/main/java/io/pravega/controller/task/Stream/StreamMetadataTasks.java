@@ -528,7 +528,7 @@ public class StreamMetadataTasks extends TaskBase {
 
         return addIndexAndSubmitTask(event,
                 () -> streamMetadataStore.submitScale(scope, stream, segmentsToSeal, new ArrayList<>(newRanges),
-                        scaleTimestamp, null, context, executor)
+                        scaleTimestamp, null, context, executor))
                         .handle((startScaleResponse, e) -> {
                             ScaleResponse.Builder response = ScaleResponse.newBuilder();
 
@@ -551,7 +551,7 @@ public class StreamMetadataTasks extends TaskBase {
                                 response.setEpoch(startScaleResponse.getObject().getActiveEpoch());
                             }
                             return response.build();
-                        }));
+                        });
     }
 
     /**
@@ -593,6 +593,7 @@ public class StreamMetadataTasks extends TaskBase {
                                     if (epoch == activeEpoch.getReferenceEpoch() + 1 && state.equals(State.SCALING)) {
                                         response.setStatus(ScaleStatusResponse.ScaleStatus.IN_PROGRESS);
                                     } else {
+                                        log.info("shivesh:: checkScale done epoch {} activeEpoch {} state", epoch, activeEpoch.getReferenceEpoch(), state);
                                         response.setStatus(ScaleStatusResponse.ScaleStatus.SUCCESS);
                                     }
                                 }

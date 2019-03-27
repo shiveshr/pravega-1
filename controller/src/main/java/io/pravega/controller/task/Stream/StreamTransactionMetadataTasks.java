@@ -561,9 +561,10 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 streamMetadataStore.sealTransaction(scope, stream, txnId, commit, versionOpt, ctx, executor), executor)
                 .whenComplete((v, e) -> {
                     if (e != null) {
-                        log.info("Txn={}, failed sealing txn", txnId);
+                        // shivesh
+                        log.debug("Txn={}, failed sealing txn", txnId);
                     } else {
-                        log.info("shivesh:: Txn={}, sealed successfully, commit={}", txnId, commit);
+                        log.debug("Txn={}, sealed successfully, commit={}", txnId, commit);
                     }
                 });
 
@@ -581,7 +582,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 case OPEN:
                 case UNKNOWN:
                 default:
-                    // Not possible after successful streamStore.sealTransaction call, because otherwise an
+                    // Not possible aftader successful streamStore.sealTransaction call, because otherwise an
                     // exception would be thrown.
                     return CompletableFuture.completedFuture(status);
             }

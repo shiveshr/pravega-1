@@ -259,7 +259,7 @@ public class PravegaTablesStoreHelper {
     }
 
     public <T> AsyncIterator<Pair<String, VersionedMetadata<T>>> getAllEntries(String scope, String tableName, Function<byte[], T> fromBytes) {
-        return new ContinuationTokenAsyncIterator<>(token -> getEntriesPaginated(scope, tableName, token, 100, fromBytes)
+        return new ContinuationTokenAsyncIterator<>(token -> getEntriesPaginated(scope, tableName, token, 1000, fromBytes)
                 .thenApplyAsync(result -> new AbstractMap.SimpleEntry<>(result.getKey(), result.getValue()), executor),
                 IteratorState.EMPTY.toBytes());
     }

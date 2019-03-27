@@ -64,6 +64,7 @@ public class ReadTxnWriteAutoScaleWithFailoverTest extends AbstractFailoverTests
 
     @Environment
     public static void initialize() throws MarathonException, ExecutionException {
+        
         URI zkUri = startZookeeperInstance();
         startBookkeeperInstances(zkUri);
         URI controllerUri = startPravegaControllerInstances(zkUri, 3);

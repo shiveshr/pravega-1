@@ -123,7 +123,8 @@ public class SegmentHelper {
 
             @Override
             public void segmentCreated(WireCommands.SegmentCreated segmentCreated) {
-                log.info(requestId, "CreateSegment {} SegmentCreated", qualifiedStreamSegmentName);
+                // TODO: shivesh
+                log.debug(requestId, "CreateSegment {} SegmentCreated", qualifiedStreamSegmentName);
                 result.complete(true);
             }
 
@@ -308,7 +309,8 @@ public class SegmentHelper {
 
             @Override
             public void segmentSealed(WireCommands.SegmentSealed segmentSealed) {
-                log.info(requestId, "sealSegment {} segmentSealed", qualifiedName);
+                // TODO: shivesh
+                log.debug(requestId, "sealSegment {} segmentSealed", qualifiedName);
                 result.complete(true);
             }
 
@@ -663,7 +665,8 @@ public class SegmentHelper {
 
             @Override
             public void segmentCreated(WireCommands.SegmentCreated segmentCreated) {
-                log.info(requestId, "CreateTableSegment {} SegmentCreated", qualifiedStreamSegmentName);
+                // TODO: shivesh
+                log.debug(requestId, "CreateTableSegment {} SegmentCreated", qualifiedStreamSegmentName);
                 result.complete(true);
             }
 

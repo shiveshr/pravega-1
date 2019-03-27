@@ -225,7 +225,6 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
             // finally, remove reader group from checkpoint store
             log.info("Removing reader group {} from process {}", readerGroup.getGroupName(), process);
             checkpointStore.removeReaderGroup(process, readerGroup.getGroupName());
-
         } finally {
             LoggerHelpers.traceLeave(log, "notifyProcessFailure", traceId, process);
         }

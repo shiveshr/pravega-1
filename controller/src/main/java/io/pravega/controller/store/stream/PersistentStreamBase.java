@@ -686,6 +686,7 @@ public abstract class PersistentStreamBase implements Stream {
                 // and new ranges are identical). else throw scale conflict exception
                 if (!RecordHelper.verifyRecordMatchesInput(segmentsToSeal, newRanges, false, record.getObject())) {
                     log.debug("scale conflict, another scale operation is ongoing");
+                    log.info("shivesh:: conflicted ETR: {}", record.getObject());
                     throw new EpochTransitionOperationExceptions.ConflictException();
                 }
                 return CompletableFuture.completedFuture(record);

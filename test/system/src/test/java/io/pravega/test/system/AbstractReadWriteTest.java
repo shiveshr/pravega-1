@@ -221,6 +221,7 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
 
                 try {
                     transaction = writer.beginTxn();
+                    log.info("shivesh:: txn with {} createTransaction", transaction.getTxnId());
                     String uniqueRoutingKey = transaction.getTxnId().toString();
                     long seqNumber = 0;
                     for (int j = 1; j <= NUM_EVENTS_PER_TRANSACTION; j++) {
@@ -233,7 +234,8 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
 
                         // Renewal of routing key to test writing in multiple segments for the same transaction.
                         if (j % RK_RENEWAL_RATE_TRANSACTION == 0) {
-                            log.info("Renew transaction writer routing key and reinitialize seqNumber at event {}.", j);
+                            // shivesh
+                            log.debug("Renew transaction writer routing key and reinitialize seqNumber at event {}.", j);
                             uniqueRoutingKey = UUID.randomUUID().toString();
                             seqNumber = 0;
                         }
@@ -255,7 +257,8 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
                     return;
                 }
             }
-            log.info("Completed writing into txn");
+            // shivesh
+            log.debug("Completed writing into txn");
             closeWriter(writer);
         }, executorService);
     }
@@ -269,7 +272,8 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
             log.info("Exit flag status: {}, Read count: {}, Write count: {}", testState.stopReadFlag.get(),
                     testState.getEventReadCount(), testState.getEventWrittenCount());
             while (!(stopFlag.get() && testState.getEventReadCount() == testState.getEventWrittenCount())) {
-                log.info("Entering read loop");
+                // shivesh
+                log.debug("Entering read loop");
                 // Exit only if exitFlag is true  and read Count equals write count.
                 try {
                     final String event = reader.readNextEvent(SECONDS.toMillis(5)).getEvent();
@@ -502,9 +506,10 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
             if (status.equals(Transaction.Status.COMMITTED)) {
                 testState.incrementTotalWrittenEvents(eventsWritten);
                 testState.committingTxn.remove(txn.getTxnId());
+                log.info("Txn id {} status is {}", txn.getTxnId(), status);
                 log.info("Event write count: {}", testState.getEventWrittenCount());
             } else if (status.equals(Transaction.Status.ABORTED)) {
-                log.debug("Transaction with id: {} aborted", txn.getTxnId());
+                log.info("Transaction with id: {} aborted", txn.getTxnId());
                 testState.abortedTxn.add(txn.getTxnId());
             } else {
                 throw new TxnNotCompleteException();
