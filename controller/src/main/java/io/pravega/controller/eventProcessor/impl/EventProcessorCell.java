@@ -95,7 +95,6 @@ class EventProcessorCell<T extends ControllerEvent> {
             }
         }
 
-        AtomicBoolean firstPos = new AtomicBoolean(true);
         @Override
         protected final void run() throws Exception {
             log.debug("Event processor RUN {}, state={}", objectId, state());
@@ -104,10 +103,6 @@ class EventProcessorCell<T extends ControllerEvent> {
                 try {
                     event = reader.readNextEvent(defaultTimeout);
                     if (event != null && event.getEvent() != null) {
-                        if (firstPos.get()) {
-                            log.info("shivesh:: {} firstPos for eventproc {} event read {}", objectId, event.getPosition(), event.getEvent());
-                            firstPos.set(false);
-                        }
                         // invoke the user specified event processing method
                         actor.process(event.getEvent(), event.getPosition());
 
@@ -296,6 +291,7 @@ class EventProcessorCell<T extends ControllerEvent> {
     private EventProcessor<T> createEventProcessor(final EventProcessorConfig<T> eventProcessorConfig) {
         EventProcessor<T> eventProcessor = eventProcessorConfig.getSupplier().get();
         eventProcessor.checkpointer = (Position position) -> {
+            log.info("shivesh:: checkpoint received by checkpointer for {}", position);
             checkpointStore.setPosition(process, readerGroupName, readerId, position);
             lastCheckpoint.set(position);
         };

@@ -170,7 +170,7 @@ public class TxnSweeper implements FailoverSweeper {
         String stream = txn.getStream();
         UUID txnId = txn.getTxnId();
         log.debug("Host = {}, failing over committing transaction {}/{}/{}", failedHost, scope, stream, txnId);
-        return transactionMetadataTasks.writeCommitEvent(scope, stream, epoch)
+        return transactionMetadataTasks.writeCommitEvent(scope, stream, epoch, txnId)
                 .thenComposeAsync(status -> streamMetadataStore.removeTxnFromIndex(failedHost, txn, true), executor);
     }
 

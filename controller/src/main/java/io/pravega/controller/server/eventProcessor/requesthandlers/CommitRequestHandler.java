@@ -175,9 +175,12 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                                         activeEpochRecord.getReferenceEpoch() == txnEpochRecord.getReferenceEpoch()) {
                                                     // If active epoch's reference is same as transaction epoch,
                                                     // we can commit transactions immediately
+                                                    log.info("shivesh:: regular commits");
                                                     return commitTransactions(scope, stream, new ArrayList<>(activeEpochRecord.getSegmentIds()), txnList)
                                                             .thenApply(x -> versionedMetadata);
                                                 } else {
+                                                    log.info("shivesh:: rolling transactions");
+
                                                     return rollTransactions(scope, stream, txnEpochRecord, activeEpochRecord, versionedMetadata, context);
                                                 }
                                             }));

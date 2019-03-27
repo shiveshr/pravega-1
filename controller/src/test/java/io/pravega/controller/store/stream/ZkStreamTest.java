@@ -565,7 +565,7 @@ public class ZkStreamTest {
         doReturn(Futures.failedFuture(StoreException.create(StoreException.Type.DATA_NOT_FOUND, "txn data not found")))
                 .when(storeHelper).getData(eq(activeTxPath), any());
 
-        Map<String, VersionedMetadata<ActiveTxnRecord>> result = stream.getCurrentTxns().join();
+        Map<UUID, ActiveTxnRecord> result = stream.getCurrentTxns().join();
         // verify that call succeeds and no active txns were found
         assertTrue(result.isEmpty());
 

@@ -327,7 +327,7 @@ public class ControllerEventProcessors extends AbstractIdleService implements Fa
         EventProcessorConfig<CommitEvent> commitConfig =
                 EventProcessorConfig.<CommitEvent>builder()
                         .config(commitReadersConfig)
-                        .decider(ExceptionHandler.DEFAULT_EXCEPTION_HANDLER)
+                        .decider(ExceptionHandler.RESUME_EXCEPTION_HANDLER)
                         .serializer(COMMIT_EVENT_SERIALIZER)
                         .supplier(() -> new ConcurrentEventProcessor<>(commitRequestHandler, executor))
                         .build();
@@ -355,7 +355,7 @@ public class ControllerEventProcessors extends AbstractIdleService implements Fa
         EventProcessorConfig<AbortEvent> abortConfig =
                 EventProcessorConfig.<AbortEvent>builder()
                         .config(abortReadersConfig)
-                        .decider(ExceptionHandler.DEFAULT_EXCEPTION_HANDLER)
+                        .decider(ExceptionHandler.RESUME_EXCEPTION_HANDLER)
                         .serializer(ABORT_EVENT_SERIALIZER)
                         .supplier(() -> new ConcurrentEventProcessor<>(abortRequestHandler, executor))
                         .build();
@@ -383,7 +383,7 @@ public class ControllerEventProcessors extends AbstractIdleService implements Fa
         EventProcessorConfig<ControllerEvent> requestConfig =
                 EventProcessorConfig.builder()
                         .config(requestReadersConfig)
-                        .decider(ExceptionHandler.DEFAULT_EXCEPTION_HANDLER)
+                        .decider(ExceptionHandler.RESUME_EXCEPTION_HANDLER )
                         .serializer(CONTROLLER_EVENT_SERIALIZER)
                         .supplier(() -> new ConcurrentEventProcessor<>(streamRequestHandler, executor))
                         .build();

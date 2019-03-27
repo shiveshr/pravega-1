@@ -14,6 +14,7 @@ import com.google.common.base.Strings;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.pravega.client.stream.StreamConfiguration;
+import io.pravega.client.tables.impl.IteratorState;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.BitConverter;
 import io.pravega.controller.store.stream.records.ActiveTxnRecord;
@@ -48,7 +49,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Predicate;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -521,30 +522,48 @@ class PravegaTablesStream extends PersistentStreamBase {
     }
 
     @Override
-    public CompletableFuture<Map<String, VersionedMetadata<ActiveTxnRecord>>> getCurrentTxns() {
-        return getTxnWithFilter(x -> true);
+    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getCurrentTxns() {
+        return getTxnWithFilter((x, y) -> true, Integer.MAX_VALUE);
     }
 
     @Override
-    public CompletableFuture<Map<String, VersionedMetadata<ActiveTxnRecord>>> getTxnInEpoch(int epoch) {
-        return getTxnWithFilter(x -> RecordHelper.getTransactionEpoch(UUID.fromString(x.getKey())) == epoch);
+    public CompletableFuture<List<UUID>> getCommittingTxnsInEpoch(int epoch, int limit) {
+        return getTxnWithFilter((x, y) -> RecordHelper.getTransactionEpoch(x) == epoch && 
+            y.getTxnStatus().equals(TxnStatus.COMMITTING), limit)
+                .thenApply(map -> {
+                    return map.entrySet().stream().map(Map.Entry::getKey).collect(Collectors.toList()); 
+                });
     }
 
-    private CompletableFuture<Map<String, VersionedMetadata<ActiveTxnRecord>>> getTxnWithFilter(Predicate<Pair<String, VersionedMetadata<ActiveTxnRecord>>> filter) {
+    private CompletableFuture<Map<UUID, ActiveTxnRecord>> getTxnWithFilter(
+            BiFunction<UUID, ActiveTxnRecord, Boolean> filter, int limit) {
         String scope = getScope();
-        Map<String, VersionedMetadata<ActiveTxnRecord>> result = new ConcurrentHashMap<>();
+        Map<UUID, ActiveTxnRecord> result = new ConcurrentHashMap<>();
+        AtomicBoolean canContinue = new AtomicBoolean(true);
+        AtomicReference<ByteBuf> token = new AtomicReference<>(IteratorState.EMPTY.toBytes());
         return getTransactionsTable()
                 .thenCompose(epochTxnTable -> Futures.exceptionallyExpecting(
-                        storeHelper.getAllEntries(scope, epochTxnTable, ActiveTxnRecord::fromBytes)
-                                   .collectRemaining(x -> {
-                                       // key is transaction id. 
-                                       if (filter.test(x)) {
-                                           result.put(x.getKey(), x.getValue());
-                                       }
-                                       return true;
-                                   })
+                        Futures.loop(canContinue::get,
+                                () -> storeHelper.getEntriesPaginated(scope, epochTxnTable, token.get(), limit, ActiveTxnRecord::fromBytes)
+                                                 .thenAccept(v -> {
+                                                     // we exit if we have either received `limit` number of entries
+                                                     List<Pair<String, VersionedMetadata<ActiveTxnRecord>>> pair = v.getValue();
+                                                     for (Pair<String, VersionedMetadata<ActiveTxnRecord>> val : pair) {
+                                                         UUID txnId = UUID.fromString(val.getKey());
+                                                         ActiveTxnRecord txnRecord = val.getValue().getObject();
+                                                         if (filter.apply(txnId, txnRecord)) {
+                                                             result.put(txnId, txnRecord);
+                                                             if (result.size() == limit) {
+                                                                 break;
+                                                             }
+                                                         }
+                                                     }
+                                                     
+                                                     canContinue.set(!v.getValue().isEmpty() && result.size() < limit);
+                                                     
+                                                     token.set(v.getKey());
+                                                 }), executor)
                                    .thenApply(x -> result), DATA_NOT_FOUND_PREDICATE, Collections.emptyMap()));
-
     }
 
     @Override

@@ -22,9 +22,12 @@ import lombok.Synchronized;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Comparator;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.Semaphore;
@@ -62,7 +65,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
     private final ScheduledFuture<?> periodicCheckpoint;
     private final Checkpointer checkpointer;
     private final Writer<R> internalWriter;
-
+    
     public ConcurrentEventProcessor(final H requestHandler,
                                     final ScheduledExecutorService executor) {
         this(requestHandler, MAX_CONCURRENT, executor, null, null, 1, TimeUnit.MINUTES);
@@ -95,6 +98,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
         // Limiting number of concurrent processing using semaphores. Otherwise we will keep picking messages from the stream
         // and it could lead to memory overload.
         if (!stop.get()) {
+            log.info("shivesh:: picked event at position:: {}" , position);
             semaphore.acquireUninterruptibly();
             long next = counter.incrementAndGet();
             PositionCounter pc = new PositionCounter(position, next);
@@ -104,6 +108,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
             withRetries(() -> requestHandler.process(request), executor)
                     .whenCompleteAsync((r, e) -> {
                         CompletableFuture<Void> future;
+                        log.info("shivesh:: processing completed for event at position {}", pc.position);
                         if (e != null) {
                             log.warn("ConcurrentEventProcessor Processing failed {}", e.getClass().getName());
                             future = handleProcessingError(request, e);

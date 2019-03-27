@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.slf4j.LoggerFactory;
@@ -34,7 +35,7 @@ import org.slf4j.LoggerFactory;
  * Request handler for performing scale operations received from requeststream.
  */
 public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
-
+public static AtomicBoolean shiveshScaleDone = new AtomicBoolean(false);
     private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(ScaleOperationTask.class));
 
     private final StreamMetadataTasks streamMetadataTasks;
@@ -76,6 +77,7 @@ public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
                                 request.getScope(), request.getStream(), request.getSegmentsToSeal(), request.getNewRanges());
 
                         result.complete(null);
+                        shiveshScaleDone.set(true);
                     }
                 }, executor);
 

@@ -556,7 +556,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
             TxnStatus status = pair.getKey();
             switch (status) {
                 case COMMITTING:
-                    return writeCommitEvent(scope, stream, pair.getValue()).thenApply(v -> status);
+                    return writeCommitEvent(scope, stream, pair.getValue(), txnId).thenApply(v -> status);
                 case ABORTING:
                     return writeAbortEvent(scope, stream, pair.getValue(), txnId).thenApply(v -> status);
                 case ABORTED:
@@ -565,7 +565,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 case OPEN:
                 case UNKNOWN:
                 default:
-                    // Not possible aftader successful streamStore.sealTransaction call, because otherwise an
+                    // Not possible after successful streamStore.sealTransaction call, because otherwise an
                     // exception would be thrown.
                     return CompletableFuture.completedFuture(status);
             }
@@ -593,14 +593,28 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 .thenCompose(abortWriter -> abortWriter.writeEvent(event.getKey(), event));
     }
 
-    CompletableFuture<Void> writeCommitEvent(String scope, String stream, int epoch) {
+    CompletableFuture<Void> writeCommitEvent(String scope, String stream, int epoch, UUID txnId) {
         CommitEvent event = new CommitEvent(scope, stream, epoch);
-        return RetryHelper.withIndefiniteRetriesAsync(() -> writeCommitEvent(event), e -> { }, executor);
+        return TaskStepsRetryHelper.withRetries(() -> writeCommitEvent(event)
+                .thenAccept(v -> {
+                    log.debug("Transaction {} abort event posted", txnId);
+                })
+                .exceptionally(ex -> {
+                    log.debug("Transaction {}, failed posting abort event. Retrying...", txnId);
+                    throw new WriteFailedException(ex);
+                }), executor);
     }
 
     CompletableFuture<Void> writeAbortEvent(String scope, String stream, int epoch, UUID txnId) {
         AbortEvent event = new AbortEvent(scope, stream, epoch, txnId);
-        return RetryHelper.withIndefiniteRetriesAsync(() -> writeAbortEvent(event), e -> { }, executor);
+        return TaskStepsRetryHelper.withRetries(() -> writeAbortEvent(event)
+                                   .thenAccept(v -> {
+                                       log.debug("Transaction {} abort event posted", txnId);
+                                   })
+                                   .exceptionally(ex -> {
+                                       log.debug("Transaction {}, failed posting abort event. Retrying...", txnId);
+                                       throw new WriteFailedException(ex);
+                                   }), executor);
     }
 
     private CompletableFuture<Void> notifyTxnCreation(final String scope, final String stream,
@@ -619,7 +633,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 txnId,
                 this.retrieveDelegationToken()), executor);
     }
-    
+
     private OperationContext getNonNullOperationContext(final String scope,
                                                         final String stream,
                                                         final OperationContext contextOpt) {

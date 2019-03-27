@@ -10,10 +10,6 @@
 package io.pravega.controller.server;
 
 import com.google.common.base.Preconditions;
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
-import com.google.common.cache.RemovalListener;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.ReferenceCounted;
 import io.pravega.auth.AuthenticationException;
@@ -1097,6 +1093,7 @@ public class SegmentHelper {
                 final List<TableKey<byte[]>> keys =
                         tableKeysRead.getKeys().stream().map(k -> new TableKeyImpl<>(getArray(k.getData()),
                                                                                      new KeyVersionImpl(k.getKeyVersion()))).collect(Collectors.toList());
+                
                 result.complete(new TableSegment.IteratorItem<>(state, keys));
             }
 

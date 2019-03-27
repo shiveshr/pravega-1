@@ -1225,11 +1225,7 @@ public abstract class PersistentStreamBase implements Stream {
 
     @Override
     public CompletableFuture<Map<UUID, ActiveTxnRecord>> getActiveTxns() {
-        return getCurrentTxns()
-                .thenApply(x -> x.entrySet()
-                                 .stream()
-                                 .collect(toMap(k -> UUID.fromString(k.getKey()),
-                                         v -> v.getValue().getObject())));
+        return getCurrentTxns();
     }
 
     @Override
@@ -1313,7 +1309,7 @@ public abstract class PersistentStreamBase implements Stream {
         return getVersionedCommitTransactionsRecord()
                 .thenCompose(versioned -> {
                     if (versioned.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
-                        return getTxnCommitList(epoch)
+                        return getCommittingTxnsInEpoch(epoch, 1000)
                                 .thenCompose(list -> {
                                     if (list.isEmpty()) {
                                         return CompletableFuture.completedFuture(versioned);
@@ -1332,16 +1328,6 @@ public abstract class PersistentStreamBase implements Stream {
                         return CompletableFuture.completedFuture(versioned);
                     }
                 });
-    }
-
-    /**
-     * Get transactions in epoch. If no transactions exist return null.
-     */
-    private CompletableFuture<List<UUID>> getTxnCommitList(int epoch) {
-        return getTransactionsInEpoch(epoch)
-                .thenApply(transactions -> transactions.entrySet().stream()
-                                                       .filter(entry -> entry.getValue().getTxnStatus().equals(TxnStatus.COMMITTING))
-                                                       .map(Map.Entry::getKey).collect(Collectors.toList()));
     }
 
     @Override
@@ -1369,15 +1355,7 @@ public abstract class PersistentStreamBase implements Stream {
                 .thenCompose(x -> Futures.toVoid(updateCommittingTxnRecord(new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY,
                         record.getVersion()))));
     }
-
-    private CompletableFuture<Map<UUID, ActiveTxnRecord>> getTransactionsInEpoch(final int epoch) {
-        return getTxnInEpoch(epoch)
-                .thenApply(x -> x.entrySet()
-                                 .stream()
-                                 .collect(toMap(k -> UUID.fromString(k.getKey()),
-                                         v -> v.getValue().getObject())));
-    }
-
+    
     @Override
     public CompletableFuture<Void> createWaitingRequestIfAbsent(String processorName) {
         return createWaitingRequestNodeIfAbsent(processorName);
@@ -1716,9 +1694,9 @@ public abstract class PersistentStreamBase implements Stream {
 
     abstract CompletableFuture<Void> createCompletedTxEntry(final UUID txId, CompletedTxnRecord data);
 
-    abstract CompletableFuture<Map<String, VersionedMetadata<ActiveTxnRecord>>> getCurrentTxns();
+    abstract CompletableFuture<Map<UUID, ActiveTxnRecord>> getCurrentTxns();
 
-    abstract CompletableFuture<Map<String, VersionedMetadata<ActiveTxnRecord>>> getTxnInEpoch(int epoch);
+    abstract CompletableFuture<List<UUID>> getCommittingTxnsInEpoch(int epoch, int limit);
     // endregion
 
     // region marker

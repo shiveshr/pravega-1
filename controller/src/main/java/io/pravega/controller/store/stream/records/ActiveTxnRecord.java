@@ -28,6 +28,11 @@ import java.io.IOException;
 @Slf4j
 public class ActiveTxnRecord {
     public static final ActiveTxnRecordSerializer SERIALIZER = new ActiveTxnRecordSerializer();
+    public static final ActiveTxnRecord EMPTY = ActiveTxnRecord.builder().txCreationTimestamp(Long.MIN_VALUE)
+                                                               .leaseExpiryTime(Long.MIN_VALUE)
+                                                               .maxExecutionExpiryTime(Long.MIN_VALUE)
+                                                               .txnStatus(TxnStatus.UNKNOWN)
+                                                               .build();
 
     private final long txCreationTimestamp;
     private final long leaseExpiryTime;

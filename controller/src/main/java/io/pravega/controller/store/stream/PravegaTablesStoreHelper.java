@@ -49,7 +49,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class PravegaTablesStoreHelper {
-    private static final int NUM_OF_TRIES = Integer.MAX_VALUE;
+    private static final int NUM_OF_TRIES = 12; 
     private final SegmentHelper segmentHelper;
     private final ScheduledExecutorService executor;
     private final Cache cache;
@@ -262,7 +262,9 @@ public class PravegaTablesStoreHelper {
 
     public <T> AsyncIterator<Pair<String, VersionedMetadata<T>>> getAllEntries(String scope, String tableName, Function<byte[], T> fromBytes) {
         return new ContinuationTokenAsyncIterator<>(token -> getEntriesPaginated(scope, tableName, token, 1000, fromBytes)
-                .thenApplyAsync(result -> new AbstractMap.SimpleEntry<>(result.getKey(), result.getValue()), executor),
+                .thenApplyAsync(result -> {
+                    return new AbstractMap.SimpleEntry<>(result.getKey(), result.getValue());
+                }, executor),
                 IteratorState.EMPTY.toBytes());
     }
 
@@ -312,9 +314,18 @@ public class PravegaTablesStoreHelper {
         });
     }
 
+    /*
+     * We dont want to do indefinite retries because for controller's graceful shutting down, it waits on grpc service to
+     * be terminated which in turn waits on all outstanding grpc calls to complete. And the store may stall the calls if
+     * there is indefinite retries. Restricting it to 12 retries gives us ~60 seconds worth of wait on the upper side.
+     * Also, note that the call can fail because hostContainerMap has not been updated or it can fail because it cannot
+     * talk to segment store. Both these are translated to ConnectionErrors and are retried. All other exceptions
+     * are thrown back
+     */
     private <T> CompletableFuture<T> withRetries(Supplier<CompletableFuture<T>> futureSupplier, String errorMessage) {
         AtomicInteger retryCount = new AtomicInteger();
         AtomicLong previous = new AtomicLong(System.nanoTime());
+        
         return RetryHelper.withRetriesAsync(exceptionalCallback(futureSupplier, errorMessage), 
                 e -> {
                     boolean b = Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException;

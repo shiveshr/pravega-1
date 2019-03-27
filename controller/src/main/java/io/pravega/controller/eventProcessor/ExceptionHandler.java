@@ -35,6 +35,15 @@ public interface ExceptionHandler {
         }
     };
 
+    ExceptionHandler RESUME_EXCEPTION_HANDLER = (Throwable y) -> {
+        if (y instanceof EventProcessorInitException ||
+                y instanceof EventProcessorReinitException) {
+            return ExceptionHandler.Directive.Stop;
+        } else {
+            return ExceptionHandler.Directive.Resume;
+        }
+    };
+
     /**
      * The decider method that returns a Directive.
      *

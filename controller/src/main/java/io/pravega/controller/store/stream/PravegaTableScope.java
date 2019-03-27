@@ -9,7 +9,9 @@
  */
 package io.pravega.controller.store.stream;
 
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.pravega.client.tables.impl.IteratorState;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.BitConverter;
 import io.pravega.shared.NameUtils;
@@ -111,19 +113,19 @@ public class PravegaTableScope implements Scope {
     @Override
     public CompletableFuture<Pair<List<String>, String>> listStreams(int limit, String continuationToken, Executor executor) {
         List<String> taken = new ArrayList<>();
-        AtomicReference<String> token = new AtomicReference<>(continuationToken);
+        ByteBuf token = Unpooled.wrappedBuffer(Base64.getDecoder().decode(continuationToken));
         AtomicBoolean canContinue = new AtomicBoolean(true);
         return getStreamsInScopeTableName()
-                .thenCompose(entry -> storeHelper.getKeysPaginated(scopeName, entry,
-                        Unpooled.wrappedBuffer(Base64.getDecoder().decode(token.get())), limit)
+                .thenCompose(entry -> storeHelper.getKeysPaginated(scopeName, entry, token, limit)
                                                  .thenApply(result -> {
                                                      if (result.getValue().isEmpty()) {
                                                          canContinue.set(false);
                                                      } else {
                                                          taken.addAll(result.getValue());
                                                      }
-                                                     token.set(Base64.getEncoder().encodeToString(result.getKey().array()));
-                                                     return new ImmutablePair<>(taken, token.get());
+                                                     token.release();
+                                                     String next = Base64.getEncoder().encodeToString(result.getKey().array());
+                                                     return new ImmutablePair<>(taken, next);
                                                  }));
     }
 
