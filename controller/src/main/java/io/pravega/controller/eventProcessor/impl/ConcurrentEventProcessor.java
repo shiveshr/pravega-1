@@ -62,7 +62,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
     private final Semaphore semaphore;
     private final ScheduledFuture<?> periodicCheckpoint;
     private final Checkpointer checkpointer;
-    private final EventStreamWriter<R> internalWriter;
+    private final Writer<R> internalWriter;
     
     public ConcurrentEventProcessor(final H requestHandler,
                                     final ScheduledExecutorService executor) {
@@ -74,7 +74,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
                              final int maxConcurrent,
                              final ScheduledExecutorService executor,
                              final Checkpointer checkpointer,
-                             final EventStreamWriter<R> writer,
+                             final Writer<R> writer,
                              final long checkpointPeriod,
                              final TimeUnit timeUnit) {
         Preconditions.checkNotNull(requestHandler);
@@ -140,7 +140,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
         if (RetryableException.isRetryable(cause)) {
             log.info("ConcurrentEventProcessor Processing failed, Retryable Exception {}. Putting the event back.", cause.getClass().getName());
 
-            EventStreamWriter<R> writer;
+            Writer<R> writer;
             if (internalWriter != null) {
                 writer = internalWriter;
             } else if (getSelfWriter() != null) {

@@ -324,7 +324,8 @@ public class ControllerServiceImpl extends ControllerServiceGrpc.ControllerServi
 
     @Override
     public void commitTransaction(TxnRequest request, StreamObserver<TxnStatus> responseObserver) {
-        log.info("commitTransaction called for stream {}/{}, txnId={}.", request.getStreamInfo().getScope(),
+        // shivesh
+        log.debug("commitTransaction called for stream {}/{}, txnId={}.", request.getStreamInfo().getScope(),
                 request.getStreamInfo().getStream(), request.getTxnId());
         authenticateExecuteAndProcessResults(() -> this.authHelper.checkAuthorization(
                 AuthResourceRepresentation.ofStreamInScope(
@@ -446,8 +447,9 @@ public class ControllerServiceImpl extends ControllerServiceGrpc.ControllerServi
                         logAndUntrackRequestTag(requestTag);
                         if (ex != null) {
                             Throwable cause = Exceptions.unwrap(ex);
-                            log.error("Controller api failed with error: ", ex);
+                            log.error("Controller api with requestId {} failed with error: ", requestTag.getRequestId(), ex);
                             String errorDescription = replyWithStackTraceOnError ? "controllerStackTrace=" + Throwables.getStackTraceAsString(ex) : cause.getMessage();
+                            logAndUntrackRequestTag(requestTag);
                             streamObserver.onError(Status.INTERNAL
                                     .withCause(cause)
                                     .withDescription(errorDescription)

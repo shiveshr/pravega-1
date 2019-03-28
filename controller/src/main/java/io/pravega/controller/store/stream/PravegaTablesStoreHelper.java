@@ -49,7 +49,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 public class PravegaTablesStoreHelper {
-    private static final int NUM_OF_TRIES = 12; 
+    private static final int NUM_OF_TRIES = 15; 
     private final SegmentHelper segmentHelper;
     private final ScheduledExecutorService executor;
     private final Cache cache;
@@ -252,7 +252,7 @@ public class PravegaTablesStoreHelper {
                         VersionedMetadata<T> value = new VersionedMetadata<>(deserialized, new Version.LongVersion(x.getKey().getVersion().getSegmentVersion()));
                         return new ImmutablePair<>(key, value);
                     }).collect(Collectors.toList());
-                    log.info("shivesh:: get keys paginated on table {}/{} returned number of items {}", scope, tableName, items.size());
+//                    log.info("shivesh:: get keys paginated on table {}/{} returned number of items {}", scope, tableName, items.size());
                     return new AbstractMap.SimpleEntry<>(result.getState().toBytes(), items);
                 }, executor);
     }
@@ -326,17 +326,17 @@ public class PravegaTablesStoreHelper {
      * are thrown back
      */
     private <T> CompletableFuture<T> withRetries(Supplier<CompletableFuture<T>> futureSupplier, String errorMessage) {
-        AtomicInteger retryCount = new AtomicInteger();
-        AtomicLong previous = new AtomicLong(System.nanoTime());
+//        AtomicInteger retryCount = new AtomicInteger();
+//        AtomicLong previous = new AtomicLong(System.nanoTime());
         
         return RetryHelper.withRetriesAsync(exceptionalCallback(futureSupplier, errorMessage), 
                 e -> {
                     boolean b = Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException;
-                    if (b) {
-                        long time = System.nanoTime();
-                        log.warn("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
-                        previous.set(time);
-                    }
+//                    if (b) {
+//                        long time = System.nanoTime();
+//                        log.debug("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
+//                        previous.set(time);
+//                    }
                     return b;
                 }, NUM_OF_TRIES, executor);
     }

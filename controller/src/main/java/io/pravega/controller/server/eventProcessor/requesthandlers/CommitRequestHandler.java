@@ -183,7 +183,13 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                                 } else {
                                                     log.info("shivesh:: rolling transactions");
 
-                                                    return rollTransactions(scope, stream, txnEpochRecord, activeEpochRecord, versionedMetadata, context);
+                                                    return rollTransactions(scope, stream, txnEpochRecord, activeEpochRecord, versionedMetadata, context)
+                                                            .whenComplete((r, e) -> {
+                                                                if (e != null) {
+                                                                    log.error("shivesh:: rolling transactions failed", e);
+                                                                }
+                                                                log.info("shivesh:: rolling transactions");
+                                                            });
                                                 }
                                             }));
                                 }
@@ -216,7 +222,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
         });
     }
 
-    private CompletionStage<Void> runRollingTxn(String scope, String stream, EpochRecord txnEpoch,
+    private CompletableFuture<Void> runRollingTxn(String scope, String stream, EpochRecord txnEpoch,
                                                 EpochRecord activeEpoch, VersionedMetadata<CommittingTransactionsRecord> existing, OperationContext context) {
         String delegationToken = streamMetadataTasks.retrieveDelegationToken();
         long timestamp = System.currentTimeMillis();

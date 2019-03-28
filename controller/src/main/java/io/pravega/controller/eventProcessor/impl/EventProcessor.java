@@ -26,10 +26,15 @@ public abstract class EventProcessor<T extends ControllerEvent> {
     public interface Checkpointer {
         void store(Position position) throws CheckpointStoreException;
     }
-    
+
+    @FunctionalInterface
+    public interface Writer<T extends ControllerEvent> {
+        CompletableFuture<Void> write(T event);
+    }
+
     Checkpointer checkpointer;
 
-    EventStreamWriter<T> selfWriter;
+    Writer<T> selfWriter;
 
     /**
      * AbstractActor initialization hook that is called before actor starts receiving events.
@@ -70,7 +75,7 @@ public abstract class EventProcessor<T extends ControllerEvent> {
      * @return a stream writer that can be used to write events to the underlying event stream.
      */
     @VisibleForTesting
-    public EventStreamWriter<T> getSelfWriter() {
+    public Writer<T> getSelfWriter() {
         return selfWriter;
     }
 }

@@ -64,7 +64,8 @@ public class ClientConnectionInboundHandler extends ChannelInboundHandlerAdapter
         Channel c = ctx.channel();
         channel.set(c);
         registeredFutureLatch.release(null); //release all futures waiting for channel registration to complete.
-        log.info("Connection established {} ", ctx);
+        // shivesh
+        log.debug("Connection established {} ", ctx);
         c.write(new WireCommands.Hello(WireCommands.WIRE_VERSION, WireCommands.OLDEST_COMPATIBLE_VERSION), c.voidPromise());
         ScheduledFuture<?> old = keepAliveFuture.getAndSet(c.eventLoop().scheduleWithFixedDelay(new KeepAliveTask(), 20, 10, TimeUnit.SECONDS));
         if (old != null) {
@@ -203,7 +204,8 @@ public class ClientConnectionInboundHandler extends ChannelInboundHandlerAdapter
                     send(new WireCommands.KeepAlive());
                 }
             } catch (Exception e) {
-                log.warn("Keep alive failed, killing connection {} due to {} ", connectionName, e.getMessage());
+                // todo shivesh: revert
+                log.debug("Keep alive failed, killing connection {} due to {} ", connectionName, e.getMessage());
                 close();
             }
         }

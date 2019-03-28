@@ -978,11 +978,23 @@ public abstract class PersistentStreamBase implements Stream {
                     CommittingTransactionsRecord committingTxnRecord = versionedMetadata.getObject();
                     int activeEpoch = committingTxnRecord.getCurrentEpoch();
                     if (activeEpochRecord.getEpoch() == activeEpoch) {
-                        log.info("shivesh:: setting new active epoch as {}", committingTxnRecord.getNewActiveEpoch());
+                        log.info("shivesh:: rollingtxn : setting new active epoch as {}", committingTxnRecord.getNewActiveEpoch());
 
                         return updateSealedSegmentSizes(sealedActiveEpochSegments)
-                                .thenCompose(x -> clearMarkers(sealedActiveEpochSegments.keySet()))
-                                .thenCompose(x -> updateCurrentEpochRecord(committingTxnRecord.getNewActiveEpoch()));
+                                .thenCompose(x -> {
+                                    log.info("shivesh:: rollingtxn : updated sealed segment sizes {}");
+
+                                    return clearMarkers(sealedActiveEpochSegments.keySet());
+                                })
+                                .thenCompose(x -> {
+                                    log.info("shivesh:: rollingtxn : cleared markers{}");
+
+                                    return updateCurrentEpochRecord(committingTxnRecord.getNewActiveEpoch());
+                                })
+                                .thenAccept(v -> {
+                                    log.info("shivesh:: rollingtxn : updated current epoch record {}");
+
+                                });
                     } else {
                         return CompletableFuture.completedFuture(null);
                     }
@@ -1357,6 +1369,7 @@ public abstract class PersistentStreamBase implements Stream {
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+        log.info("shivesh:: marking txns as committed transaction on stream {}/{}", scope, name);
         for (UUID txnId : record.getObject().getTransactionsToCommit()) {
             log.debug("Committing transaction {} on stream {}/{}", txnId, scope, name);
             // commit transaction in segment store
@@ -1369,7 +1382,13 @@ public abstract class PersistentStreamBase implements Stream {
         }
         return future
                 .thenCompose(x -> Futures.toVoid(updateCommittingTxnRecord(new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY,
-                        record.getVersion()))));
+                        record.getVersion()))))
+                .whenComplete((r, e) -> {
+                    if (e != null){
+                        log.error("shivesh:: error while trying to update committing txn record", e);
+                    }
+                    log.info("shivesh:: reset committing txn record on stream {}/{}", scope, name);
+                });
     }
     
     @Override

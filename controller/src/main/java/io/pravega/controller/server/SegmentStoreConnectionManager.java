@@ -226,7 +226,7 @@ class SegmentStoreConnectionManager {
                 if (connectionCount < maxConcurrentConnections) {
                     waiting = waitQueue.poll();
                     if (waiting != null) {
-                        log.debug("shivesh:: Creating new connection for {}. Total connection count = {}", uri, connectionCount);
+//                        log.debug("shivesh:: Creating new connection for {}. Total connection count = {}", uri, connectionCount);
                         connectionCount++;
                     }
                 }
@@ -255,7 +255,7 @@ class SegmentStoreConnectionManager {
             }
             boolean tryCreateNewConnection;
             synchronized (lock) {
-                log.info("shivesh:: discarding disconnected connection for {}. count = {}", uri, connectionCount);
+//                log.info("shivesh:: discarding disconnected connection for {}. count = {}", uri, connectionCount);
                 connectionCount--;
                 tryCreateNewConnection = !waitQueue.isEmpty();
             }

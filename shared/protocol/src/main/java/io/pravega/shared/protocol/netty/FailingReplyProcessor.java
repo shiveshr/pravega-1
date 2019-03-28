@@ -43,7 +43,8 @@ public abstract class FailingReplyProcessor implements ReplyProcessor {
         if (hello.getLowVersion() > WireCommands.WIRE_VERSION || hello.getHighVersion() < WireCommands.OLDEST_COMPATIBLE_VERSION) {
             log.error("Incompatible wire protocol versions {}", hello);
         } else {
-            log.info("Received hello: {}", hello);
+            // shivesh
+            log.debug("Received hello: {}", hello);
         }
     }
 

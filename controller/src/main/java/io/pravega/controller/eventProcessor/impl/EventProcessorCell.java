@@ -32,7 +32,6 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.concurrent.NotThreadSafe;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -295,7 +294,7 @@ class EventProcessorCell<T extends ControllerEvent> {
             checkpointStore.setPosition(process, readerGroupName, readerId, position);
             lastCheckpoint.set(position);
         };
-        eventProcessor.selfWriter = selfWriter;
+        eventProcessor.selfWriter = e -> selfWriter.writeEvent(e.getKey(), e);
         return eventProcessor;
     }
 

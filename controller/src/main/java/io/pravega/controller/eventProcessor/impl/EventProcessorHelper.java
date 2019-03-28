@@ -9,7 +9,6 @@
  */
 package io.pravega.controller.eventProcessor.impl;
 
-import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.common.util.Retry;
 import io.pravega.controller.retryable.RetryableException;
 import io.pravega.shared.controller.event.ControllerEvent;
@@ -49,10 +48,10 @@ public class EventProcessorHelper {
         return INDEFINITELY.runAsync(futureSupplier, executor);
     }
 
-    public static <R extends ControllerEvent> CompletableFuture<Void> writeBack(R request, EventStreamWriter<R> writer) {
+    public static <R extends ControllerEvent> CompletableFuture<Void> writeBack(R request, EventProcessor.Writer<R> writer) {
         if (writer == null) {
             return CompletableFuture.completedFuture(null);
         }
-        return writer.writeEvent(request.getKey(), request);
+        return writer.write(request);
     }
 }

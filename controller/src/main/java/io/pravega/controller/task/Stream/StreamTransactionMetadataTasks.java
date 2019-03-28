@@ -242,7 +242,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      */
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final OperationContext contextOpt) {
-        log.info("shivesh:: committxn called for txn {} on stream {}/{}", txId, scope, stream);
+//        log.info("shivesh:: committxn called for txn {} on stream {}/{}", txId, scope, stream);
         final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
         return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, context),
                 RETRYABLE_PREDICATE, 3, executor);

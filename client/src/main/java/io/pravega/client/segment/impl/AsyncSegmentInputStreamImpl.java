@@ -174,14 +174,16 @@ class AsyncSegmentInputStreamImpl extends AsyncSegmentInputStream {
             if (closed.get()) {
                 log.debug("Exception while reading from Segment : {}", segmentId, ex);
             } else {
-                log.warn("Exception while reading from Segment : {}", segmentId, ex);
+                // todo shivesh:: revert
+                log.debug("Exception while reading from Segment : {}", segmentId, ex);
             }
             return ex instanceof Exception && !(ex instanceof ConnectionClosedException) && !(ex instanceof SegmentTruncatedException);
         }).runAsync(() -> {
             return getConnection()
                     .whenComplete((connection, ex) -> {
                         if (ex != null) {
-                            log.warn("Exception while establishing connection with Pravega " +
+                            // TODO: shivesh: revert..
+                            log.debug("Exception while establishing connection with Pravega " +
                                     "node", ex);
                             closeConnection(new ConnectionFailedException(ex));
                         }
@@ -250,7 +252,8 @@ class AsyncSegmentInputStreamImpl extends AsyncSegmentInputStream {
     }
 
     private void failAllInflight(Exception e) {
-        log.info("Connection failed due to a {}. Read requests will be retransmitted.", e.toString());
+        // todo: shivesh
+        log.debug("Connection failed due to a {}. Read requests will be retransmitted.", e.toString());
         List<CompletableFuture<WireCommands.SegmentRead>> readsToFail;
         synchronized (lock) {
             readsToFail = new ArrayList<>(outstandingRequests.values());

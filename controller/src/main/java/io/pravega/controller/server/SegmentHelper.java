@@ -1325,7 +1325,7 @@ public class SegmentHelper {
                             (((WireCommandFailedException) unwrap).getReason().equals(WireCommandFailedException.Reason.ConnectionDropped))
                             )) {
                         connectionFuture.thenAccept(connectionObject -> {
-                            log.error("shivesh:: connection failed for our request.. returning failed connection" + request.getType());
+//                            log.error("shivesh:: connection failed for our request.. returning failed connection" + request.getType());
                             connectionObject.failConnection();
                             pool.returnConnection(connectionObject);
                         });
