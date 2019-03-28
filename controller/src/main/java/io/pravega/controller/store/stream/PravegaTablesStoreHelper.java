@@ -240,7 +240,10 @@ public class PravegaTablesStoreHelper {
         log.info("get entries paginated called for : {}/{}", scope, tableName);
 
         return withRetries(() -> segmentHelper.readTableEntries(scope, tableName, limit,
-                IteratorState.fromBytes(continuationToken), authToken.get(), RequestTag.NON_EXISTENT_ID),
+                IteratorState.fromBytes(continuationToken), authToken.get(), RequestTag.NON_EXISTENT_ID).exceptionally(e -> {
+                    log.info("shivesh:: readTableEntries threw exception:: {}.. it will be translated in withRetries", e);
+                    throw new CompletionException(e);
+                }),
                 () -> String.format("get entries paginated for table: %s/%s", scope, tableName))
                 .thenApplyAsync(result -> {
                     log.info("shivesh:: get entries paginated returned result {}", result.getItems().size());

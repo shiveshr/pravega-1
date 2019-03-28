@@ -70,7 +70,7 @@ public class RawClient implements AutoCloseable {
 
         @Override
         public void processingFailure(Exception error) {
-            log.warn("Processing failure: ", error);
+            log.debug("Processing failure: ", error);
             closeConnection(error);
         }
 
@@ -98,11 +98,12 @@ public class RawClient implements AutoCloseable {
         }
     }
 
+    // TODO: shivesh
     private void closeConnection(Throwable exceptionToInflightRequests) {
         if (closed.get() || exceptionToInflightRequests instanceof ConnectionClosedException) {
             log.debug("Closing connection to segment {} with exception {}", this.segmentId, exceptionToInflightRequests);
         } else {
-            log.warn("Closing connection to segment {} with exception: {}", this.segmentId, exceptionToInflightRequests);
+            log.debug("Closing connection to segment {} with exception: {}", this.segmentId, exceptionToInflightRequests);
         }
         if (closed.compareAndSet(false, true)) {
             connection.thenAccept(c -> {
