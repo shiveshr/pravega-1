@@ -91,11 +91,16 @@ public class ZKHostStore implements HostControllerStore {
     @Synchronized
     private void updateMap() {
         log.info("shivesh:: received updated map from node cache::");
-        
+
         hostContainerMap.get().getHostContainerMap().forEach((x, y) -> {
-            log.info("shivesh:: host container assignment {} --> {} " + x.getIpAddr(), y);
+            log.info("shivesh:: host container previous assignment {} --> {} " + x.getIpAddr(), y);
         });
+
         hostContainerMap.set(HostContainerMap.fromBytes(hostContainerMapNode.getCurrentData().getData()));
+
+        hostContainerMap.get().getHostContainerMap().forEach((x, y) -> {
+            log.info("shivesh:: host container new assignment {} --> {} " + x.getIpAddr(), y);
+        });
         // Following signal is meant only for testing
         Listener consumer = listenerRef.get();
         if (consumer != null) {
