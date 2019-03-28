@@ -74,7 +74,6 @@ class ZKCheckpointStore implements CheckpointStore {
     @Override
     public void setPosition(String process, String readerGroup, String readerId, Position position) throws CheckpointStoreException {
         updateNode(getReaderPath(process, readerGroup, readerId), positionSerializer.serialize(position).array());
-        log.info("shivesh:: checkpoint for {} {} {} {}", process, readerGroup, readerId, position);
     }
 
     @Override
@@ -89,11 +88,6 @@ class ZKCheckpointStore implements CheckpointStore {
             }
             map.put(child, position);
         }
-
-        map.forEach((x, y) -> {
-            log.info("shivesh:: checkpoints read back {} {} {} {}", process, readerGroup, x, y);
-        });
-
         return map;
     }
 

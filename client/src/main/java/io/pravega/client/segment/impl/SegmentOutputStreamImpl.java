@@ -178,7 +178,9 @@ class SegmentOutputStreamImpl implements SegmentOutputStream {
                     }
                     oldConnection = connection;
                 }
-                log.info("Handling exception {} for connection {} on writer {}. SetupCompleted: {}, Closed: {}",
+                
+                // TODO: shivesh
+                log.debug("Handling exception {} for connection {} on writer {}. SetupCompleted: {}, Closed: {}",
                          throwable, connection, writerId, connectionSetupCompleted == null ? null : connectionSetupCompleted.isDone(), closed);
                 if (exception == null) {
                     exception = throwable;
@@ -190,7 +192,7 @@ class SegmentOutputStreamImpl implements SegmentOutputStream {
                 } 
                 if (!closed) {
                     String message = throwable.getMessage() == null ? throwable.getClass().toString() : throwable.getMessage();
-                    log.warn("Connection for segment {} on writer {} failed due to: {}", segmentName, writerId, message);
+                    log.debug("Connection for segment {} on writer {} failed due to: {}", segmentName, writerId, message);
                 }
             }
             if (throwable instanceof SegmentSealedException || throwable instanceof NoSuchSegmentException) {
@@ -352,11 +354,11 @@ class SegmentOutputStreamImpl implements SegmentOutputStream {
                                              .collect(Collectors.toList());
             ClientConnection connection = state.getConnection();
             if (connection == null) {
-                log.warn("Connection setup could not be completed because connection is already failed.", writerId);
+                log.debug("Connection setup could not be completed because connection is already failed.", writerId);
                 return;
             }
             if (toRetransmit == null || toRetransmit.isEmpty()) {
-                log.info("Connection setup complete for writer {}", writerId);
+                log.debug("Connection setup complete for writer {}", writerId);
                 state.connectionSetupComplete(connection);
             } else {
                 connection.sendAsync(toRetransmit, e -> {
@@ -443,7 +445,7 @@ class SegmentOutputStreamImpl implements SegmentOutputStream {
                 log.trace("Sending append request: {}", append);
                 connection.send(append);
             } catch (ConnectionFailedException e) {
-                log.warn("Connection " + writerId + " failed due to: ", e);
+                log.debug("Connection " + writerId + " failed due to: ", e);
                 reconnect(); // As the message is inflight, this will perform the retransmission.
             }
         }
@@ -526,7 +528,7 @@ class SegmentOutputStreamImpl implements SegmentOutputStream {
         state.setupConnection.registerAndRunReleaser(() -> {
             Retry.indefinitelyWithExpBackoff(retrySchedule.getInitialMillis(), retrySchedule.getMultiplier(),
                                              retrySchedule.getMaxDelay(),
-                                             t -> log.warn(writerId + " Failed to connect: ", t))
+                                             t -> log.debug(writerId + " Failed to connect: ", t))
                  .runAsync(() -> {
                      log.debug("Running reconnect for segment:{} writerID: {}", segmentName, writerId);
                      if (state.isClosed() || state.isAlreadySealed()) {

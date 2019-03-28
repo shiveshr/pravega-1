@@ -242,7 +242,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      */
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final OperationContext contextOpt) {
-//        log.info("shivesh:: committxn called for txn {} on stream {}/{}", txId, scope, stream);
+        log.debug("shivesh:: committxn called for txn {} on stream {}/{}", txId, scope, stream);
         final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
         return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, context),
                 RETRYABLE_PREDICATE, 3, executor);
@@ -442,7 +442,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 return CompletableFuture.completedFuture(createStatus(Status.LEASE_TOO_LARGE));
             } else if (lease + System.currentTimeMillis() > txnData.getMaxExecutionExpiryTime()) {
                 return CompletableFuture.completedFuture(createStatus(Status.MAX_EXECUTION_TIME_EXCEEDED));
-            } else {
+            } else if (txnData.getStatus().equals(TxnStatus.OPEN)) {
                 TxnResource resource = new TxnResource(scope, stream, txnId);
 
                 // Step 2. Add txn to host-transaction index
@@ -487,6 +487,9 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                         return createStatus(Status.OK);
                     }, executor);
                 }, executor);
+            } else {
+                // fail ping if transaction is not open. 
+                return Futures.failedFuture(StoreException.create(StoreException.Type.ILLEGAL_STATE, String.format("transaction status = %s", txnData.getStatus())));
             }
         }, executor);
     }

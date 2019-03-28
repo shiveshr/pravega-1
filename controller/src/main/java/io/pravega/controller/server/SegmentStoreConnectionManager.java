@@ -340,7 +340,8 @@ class SegmentStoreConnectionManager {
                                 WireCommandFailedException.Reason.ConnectionFailed));
                         state.set(ConnectionState.DISCONNECTED);
                     } else {
-                        resultFuture.completeExceptionally(new RuntimeException(cause));
+                        log.info("shivesh:: connection failed with {}", cause.getClass());
+                        resultFuture.completeExceptionally(cause);
                     }
                 }
             });

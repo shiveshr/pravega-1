@@ -338,7 +338,7 @@ public class PravegaTablesStoreHelper {
                     boolean b = unwrap instanceof StoreException.StoreConnectionException;
                     if (b) {
                         long time = System.nanoTime();
-                        log.debug("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
+                        log.info("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
                         previous.set(time);
                     } else {
                         if (unwrap instanceof StoreException.UnknownException || unwrap instanceof StoreException.IllegalStateException) {
