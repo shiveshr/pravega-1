@@ -241,7 +241,7 @@ public class PravegaTablesStoreHelper {
 
         return withRetries(() -> segmentHelper.readTableEntries(scope, tableName, limit,
                 IteratorState.fromBytes(continuationToken), authToken.get(), RequestTag.NON_EXISTENT_ID).exceptionally(e -> {
-                    log.info("shivesh:: readTableEntries threw exception:: {}.. it will be translated in withRetries", e);
+                    log.warn("shivesh:: readTableEntries threw exception:: {}.. it will be translated in withRetries", Exceptions.unwrap(e).getClass());
                     throw new CompletionException(e);
                 }),
                 () -> String.format("get entries paginated for table: %s/%s", scope, tableName))
@@ -305,6 +305,7 @@ public class PravegaTablesStoreHelper {
                         toThrow = StoreException.create(StoreException.Type.WRITE_CONFLICT, wcfe, errorMessage);
                         break;
                     default:
+                        log.info("shivesh:: found unknown exception type:{}", wcfe.getReason());
                         toThrow = StoreException.create(StoreException.Type.UNKNOWN, wcfe, errorMessage);
                 }
             } else if (cause instanceof HostStoreException) {
@@ -328,17 +329,22 @@ public class PravegaTablesStoreHelper {
      * are thrown back
      */
     private <T> CompletableFuture<T> withRetries(Supplier<CompletableFuture<T>> futureSupplier, Supplier<String> errorMessage) {
-//        AtomicInteger retryCount = new AtomicInteger();
-//        AtomicLong previous = new AtomicLong(System.nanoTime());
+        AtomicInteger retryCount = new AtomicInteger();
+        AtomicLong previous = new AtomicLong(System.nanoTime());
         
         return RetryHelper.withRetriesAsync(exceptionalCallback(futureSupplier, errorMessage), 
                 e -> {
-                    boolean b = Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException;
-//                    if (b) {
-//                        long time = System.nanoTime();
-//                        log.debug("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
-//                        previous.set(time);
-//                    }
+                    Throwable unwrap = Exceptions.unwrap(e);
+                    boolean b = unwrap instanceof StoreException.StoreConnectionException;
+                    if (b) {
+                        long time = System.nanoTime();
+                        log.debug("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
+                        previous.set(time);
+                    } else {
+                        if (unwrap instanceof StoreException.UnknownException || unwrap instanceof StoreException.IllegalStateException) {
+                            log.error("shivesh:: all hell broke lose {}", unwrap);
+                        }
+                    }
                     return b;
                 }, NUM_OF_TRIES, executor);
     }

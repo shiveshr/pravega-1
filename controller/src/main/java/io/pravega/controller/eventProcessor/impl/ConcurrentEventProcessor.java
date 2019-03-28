@@ -181,7 +181,6 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
         running.remove(pc);
         completed.add(pc);
 
-        running.forEach(x -> log.info("shivesh:: running positions" + x.position));
         final PositionCounter smallest = running.isEmpty() ? MAX : running.first();
         final List<PositionCounter> checkpointCandidates = completed.stream()
                 .filter(x -> positionCounterComparator.compare(x, smallest) < 0).collect(Collectors.toList());
