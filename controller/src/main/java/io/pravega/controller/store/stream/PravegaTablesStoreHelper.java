@@ -328,9 +328,11 @@ public class PravegaTablesStoreHelper {
      * talk to segment store. Both these are translated to ConnectionErrors and are retried. All other exceptions
      * are thrown back
      */
+    AtomicLong shivesh = new AtomicLong();
     private <T> CompletableFuture<T> withRetries(Supplier<CompletableFuture<T>> futureSupplier, Supplier<String> errorMessage) {
         AtomicInteger retryCount = new AtomicInteger();
         AtomicLong previous = new AtomicLong(System.nanoTime());
+        long context = shivesh.incrementAndGet();
         try {
             return RetryHelper.withRetriesAsync(exceptionalCallback(futureSupplier, errorMessage),
                     e -> {
@@ -338,17 +340,17 @@ public class PravegaTablesStoreHelper {
                         boolean b = unwrap instanceof StoreException.StoreConnectionException;
                         if (b) {
                             long time = System.nanoTime();
-                            log.info("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
+                            log.info("shivesh:: {} Retry#{} got store connection error in our infinite retry loop while trying to work. {}", context, retryCount.incrementAndGet(), time - previous.get());
                             previous.set(time);
                         } else {
                             if (unwrap instanceof StoreException.UnknownException || unwrap instanceof StoreException.IllegalStateException) {
-                                log.error("shivesh:: all hell broke lose {}", unwrap);
+                                log.error("shivesh:: {} all hell broke lose", context, unwrap);
                             }
                         }
                         return b;
                     }, NUM_OF_TRIES, executor);
         } catch (Exception e) {
-            log.warn("shivesh:: this is unusual to get an exception here {}", e);
+            log.warn("shivesh:: {} this is unusual to get an exception here", context, e);
             return Futures.failedFuture(e);
         }
     }

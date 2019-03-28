@@ -438,7 +438,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug("commitTransaction {} connection dropped", transactionName);
+                log.warn("commitTransaction {} connection dropped", transactionName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -470,6 +470,7 @@ public class SegmentHelper {
             @Override
             public void processingFailure(Exception error) {
                 if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    log.info("shivesh:: connection failed on processing failure in commitTransaction");
                     result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
                 } else {
                     log.error("commitTransaction {} failed", transactionName, error);
@@ -1217,7 +1218,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "readTableEntries {} Connection dropped", qualifiedName);
+                log.warn(requestId, "readTableEntries {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -1258,6 +1259,8 @@ public class SegmentHelper {
             @Override
             public void processingFailure(Exception error) {
                 if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
+                    log.info("shivesh:: connection failed on processing failure in readTableEntries");
+
                     result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
                 } else {
                     log.error(requestId, "readTableEntries {} failed", qualifiedName, error);
