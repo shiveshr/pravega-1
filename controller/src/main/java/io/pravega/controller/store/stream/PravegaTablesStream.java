@@ -531,7 +531,9 @@ class PravegaTablesStream extends PersistentStreamBase {
         return getTxnWithFilter((x, y) -> RecordHelper.getTransactionEpoch(x) == epoch && 
             y.getTxnStatus().equals(TxnStatus.COMMITTING), limit)
                 .thenApply(map -> {
-                    return map.entrySet().stream().map(Map.Entry::getKey).collect(Collectors.toList()); 
+                    List<UUID> list = map.entrySet().stream().map(Map.Entry::getKey).collect(Collectors.toList());
+                    log.info("shivesh:: found txn committing list: {}", list);
+                    return list;
                 });
     }
 
@@ -562,13 +564,22 @@ class PravegaTablesStream extends PersistentStreamBase {
                                                              }
                                                          }
                                                      }
-                                                     if (v.getValue().isEmpty()) {
+                                                     // if we get less than the requested number, then there isnt really more available. 
+                                                     // it may become available but its a good exit situation for us. 
+                                                     canContinue.set(!(v.getValue().size() < limit || result.size() >= limit));
+                                                     if (!canContinue.get()) {
                                                          log.info("shivesh:: read all available keys.. nothing more to do.. total result = ", result.size());
+                                                     } else {
+                                                         log.info("shivesh: calling paginated again as we have not found our mojo.. only found {} while previous page had {}", result.size(), v.getValue().size());
                                                      }
-                                                     canContinue.set(!v.getValue().isEmpty() && result.size() < limit);
-                                                     
                                                      token.set(v.getKey());
-                                                 }), executor)
+                                                 }).whenComplete((r, e) -> {
+                                                     if (e!=null) {
+                                                         log.info("shivesh:: error in reading all entries pagianted", e);
+                                                     } else {
+                                                         log.info("shivesh: exited the loop.. read all entries paginated and found {} entries.", result.size());
+                                                     }
+                                        }), executor)
                                    .thenApply(x -> result), DATA_NOT_FOUND_PREDICATE, Collections.emptyMap()));
     }
 

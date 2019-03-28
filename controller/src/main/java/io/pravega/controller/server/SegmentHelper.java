@@ -100,7 +100,8 @@ public class SegmentHelper {
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "CreateSegment {} Connection dropped", qualifiedStreamSegmentName);
+                // shivesh
+                log.debug(requestId, "CreateSegment {} Connection dropped", qualifiedStreamSegmentName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -166,7 +167,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "truncateSegment {} Connection dropped", qualifiedName);
+                log.debug(requestId, "truncateSegment {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -227,7 +228,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "deleteSegment {} Connection dropped", qualifiedName);
+                log.debug(requestId, "deleteSegment {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -303,7 +304,7 @@ public class SegmentHelper {
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "sealSegment {} connectionDropped", qualifiedName);
+                log.debug(requestId, "sealSegment {} connectionDropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -365,7 +366,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn("createTransaction {} connectionDropped", transactionName);
+                log.debug("createTransaction {} connectionDropped", transactionName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -437,7 +438,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn("commitTransaction {} connection dropped", transactionName);
+                log.debug("commitTransaction {} connection dropped", transactionName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -504,7 +505,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn("abortTransaction {} connectionDropped", transactionName);
+                log.debug("abortTransaction {} connectionDropped", transactionName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -561,7 +562,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "updatePolicy {} connectionDropped", qualifiedName);
+                log.debug(requestId, "updatePolicy {} connectionDropped", qualifiedName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -614,7 +615,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn("getSegmentInfo {} connectionDropped", qualifiedName);
+                log.debug("getSegmentInfo {} connectionDropped", qualifiedName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -678,7 +679,7 @@ public class SegmentHelper {
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "CreateTableSegment {} Connection dropped", qualifiedStreamSegmentName);
+                log.debug(requestId, "CreateTableSegment {} Connection dropped", qualifiedStreamSegmentName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -752,7 +753,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "deleteTableSegment {} Connection dropped.", qualifiedName);
+                log.debug(requestId, "deleteTableSegment {} Connection dropped.", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -831,7 +832,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "updateTableEntries {} Connection dropped", qualifiedName);
+                log.debug(requestId, "updateTableEntries {} Connection dropped", qualifiedName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -929,7 +930,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "removeTableKeys {} Connection dropped", qualifiedName);
+                log.debug(requestId, "removeTableKeys {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -1024,7 +1025,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "readTable {} Connection dropped", qualifiedName);
+                log.debug(requestId, "readTable {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -1129,7 +1130,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "readTableKeys {} Connection dropped", qualifiedName);
+                log.debug(requestId, "readTableKeys {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -1216,7 +1217,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.warn(requestId, "readTableEntries {} Connection dropped", qualifiedName);
+                log.debug(requestId, "readTableEntries {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }

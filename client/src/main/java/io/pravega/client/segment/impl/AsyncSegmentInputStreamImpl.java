@@ -121,7 +121,7 @@ class AsyncSegmentInputStreamImpl extends AsyncSegmentInputStream {
 
         @Override
         public void processingFailure(Exception error) {
-            log.warn("Processing failure: ", error);
+            log.debug("Processing failure: ", error);
             closeConnection(error);
         }
 
@@ -203,7 +203,7 @@ class AsyncSegmentInputStreamImpl extends AsyncSegmentInputStream {
         log.trace("Sending read request {}", request);
         c.sendAsync(request, cfe -> {
             if (cfe != null) {
-                log.error("Error while sending request {}", request, cfe);
+                log.debug("Error while sending request {}", request, cfe);
                 synchronized (lock) {
                     outstandingRequests.remove(request.getOffset());
                 }
@@ -214,10 +214,11 @@ class AsyncSegmentInputStreamImpl extends AsyncSegmentInputStream {
     }
 
     private void closeConnection(Exception exceptionToInflightRequests) {
+        // TODO: shivesh: revert
         if (closed.get()) {
-            log.info("Closing connection to segment: {}", segmentId);
+            log.debug("Closing connection to segment: {}", segmentId);
         } else {            
-            log.info("Closing connection to segment {} with exception: {}", segmentId, exceptionToInflightRequests);
+            log.debug("Closing connection to segment {} with exception: {}", segmentId, exceptionToInflightRequests);
         }
         CompletableFuture<ClientConnection> c;
         synchronized (lock) {
@@ -228,7 +229,7 @@ class AsyncSegmentInputStreamImpl extends AsyncSegmentInputStream {
             try {
                 c.getNow(null).close();
             } catch (Exception e) {
-                log.warn("Exception tearing down connection: ", e);
+                log.debug("Exception tearing down connection: ", e);
             }
         }
         failAllInflight(exceptionToInflightRequests);
