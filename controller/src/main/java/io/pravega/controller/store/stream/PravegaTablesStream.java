@@ -534,6 +534,11 @@ class PravegaTablesStream extends PersistentStreamBase {
                     List<UUID> list = map.entrySet().stream().map(Map.Entry::getKey).collect(Collectors.toList());
                     log.info("shivesh:: found txn committing list: {}", list);
                     return list;
+                })
+                .whenComplete((r, e) -> {
+                   if (e != null) {
+                       log.info("shivesh:: fmt:: map to list conversion failed {}", e);
+                   }
                 });
     }
 
