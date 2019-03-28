@@ -44,6 +44,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -535,9 +536,13 @@ class PravegaTablesStream extends PersistentStreamBase {
                     log.info("shivesh:: found txn committing list: {}", list);
                     return list;
                 })
-                .whenComplete((r, e) -> {
+                .handle((r, e) -> {
                    if (e != null) {
-                       log.info("shivesh:: fmt:: map to list conversion failed {}", e);
+                       log.warn("shivesh:: fmt:: map to list conversion failed {}", e);
+                       throw new CompletionException(e);
+                   } else {
+                       log.info("shivesh:: found committing list::", r);
+                       return r;
                    }
                 });
     }
@@ -578,11 +583,13 @@ class PravegaTablesStream extends PersistentStreamBase {
                                                          log.info("shivesh: calling paginated again as we have not found our mojo.. only found {} while previous page had {}", result.size(), v.getValue().size());
                                                      }
                                                      token.set(v.getKey());
-                                                 }).whenComplete((r, e) -> {
+                                                 }).handle((r, e) -> {
                                                      if (e!=null) {
                                                          log.info("shivesh:: error in reading all entries pagianted", e);
+                                                         throw new CompletionException(e);
                                                      } else {
                                                          log.info("shivesh: exited the loop.. read all entries paginated and found {} entries.", result.size());
+                                                         return r;
                                                      }
                                         }), executor)
                                    .thenApply(x -> result), DATA_NOT_FOUND_PREDICATE, Collections.emptyMap()));

@@ -10,6 +10,7 @@
 package io.pravega.controller.eventProcessor.impl;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.eventProcessor.RequestHandler;
 import io.pravega.shared.controller.event.CommitEvent;
@@ -98,24 +99,29 @@ public abstract class SerializedRequestHandler<T extends ControllerEvent> implem
         Work work = workQueue.poll();
         CompletableFuture<Void> future;
         try {
+            log.info("shivesh:: starting event {} processing", work.event);
             future = processEvent(work.getEvent());
         } catch (Exception e) {
             log.info("shivesh:: adding synchronous error catch actually helped");
             future = Futures.failedFuture(e);
         }
 
-        future.whenComplete((r, e) -> {
+        future.handle((r, e) -> {
             if (e != null && toPostpone(work.getEvent(), work.getPickupTime(), e)) {
+                log.info("shivesh:: postponing event {} processing", work.event);
                 handleWorkPostpone(key, workQueue, work);
             } else {
                 if (e != null) {
+                    log.info("shivesh:: workflow {} failed with exception:{}", work.event, Exceptions.unwrap(e).getClass());
                     work.getResult().completeExceptionally(e);
                 } else {
+                    log.info("shivesh:: workflow completed for event {}", work.event);
                     work.getResult().complete(r);
                 }
 
                 handleWorkComplete(key, workQueue, work);
             }
+            return null;
         });
     }
 

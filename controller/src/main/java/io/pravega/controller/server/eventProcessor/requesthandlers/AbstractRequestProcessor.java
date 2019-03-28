@@ -30,6 +30,7 @@ import io.pravega.shared.controller.event.UpdateStreamEvent;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -161,7 +162,16 @@ public abstract class AbstractRequestProcessor<T extends ControllerEvent> extend
                     return null;
                 });
 
-        return resultFuture;
+        return resultFuture
+                .handle((r, e) -> {
+                    if (e != null) {
+                        log.info("shivesh:: abstract-request processor for event {} failed", event);
+                        throw new CompletionException(e);   
+                    } else {
+                        log.info("shivesh:: abstract-request processor for event {} completed", event);
+                        return r;
+                    }
+                });
     }
 
     private <R> CompletableFuture<R> suppressException(CompletableFuture<R> future, R returnOnException, String message) {

@@ -96,7 +96,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
         CompletableFuture<Void> future = new CompletableFuture<>();
 
         tryCommitTransactions(scope, stream, epoch, context)
-                .whenComplete((r, e) -> {
+                .handle((r, e) -> {
                     if (e != null) {
                         Throwable cause = Exceptions.unwrap(e);
                         // for operation not allowed, we will report the event
@@ -114,6 +114,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                         }
                         future.complete(r);
                     }
+                    return null;
                 });
 
         return future;

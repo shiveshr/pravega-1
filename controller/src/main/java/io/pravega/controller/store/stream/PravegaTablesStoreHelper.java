@@ -349,14 +349,16 @@ public class PravegaTablesStoreHelper {
                         }
                         return b;
                     }, NUM_OF_TRIES, executor)
-                    .whenComplete((r, e) -> {
+                    .handle((r, e) -> {
                         if (e != null) {
                             if (retryCount.get() > 0) {
                                 log.info("shivesh:: {} Failed after retries. retrycount at the time of failure {}", context, retryCount.get());
                             } 
+                            throw new CompletionException(e);
                         } else if (retryCount.get() > 0) {
                             log.info("shivesh:: {} succeeded after retries. retrycount before success {}", context, retryCount.get());
                         }
+                        return r;
                     });
         } catch (Exception e) {
             log.warn("shivesh:: {} this is unusual to get an exception here", context, e);

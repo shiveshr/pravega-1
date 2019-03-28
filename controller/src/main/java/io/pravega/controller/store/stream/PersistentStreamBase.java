@@ -1349,12 +1349,18 @@ public abstract class PersistentStreamBase implements Stream {
                         throw StoreException.create(StoreException.Type.OPERATION_NOT_ALLOWED,
                                 "Transactions on different epoch are being committed");
                     } else {
+                        log.info("shivesh:: found existing committing txn object object:: ");
                         return CompletableFuture.completedFuture(versioned);
                     }
                 })
-                .exceptionally(e -> {
-                    log.warn("shivesh:: lo beta.. exception while trying to start committing transcations", e);
-                    throw new CompletionException(e);
+                .handle((r, e) -> {
+                    if (e != null) {
+                        log.warn("shivesh:: lo beta.. exception while trying to start committing transcations", e);
+                        throw new CompletionException(e);
+                    } else {
+                        log.info("shivesh:: returned from startCommittingTransactions in epoch.. result = numOf txns to commit{}", r.getObject().getTransactionsToCommit().size());
+                    }
+                    return r;
                 });
     }
 
