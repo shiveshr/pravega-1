@@ -331,21 +331,25 @@ public class PravegaTablesStoreHelper {
     private <T> CompletableFuture<T> withRetries(Supplier<CompletableFuture<T>> futureSupplier, Supplier<String> errorMessage) {
         AtomicInteger retryCount = new AtomicInteger();
         AtomicLong previous = new AtomicLong(System.nanoTime());
-        
-        return RetryHelper.withRetriesAsync(exceptionalCallback(futureSupplier, errorMessage), 
-                e -> {
-                    Throwable unwrap = Exceptions.unwrap(e);
-                    boolean b = unwrap instanceof StoreException.StoreConnectionException;
-                    if (b) {
-                        long time = System.nanoTime();
-                        log.info("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
-                        previous.set(time);
-                    } else {
-                        if (unwrap instanceof StoreException.UnknownException || unwrap instanceof StoreException.IllegalStateException) {
-                            log.error("shivesh:: all hell broke lose {}", unwrap);
+        try {
+            return RetryHelper.withRetriesAsync(exceptionalCallback(futureSupplier, errorMessage),
+                    e -> {
+                        Throwable unwrap = Exceptions.unwrap(e);
+                        boolean b = unwrap instanceof StoreException.StoreConnectionException;
+                        if (b) {
+                            long time = System.nanoTime();
+                            log.info("shivesh:: Retry#{} got store connection error in our infinite retry loop while trying to work. {}", retryCount.incrementAndGet(), time - previous.get());
+                            previous.set(time);
+                        } else {
+                            if (unwrap instanceof StoreException.UnknownException || unwrap instanceof StoreException.IllegalStateException) {
+                                log.error("shivesh:: all hell broke lose {}", unwrap);
+                            }
                         }
-                    }
-                    return b;
-                }, NUM_OF_TRIES, executor);
+                        return b;
+                    }, NUM_OF_TRIES, executor);
+        } catch (Exception e) {
+            log.warn("shivesh:: this is unusual to get an exception here {}", e);
+            return Futures.failedFuture(e);
+        }
     }
 }
