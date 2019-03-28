@@ -1366,22 +1366,14 @@ public abstract class PersistentStreamBase implements Stream {
 
     @Override
     public CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record) {
-        // Chain all transaction commit futures one after the other. This will ensure that order of commit
-        // if honoured and is based on the order in the list.
-        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+        // transactions have already been committed. we are simply marking their metadata records to be committed. 
+        // this can be performed parallelly. 
         log.info("shivesh:: marking txns as committed transaction on stream {}/{}", scope, name);
-        for (UUID txnId : record.getObject().getTransactionsToCommit()) {
-            log.debug("Committing transaction {} on stream {}/{}", txnId, scope, name);
-            // commit transaction in segment store
-            future = future
-                    // mark transaction as committed in metadata store.
-                    .thenCompose(x -> commitTransaction(txnId)
-                            .thenAccept(done -> {
-                                log.debug("transaction {} on stream {}/{} committed successfully", txnId, scope, name);
-                            }));
-        }
-        return future
-                .thenCompose(x -> Futures.toVoid(updateCommittingTxnRecord(new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY,
+        return Futures.allOf(record.getObject().getTransactionsToCommit().stream().map(txnId -> commitTransaction(txnId)
+                .thenAccept(done -> {
+                    log.debug("transaction {} on stream {}/{} committed successfully", txnId, scope, name);
+                })).collect(Collectors.toList()))            
+              .thenCompose(x -> Futures.toVoid(updateCommittingTxnRecord(new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY,
                         record.getVersion()))))
                 .whenComplete((r, e) -> {
                     if (e != null){
