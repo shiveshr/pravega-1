@@ -553,8 +553,8 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
         Stream stream = getStream(scopeName, streamName, context);
         return withCompletion(stream.createTransaction(txnId, lease, maxExecutionTime), executor)
                 .thenApply(result -> {
-                    stream.getNumberOfOngoingTransactions().thenAccept(count ->
-                            TransactionMetrics.reportOpenTransactions(scopeName, streamName, count));
+//                    stream.getNumberOfOngoingTransactions().thenAccept(count ->
+//                            TransactionMetrics.reportOpenTransactions(scopeName, streamName, count));
                     return result;
                 });
     }
@@ -616,8 +616,8 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
         Stream stream = getStream(scope, streamName, context);
         return withCompletion(stream.abortTransaction(txId), executor)
                 .thenApply(result -> {
-                    stream.getNumberOfOngoingTransactions().thenAccept(count ->
-                            TransactionMetrics.reportOpenTransactions(scope, streamName, count));
+//                    stream.getNumberOfOngoingTransactions().thenAccept(count ->
+//                            TransactionMetrics.reportOpenTransactions(scope, streamName, count));
                     return result;
                 });
     }
