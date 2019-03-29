@@ -92,6 +92,7 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -554,6 +555,41 @@ public class StreamTransactionMetadataTasksTest {
         UUID txnId = txn.getKey().getId();
         assertEquals(0, (int) (txnId.getMostSignificantBits() >> 32));
         assertEquals(2, txnId.getLeastSignificantBits());
+    }
+    
+    @Test(timeout = 10000)
+    public void writerInitializationTest() {
+        StreamMetadataStore streamStoreMock = StreamStoreFactory.createZKStore(zkClient, executor);
+
+        txnTasks = new StreamTransactionMetadataTasks(streamStoreMock, hostStore,
+                SegmentHelperMock.getSegmentHelperMock(), executor, "host", connectionFactory,
+                new AuthHelper(this.authEnabled, "secret"));
+
+
+        streamStore.createScope(SCOPE).join();
+        streamStore.createStream(SCOPE, STREAM, StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build(),1L, null, executor).join();
+        streamStore.setState(SCOPE, STREAM, State.ACTIVE, null, executor).join();
+
+        CompletableFuture<Pair<VersionedTransactionData, List<StreamSegmentRecord>>> createFuture = txnTasks.createTxn(SCOPE, STREAM, 100L, null);
+        
+        // create and ping transactions should not wait for writer initialization and complete immediately.
+        createFuture.join();
+        assertTrue(Futures.await(createFuture));
+        UUID txnId = createFuture.join().getKey().getId();
+        CompletableFuture<PingTxnStatus> pingFuture = txnTasks.pingTxn(SCOPE, STREAM, txnId, 100L, null);
+        assertTrue(Futures.await(pingFuture));
+
+        CompletableFuture<TxnStatus> commitFuture = txnTasks.commitTxn(SCOPE, STREAM, txnId, null);
+        assertFalse(commitFuture.isDone());
+        
+        EventStreamWriterMock<CommitEvent> commitWriter = new EventStreamWriterMock<>();
+        EventStreamWriterMock<AbortEvent> abortWriter = new EventStreamWriterMock<>();
+
+        txnTasks.initializeStreamWriters("", commitWriter, "", abortWriter);
+        assertTrue(Futures.await(commitFuture));
+        UUID txnId2 = txnTasks.createTxn(SCOPE, STREAM, 100L, null).join().getKey().getId();
+        assertTrue(Futures.await(txnTasks.abortTxn(SCOPE, STREAM, txnId2, null, null)));
+
     }
 
     private <T extends ControllerEvent> void createEventProcessor(final String readerGroupName,
