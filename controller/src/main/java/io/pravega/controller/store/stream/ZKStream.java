@@ -357,7 +357,7 @@ class ZKStream extends PersistentStreamBase {
 
     @Override
     CompletableFuture<Void> createStreamMetadata() {
-        return Futures.toVoid(store.createZNodeIfNotExist(streamPath.get()));
+        return Futures.toVoid(store.createZNodeIfNotExist(getStreamPath()));
     }
 
     private CompletableFuture<CreateStreamResponse> handleConfigExists(long creationTime, int startingSegmentNumber, boolean creationTimeMatched) {
@@ -604,7 +604,7 @@ class ZKStream extends PersistentStreamBase {
     }
 
     @Override
-    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getCurrentTxns() {
+    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getActiveTxns() {
         return store.getChildren(getActiveTxRoot())
                     .thenCompose(children -> {
                         return Futures.allOfWithResults(children.stream().map(x -> getTxnInEpoch(Integer.parseInt(x))).collect(Collectors.toList()))
@@ -617,23 +617,16 @@ class ZKStream extends PersistentStreamBase {
     }
 
     @Override
-    public CompletableFuture<List<UUID>> getCommittingTxnsInEpoch(int epoch, int limit) {
-        return getTxnInEpoch(epoch)
-                .thenApply(txnsMap -> txnsMap.entrySet().stream()
-                                             .filter(x -> x.getValue().getTxnStatus().equals(TxnStatus.COMMITTING))
-                                             .limit(limit).map(Map.Entry::getKey).collect(Collectors.toList()));
-    }
-
-    private CompletableFuture<Map<UUID, ActiveTxnRecord>> getTxnInEpoch(int epoch) {
+    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getTxnInEpoch(int epoch) {
+        VersionedMetadata<ActiveTxnRecord> empty = getEmptyData();
         return Futures.exceptionallyExpecting(store.getChildren(getEpochPath(epoch)),
                 e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, Collections.emptyList())
                       .thenCompose(txIds -> Futures.allOfWithResults(txIds.stream().collect(
                               Collectors.toMap(UUID::fromString, 
-                                      txId -> Futures.exceptionallyExpecting(store.getData(getActiveTxPath(epoch, txId),
-                                              ActiveTxnRecord::fromBytes).thenApply(VersionedMetadata::getObject),
-                                      e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, ActiveTxnRecord.EMPTY)))
-                              ).thenApply(txnMap -> txnMap.entrySet().stream().filter(x -> !x.getValue().equals(ActiveTxnRecord.EMPTY))
-                                                          .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)))
+                                      txId -> Futures.exceptionallyExpecting(store.getData(getActiveTxPath(epoch, txId), ActiveTxnRecord::fromBytes),
+                                      e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, empty)))
+                              ).thenApply(txnMap -> txnMap.entrySet().stream().filter(x -> !x.getValue().equals(empty))
+                                                          .collect(Collectors.toMap(Map.Entry::getKey, x -> x.getValue().getObject())))
                       );
     }
 
@@ -864,4 +857,9 @@ class ZKStream extends PersistentStreamBase {
         return store.getData(getIdPath(), x -> BitConverter.readInt(x, 0))
                 .thenApply(VersionedMetadata::getObject);
     }
+
+    private static <T> VersionedMetadata<T> getEmptyData() {
+        return new VersionedMetadata<>(null, new Version.IntVersion(Integer.MIN_VALUE));
+    }
+
 }

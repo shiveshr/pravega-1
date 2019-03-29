@@ -91,18 +91,19 @@ public class IntermittentCnxnFailureTest {
         HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
         ConnectionFactoryImpl connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
 
-        segmentHelperMock = spy(new SegmentHelper(hostStore, connectionFactory, AuthHelper.getDisabledAuthHelper()));
+        segmentHelperMock = spy(new SegmentHelper(connectionFactory, hostStore));
 
         doReturn(Controller.NodeUri.newBuilder().setEndpoint("localhost").setPort(Config.SERVICE_PORT).build()).when(segmentHelperMock).getSegmentUri(
                 anyString(), anyString(), anyInt());
 
         connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelperMock,
-                executor, "host", requestTracker);
+                executor, "host", AuthHelper.getDisabledAuthHelper(), requestTracker);
 
-        streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelperMock, executor, "host");
+        streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(
+                streamStore, segmentHelperMock, executor, "host", AuthHelper.getDisabledAuthHelper());
 
-        controllerService = new ControllerService(streamStore, hostStore, streamMetadataTasks,
+        controllerService = new ControllerService(streamStore, streamMetadataTasks,
                 streamTransactionMetadataTasks, segmentHelperMock, executor, null);
 
         controllerService.createScope(SCOPE).get();
@@ -146,7 +147,7 @@ public class IntermittentCnxnFailureTest {
 
         // Mock createSegment to return success.
         doReturn(CompletableFuture.completedFuture(true)).when(segmentHelperMock).createSegment(
-                anyString(), anyString(), anyInt(), any(), anyString(), anyLong());
+                anyString(), anyString(), anyInt(), any(), any(), anyLong());
 
         AtomicBoolean result = new AtomicBoolean(false);
         Retry.withExpBackoff(10, 10, 4)

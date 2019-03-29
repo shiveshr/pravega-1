@@ -37,6 +37,7 @@ public class GRPCServer extends AbstractIdleService {
     @Getter
     private final PravegaAuthManager pravegaAuthManager;
 
+    private final ControllerServiceImpl controllerServiceImpl;
     /**
      * Create gRPC server on the specified port.
      *
@@ -48,11 +49,11 @@ public class GRPCServer extends AbstractIdleService {
         this.objectId = "gRPCServer";
         this.config = serverConfig;
         AuthHelper authHelper = new AuthHelper(serverConfig.isAuthorizationEnabled(), serverConfig.getTokenSigningKey());
+        this.controllerServiceImpl = new ControllerServiceImpl(controllerService, authHelper, requestTracker,
+                serverConfig.isReplyWithStackTraceOnError());
         ServerBuilder<?> builder = ServerBuilder
                 .forPort(serverConfig.getPort())
-                .addService(ServerInterceptors.intercept(new ControllerServiceImpl(controllerService, authHelper, requestTracker,
-                                serverConfig.isReplyWithStackTraceOnError()),
-                        RPCTracingHelpers.getServerInterceptor(requestTracker)));
+                .addService(ServerInterceptors.intercept(controllerServiceImpl, RPCTracingHelpers.getServerInterceptor(requestTracker)));
         if (serverConfig.isAuthorizationEnabled()) {
             this.pravegaAuthManager = new PravegaAuthManager(serverConfig);
             this.pravegaAuthManager.registerInterceptors(builder);
@@ -90,6 +91,7 @@ public class GRPCServer extends AbstractIdleService {
         try {
             log.info("Stopping gRPC server listening on port: {}", this.config.getPort());
             this.server.shutdown();
+            this.controllerServiceImpl.shutdown();
             log.info("Awaiting termination of gRPC server");
             this.server.awaitTermination();
             log.info("gRPC server terminated");

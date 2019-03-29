@@ -64,7 +64,6 @@ import static io.pravega.controller.store.stream.AbstractStreamMetadataStore.DAT
 import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
 import static io.pravega.shared.segment.StreamSegmentNameUtils.getSegmentNumber;
 import static java.util.stream.Collectors.groupingBy;
-import static java.util.stream.Collectors.toMap;
 
 @Slf4j
 public abstract class PersistentStreamBase implements Stream {
@@ -1243,11 +1242,6 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getActiveTxns() {
-        return getCurrentTxns();
-    }
-
-    @Override
     public CompletableFuture<EpochRecord> getActiveEpoch(boolean ignoreCached) {
         return getCurrentEpochRecordData(ignoreCached).thenApply(VersionedMetadata::getObject);
     }
@@ -1329,7 +1323,7 @@ public abstract class PersistentStreamBase implements Stream {
         return getVersionedCommitTransactionsRecord()
                 .thenCompose(versioned -> {
                     if (versioned.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
-                        return getCommittingTxnsInEpoch(epoch, 1000)
+                        return getTxnCommitList(epoch)
                                 .thenCompose(list -> {
                                     log.info("shivesh:: got #{} transactions in epoch {}", list.size(), epoch);
 
@@ -1362,6 +1356,16 @@ public abstract class PersistentStreamBase implements Stream {
                     }
                     return r;
                 });
+    }
+
+    /**
+     * Get transactions in epoch. If no transactions exist return null.
+     */
+    private CompletableFuture<List<UUID>> getTxnCommitList(int epoch) {
+        return getTxnInEpoch(epoch)
+                .thenApply(transactions -> transactions.entrySet().stream()
+                                                       .filter(entry -> entry.getValue().getTxnStatus().equals(TxnStatus.COMMITTING))
+                                                       .map(Map.Entry::getKey).collect(Collectors.toList()));
     }
 
     @Override
@@ -1480,10 +1484,10 @@ public abstract class PersistentStreamBase implements Stream {
             return Futures.exceptionallyComposeExpecting(getSealedSegmentSizesMapShardData(shard), 
                     DATA_NOT_FOUND_PREDICATE, () -> createSealedSegmentSizeMapShardIfAbsent(shard)
                             .thenCompose(v -> getSealedSegmentSizesMapShardData(shard))) 
-                    .thenCompose(y -> {
-                        SealedSegmentsMapShard mapShard = y.getObject();
+                    .thenCompose(mapShardData -> {
+                        SealedSegmentsMapShard mapShard = mapShardData.getObject();
                         segments.forEach(z -> mapShard.addSealedSegmentSize(z, sealedSegmentSizes.get(z)));
-                        return updateSealedSegmentSizesMapShardData(shard, new VersionedMetadata<>(mapShard, y.getVersion()));
+                        return updateSealedSegmentSizesMapShardData(shard, new VersionedMetadata<>(mapShard, mapShardData.getVersion()));
                     });
         }).collect(Collectors.toList()));
     }
@@ -1726,10 +1730,8 @@ public abstract class PersistentStreamBase implements Stream {
     abstract CompletableFuture<Void> removeActiveTxEntry(final int epoch, final UUID txId);
 
     abstract CompletableFuture<Void> createCompletedTxEntry(final UUID txId, CompletedTxnRecord data);
-
-    abstract CompletableFuture<Map<UUID, ActiveTxnRecord>> getCurrentTxns();
-
-    abstract CompletableFuture<List<UUID>> getCommittingTxnsInEpoch(int epoch, int limit);
+    
+    abstract CompletableFuture<Map<UUID, ActiveTxnRecord>> getTxnInEpoch(int epoch);
     // endregion
 
     // region marker
@@ -1764,6 +1766,5 @@ public abstract class PersistentStreamBase implements Stream {
     abstract CompletableFuture<String> getWaitingRequestNode();
 
     abstract CompletableFuture<Void> deleteWaitingRequestNode();
-    // endregion
     // endregion
 }

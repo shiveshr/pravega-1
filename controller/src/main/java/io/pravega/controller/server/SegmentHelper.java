@@ -28,12 +28,10 @@ import io.pravega.common.Exceptions;
 import io.pravega.common.cluster.Host;
 import io.pravega.common.tracing.RequestTag;
 import io.pravega.common.tracing.TagLogger;
-import io.pravega.controller.server.rpc.auth.AuthHelper;
 import io.pravega.controller.store.host.HostControllerStore;
 import io.pravega.controller.store.stream.records.RecordHelper;
 import io.pravega.controller.stream.api.grpc.v1.Controller;
 import io.pravega.controller.stream.api.grpc.v1.Controller.TxnStatus;
-import io.pravega.controller.util.Config;
 import io.pravega.shared.protocol.netty.ConnectionFailedException;
 import io.pravega.shared.protocol.netty.FailingReplyProcessor;
 import io.pravega.shared.protocol.netty.PravegaNodeUri;
@@ -41,25 +39,22 @@ import io.pravega.shared.protocol.netty.ReplyProcessor;
 import io.pravega.shared.protocol.netty.WireCommand;
 import io.pravega.shared.protocol.netty.WireCommandType;
 import io.pravega.shared.protocol.netty.WireCommands;
-import org.apache.commons.lang3.tuple.ImmutablePair;
-import org.apache.commons.lang3.tuple.Pair;
-import org.slf4j.LoggerFactory;
-
 import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
+import org.slf4j.LoggerFactory;
 
 import static io.netty.buffer.Unpooled.wrappedBuffer;
 import static io.pravega.shared.segment.StreamSegmentNameUtils.getQualifiedStreamSegmentName;
+import static io.pravega.shared.segment.StreamSegmentNameUtils.getScopedStreamName;
 import static io.pravega.shared.segment.StreamSegmentNameUtils.getSegmentNumber;
 import static io.pravega.shared.segment.StreamSegmentNameUtils.getTransactionNameFromId;
 
@@ -68,14 +63,13 @@ public class SegmentHelper {
     private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(SegmentHelper.class));
 
     private final Supplier<Long> idGenerator = new AtomicLong(0)::incrementAndGet;
-    private final HostControllerStore hostStore;
-    private final AuthHelper authHelper;
-    private final SegmentStoreConnectionManager connectionManager;
 
-    public SegmentHelper(HostControllerStore hostControllerStore, ConnectionFactory clientCF, AuthHelper authHelper) {
-        this.hostStore = hostControllerStore;
-        this.authHelper = authHelper;
-        this.connectionManager = new SegmentStoreConnectionManager(clientCF);
+    private final SegmentStoreConnectionManager connectionManager;
+    private final HostControllerStore hostStore;
+    
+    public SegmentHelper(final ConnectionFactory clientCF, HostControllerStore hostStore) {
+        connectionManager = new SegmentStoreConnectionManager(clientCF);
+        this.hostStore = hostStore;
     }
 
     public Controller.NodeUri getSegmentUri(final String scope,
@@ -89,7 +83,7 @@ public class SegmentHelper {
                                                     final String stream,
                                                     final long segmentId,
                                                     final ScalingPolicy policy,
-                                                    final String controllerToken,
+                                                    String controllerToken,
                                                     final long clientRequestId) {
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
         final String qualifiedStreamSegmentName = getQualifiedStreamSegmentName(scope, stream, segmentId);
@@ -100,8 +94,7 @@ public class SegmentHelper {
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
             @Override
             public void connectionDropped() {
-                // shivesh
-                log.debug(requestId, "CreateSegment {} Connection dropped", qualifiedStreamSegmentName);
+                log.warn(requestId, "CreateSegment {} Connection dropped", qualifiedStreamSegmentName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -120,19 +113,14 @@ public class SegmentHelper {
 
             @Override
             public void segmentCreated(WireCommands.SegmentCreated segmentCreated) {
-                // TODO: shivesh
-                log.debug(requestId, "CreateSegment {} SegmentCreated", qualifiedStreamSegmentName);
+                log.info(requestId, "CreateSegment {} SegmentCreated", qualifiedStreamSegmentName);
                 result.complete(true);
             }
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "CreateSegment {} threw exception", qualifiedStreamSegmentName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "CreateSegment {} threw exception", qualifiedStreamSegmentName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -155,7 +143,7 @@ public class SegmentHelper {
                                                       final String stream,
                                                       final long segmentId,
                                                       final long offset,
-                                                      final String delegationToken,
+                                                      String delegationToken,
                                                       final long clientRequestId) {
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId);
@@ -167,7 +155,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "truncateSegment {} Connection dropped", qualifiedName);
+                log.warn(requestId, "truncateSegment {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -192,12 +180,8 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "truncateSegment {} error", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "truncateSegment {} error", qualifiedName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -216,7 +200,7 @@ public class SegmentHelper {
     public CompletableFuture<Boolean> deleteSegment(final String scope,
                                                     final String stream,
                                                     final long segmentId,
-                                                    final String delegationToken,
+                                                    String delegationToken,
                                                     final long clientRequestId) {
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId);
@@ -228,7 +212,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "deleteSegment {} Connection dropped", qualifiedName);
+                log.warn(requestId, "deleteSegment {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -253,12 +237,8 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "deleteSegment {} failed", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "deleteSegment {} failed", qualifiedName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -287,7 +267,7 @@ public class SegmentHelper {
     public CompletableFuture<Boolean> sealSegment(final String scope,
                                                   final String stream,
                                                   final long segmentId,
-                                                  final String delegationToken,
+                                                  String delegationToken,
                                                   final long clientRequestId) {
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId);
         final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, segmentId);
@@ -304,7 +284,7 @@ public class SegmentHelper {
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "sealSegment {} connectionDropped", qualifiedName);
+                log.warn(requestId, "sealSegment {} connectionDropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -318,8 +298,7 @@ public class SegmentHelper {
 
             @Override
             public void segmentSealed(WireCommands.SegmentSealed segmentSealed) {
-                // TODO: shivesh
-                log.debug(requestId, "sealSegment {} segmentSealed", qualifiedName);
+                log.info(requestId, "sealSegment {} segmentSealed", qualifiedName);
                 result.complete(true);
             }
 
@@ -331,12 +310,8 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "sealSegment {} failed", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "sealSegment {} failed", qualifiedName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -351,12 +326,12 @@ public class SegmentHelper {
         sendRequestAsync(request, replyProcessor, result, ModelHelper.encode(uri));
         return result;
     }
-    
+
     public CompletableFuture<UUID> createTransaction(final String scope,
                                                      final String stream,
                                                      final long segmentId,
                                                      final UUID txId,
-                                                     final String delegationToken) {
+                                                     String delegationToken) {
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId);
         final String transactionName = getTransactionName(scope, stream, segmentId, txId);
 
@@ -366,7 +341,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug("createTransaction {} connectionDropped", transactionName);
+                log.warn("createTransaction {} connectionDropped", transactionName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -391,12 +366,8 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error("createTransaction {} failed", transactionName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error("createTransaction {} failed", transactionName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -427,7 +398,7 @@ public class SegmentHelper {
                                                           final long targetSegmentId,
                                                           final long sourceSegmentId,
                                                           final UUID txId,
-                                                          final String delegationToken) {
+                                                          String delegationToken) {
         Preconditions.checkArgument(getSegmentNumber(targetSegmentId) == getSegmentNumber(sourceSegmentId));
         final Controller.NodeUri uri = getSegmentUri(scope, stream, sourceSegmentId);
         final String qualifiedNameTarget = getQualifiedStreamSegmentName(scope, stream, targetSegmentId);
@@ -469,13 +440,8 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    log.info("shivesh:: connection failed on processing failure in commitTransaction");
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error("commitTransaction {} failed", transactionName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error("commitTransaction {} failed", transactionName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -497,7 +463,7 @@ public class SegmentHelper {
                                                          final String stream,
                                                          final long segmentId,
                                                          final UUID txId,
-                                                         final String delegationToken) {
+                                                         String delegationToken) {
         final String transactionName = getTransactionName(scope, stream, segmentId, txId);
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId);
         final CompletableFuture<TxnStatus> result = new CompletableFuture<>();
@@ -506,7 +472,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug("abortTransaction {} connectionDropped", transactionName);
+                log.warn("abortTransaction {} connectionDropped", transactionName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -530,12 +496,8 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.info("abortTransaction {} failed", transactionName, error);
-                    result.completeExceptionally(error);
-                }
+                log.info("abortTransaction {} failed", transactionName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -552,7 +514,7 @@ public class SegmentHelper {
     }
 
     public CompletableFuture<Void> updatePolicy(String scope, String stream, ScalingPolicy policy, long segmentId,
-                                                final String delegationToken, long clientRequestId) {
+                                                String delegationToken, long clientRequestId) {
         final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, segmentId);
         final CompletableFuture<Void> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId);
@@ -563,7 +525,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "updatePolicy {} connectionDropped", qualifiedName);
+                log.warn(requestId, "updatePolicy {} connectionDropped", qualifiedName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -581,12 +543,8 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "updatePolicy {} failed", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "updatePolicy {} failed", qualifiedName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -606,7 +564,7 @@ public class SegmentHelper {
     }
 
     public CompletableFuture<WireCommands.StreamSegmentInfo> getSegmentInfo(String scope, String stream, long segmentId,
-                                                                            final String delegationToken) {
+                                                                            String delegationToken) {
         final CompletableFuture<WireCommands.StreamSegmentInfo> result = new CompletableFuture<>();
         final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, segmentId);
         final Controller.NodeUri uri = getSegmentUri(scope, stream, segmentId);
@@ -616,7 +574,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug("getSegmentInfo {} connectionDropped", qualifiedName);
+                log.warn("getSegmentInfo {} connectionDropped", qualifiedName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -628,18 +586,14 @@ public class SegmentHelper {
 
             @Override
             public void streamSegmentInfo(WireCommands.StreamSegmentInfo streamInfo) {
-                log.debug("getSegmentInfo {} got response", qualifiedName);
+                log.info("getSegmentInfo {} got response", qualifiedName);
                 result.complete(streamInfo);
             }
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error("getSegmentInfo {} failed", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error("getSegmentInfo {} failed", qualifiedName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -669,10 +623,10 @@ public class SegmentHelper {
      */
     public CompletableFuture<Boolean> createTableSegment(final String scope,
                                                          final String stream,
-                                                         final String delegationToken,
+                                                         String delegationToken,
                                                          final long clientRequestId) {
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
-        final String qualifiedStreamSegmentName = getQualifiedStreamSegmentName(scope, stream, 0L);
+        final String qualifiedStreamSegmentName = getScopedStreamName(scope, stream);
         final Controller.NodeUri uri = getSegmentUri(scope, stream, 0L);
         final WireCommandType type = WireCommandType.CREATE_TABLE_SEGMENT;
         final long requestId = (clientRequestId == RequestTag.NON_EXISTENT_ID) ? idGenerator.get() : clientRequestId;
@@ -680,7 +634,7 @@ public class SegmentHelper {
         final FailingReplyProcessor replyProcessor = new FailingReplyProcessor() {
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "CreateTableSegment {} Connection dropped", qualifiedStreamSegmentName);
+                log.warn(requestId, "CreateTableSegment {} Connection dropped", qualifiedStreamSegmentName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -699,19 +653,14 @@ public class SegmentHelper {
 
             @Override
             public void segmentCreated(WireCommands.SegmentCreated segmentCreated) {
-                // TODO: shivesh
-                log.debug(requestId, "CreateTableSegment {} SegmentCreated", qualifiedStreamSegmentName);
+                log.info(requestId, "CreateTableSegment {} SegmentCreated", qualifiedStreamSegmentName);
                 result.complete(true);
             }
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "CreateTableSegment {} threw exception", qualifiedStreamSegmentName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "CreateTableSegment {} threw exception", qualifiedStreamSegmentName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -742,11 +691,11 @@ public class SegmentHelper {
     public CompletableFuture<Boolean> deleteTableSegment(final String scope,
                                                          final String stream,
                                                          final boolean mustBeEmpty,
-                                                         final String delegationToken,
+                                                         String delegationToken,
                                                          final long clientRequestId) {
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, 0L);
-        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, 0L);
+        final String qualifiedName = getScopedStreamName(scope, stream);
         final WireCommandType type = WireCommandType.DELETE_TABLE_SEGMENT;
         final long requestId = (clientRequestId == RequestTag.NON_EXISTENT_ID) ? idGenerator.get() : clientRequestId;
 
@@ -754,7 +703,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "deleteTableSegment {} Connection dropped.", qualifiedName);
+                log.warn(requestId, "deleteTableSegment {} Connection dropped.", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -768,7 +717,7 @@ public class SegmentHelper {
             @Override
             public void noSuchSegment(WireCommands.NoSuchSegment noSuchSegment) {
                 log.info(requestId, "deleteTableSegment {} NoSuchSegment.", qualifiedName);
-                result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.SegmentDoesNotExist));
+                result.complete(true);
             }
 
             @Override
@@ -785,14 +734,10 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "deleteTableSegment {} failed.", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "deleteTableSegment {} failed.", qualifiedName, error);
+                handleError(error, result, type);
             }
-            
+
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -821,11 +766,11 @@ public class SegmentHelper {
     public CompletableFuture<List<KeyVersion>> updateTableEntries(final String scope,
                                                                   final String stream,
                                                                   final List<TableEntry<byte[], byte[]>> entries,
-                                                                  final String delegationToken,
+                                                                  String delegationToken,
                                                                   final long clientRequestId) {
         final CompletableFuture<List<KeyVersion>> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, 0L);
-        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, 0L);
+        final String qualifiedName = getScopedStreamName(scope, stream);
         final WireCommandType type = WireCommandType.UPDATE_TABLE_ENTRIES;
         final long requestId = (clientRequestId == RequestTag.NON_EXISTENT_ID) ? idGenerator.get() : clientRequestId;
 
@@ -833,7 +778,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "updateTableEntries {} Connection dropped", qualifiedName);
+                log.warn(requestId, "updateTableEntries {} Connection dropped", qualifiedName);
                 result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
 
@@ -851,7 +796,7 @@ public class SegmentHelper {
 
             @Override
             public void tableEntriesUpdated(WireCommands.TableEntriesUpdated tableEntriesUpdated) {
-                log.debug(requestId, "updateTableEntries request for {} tableSegment completed.", qualifiedName);
+                log.info(requestId, "updateTableEntries request for {} tableSegment completed.", qualifiedName);
                 result.complete(tableEntriesUpdated.getUpdatedVersions().stream().map(KeyVersionImpl::new).collect(Collectors.toList()));
             }
 
@@ -869,14 +814,10 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "updateTableEntries {} failed", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "updateTableEntries {} failed", qualifiedName, error);
+                handleError(error, result, type);
             }
-            
+
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -919,11 +860,11 @@ public class SegmentHelper {
     public CompletableFuture<Void> removeTableKeys(final String scope,
                                                    final String stream,
                                                    final List<TableKey<byte[]>> keys,
-                                                   final String delegationToken,
+                                                   String delegationToken,
                                                    final long clientRequestId) {
         final CompletableFuture<Void> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, 0L);
-        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, 0L);
+        final String qualifiedName = getScopedStreamName(scope, stream);
         final WireCommandType type = WireCommandType.REMOVE_TABLE_KEYS;
         final long requestId = (clientRequestId == RequestTag.NON_EXISTENT_ID) ? idGenerator.get() : clientRequestId;
 
@@ -931,7 +872,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "removeTableKeys {} Connection dropped", qualifiedName);
+                log.warn(requestId, "removeTableKeys {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -950,7 +891,7 @@ public class SegmentHelper {
 
             @Override
             public void tableKeysRemoved(WireCommands.TableKeysRemoved tableKeysRemoved) {
-                log.debug(requestId, "removeTableKeys {} completed.", qualifiedName);
+                log.info(requestId, "removeTableKeys {} completed.", qualifiedName);
                 result.complete(null);
             }
 
@@ -968,14 +909,10 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "removeTableKeys {} failed", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "removeTableKeys {} failed", qualifiedName, error);
+                handleError(error, result, type);
             }
-            
+
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -1014,11 +951,11 @@ public class SegmentHelper {
     public CompletableFuture<List<TableEntry<byte[], byte[]>>> readTable(final String scope,
                                                                          final String stream,
                                                                          final List<TableKey<byte[]>> keys,
-                                                                         final String delegationToken,
+                                                                         String delegationToken,
                                                                          final long clientRequestId) {
         final CompletableFuture<List<TableEntry<byte[], byte[]>>> result = new CompletableFuture<>();
         final Controller.NodeUri uri = getSegmentUri(scope, stream, 0L);
-        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, 0L);
+        final String qualifiedName = getScopedStreamName(scope, stream);
         final WireCommandType type = WireCommandType.READ_TABLE;
         final long requestId = (clientRequestId == RequestTag.NON_EXISTENT_ID) ? idGenerator.get() : clientRequestId;
 
@@ -1026,7 +963,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "readTable {} Connection dropped", qualifiedName);
+                log.warn(requestId, "readTable {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -1045,24 +982,16 @@ public class SegmentHelper {
 
             @Override
             public void tableRead(WireCommands.TableRead tableRead) {
-                log.debug(requestId, "readTable {} successful.", qualifiedName);
-                AtomicBoolean allKeysFound = new AtomicBoolean(true);
+                log.info(requestId, "readTable {} successful.", qualifiedName);
                 List<TableEntry<byte[], byte[]>> tableEntries = tableRead.getEntries().getEntries().stream()
                                                                          .map(e -> {
                                                                              WireCommands.TableKey k = e.getKey();
                                                                              TableKey<byte[]> tableKey =
                                                                                      new TableKeyImpl<>(getArray(k.getData()),
-                                                                                             new KeyVersionImpl(k.getKeyVersion()));
-                                                                             // Hack added to return KeyDoesNotExist if key version is Long.Min
-                                                                             allKeysFound.compareAndSet(true, k.getKeyVersion() != WireCommands.TableKey.NO_VERSION);
+                                                                                                        new KeyVersionImpl(k.getKeyVersion()));
                                                                              return new TableEntryImpl<>(tableKey, getArray(e.getValue().getData()));
                                                                          }).collect(Collectors.toList());
-                if (allKeysFound.get()) {
-                    result.complete(tableEntries);
-                } else {
-                    // Hack added to return KeyDoesNotExist if key version is Long.Min
-                    result.completeExceptionally(new WireCommandFailedException(type, WireCommandFailedException.Reason.TableKeyDoesNotExist));
-                }
+                result.complete(tableEntries);
             }
 
             @Override
@@ -1073,14 +1002,10 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "readTable {} failed", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "readTable {} failed", qualifiedName, error);
+                handleError(error, result, type);
             }
-            
+
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -1121,7 +1046,7 @@ public class SegmentHelper {
                                                                                     final long clientRequestId) {
 
         final Controller.NodeUri uri = getSegmentUri(scope, stream, 0L);
-        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, 0L);
+        final String qualifiedName = getScopedStreamName(scope, stream);
         final WireCommandType type = WireCommandType.READ_TABLE_KEYS;
         final long requestId = (clientRequestId == RequestTag.NON_EXISTENT_ID) ? idGenerator.get() : clientRequestId;
         final IteratorState token = (state == null) ? IteratorState.EMPTY : state;
@@ -1131,7 +1056,7 @@ public class SegmentHelper {
 
             @Override
             public void connectionDropped() {
-                log.debug(requestId, "readTableKeys {} Connection dropped", qualifiedName);
+                log.warn(requestId, "readTableKeys {} Connection dropped", qualifiedName);
                 result.completeExceptionally(
                         new WireCommandFailedException(type, WireCommandFailedException.Reason.ConnectionDropped));
             }
@@ -1150,12 +1075,11 @@ public class SegmentHelper {
 
             @Override
             public void tableKeysRead(WireCommands.TableKeysRead tableKeysRead) {
-                log.debug(requestId, "readTableKeys {} successful.", qualifiedName);
+                log.info(requestId, "readTableKeys {} successful.", qualifiedName);
                 final IteratorState state = IteratorState.fromBytes(tableKeysRead.getContinuationToken());
                 final List<TableKey<byte[]>> keys =
                         tableKeysRead.getKeys().stream().map(k -> new TableKeyImpl<>(getArray(k.getData()),
                                                                                      new KeyVersionImpl(k.getKeyVersion()))).collect(Collectors.toList());
-                
                 result.complete(new TableSegment.IteratorItem<>(state, keys));
             }
 
@@ -1167,12 +1091,8 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "readTableKeys {} failed", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "readTableKeys {} failed", qualifiedName, error);
+                handleError(error, result, type);
             }
 
             @Override
@@ -1208,7 +1128,7 @@ public class SegmentHelper {
                                                                                final long clientRequestId) {
 
         final Controller.NodeUri uri = getSegmentUri(scope, stream, 0L);
-        final String qualifiedName = getQualifiedStreamSegmentName(scope, stream, 0L);
+        final String qualifiedName = getScopedStreamName(scope, stream);
         final WireCommandType type = WireCommandType.READ_TABLE_ENTRIES;
         final long requestId = (clientRequestId == RequestTag.NON_EXISTENT_ID) ? idGenerator.get() : clientRequestId;
         final IteratorState token = (state == null) ? IteratorState.EMPTY : state;
@@ -1258,16 +1178,10 @@ public class SegmentHelper {
 
             @Override
             public void processingFailure(Exception error) {
-                if ((Exceptions.unwrap(error) instanceof ConnectionFailedException)) {
-                    log.info("shivesh:: connection failed on processing failure in readTableEntries");
-
-                    result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
-                } else {
-                    log.error(requestId, "readTableEntries {} failed", qualifiedName, error);
-                    result.completeExceptionally(error);
-                }
+                log.error(requestId, "readTableEntries {} failed", qualifiedName, error);
+                handleError(error, result, type);
             }
-            
+
             @Override
             public void authTokenCheckFailed(WireCommands.AuthTokenCheckFailed authTokenCheckFailed) {
                 result.completeExceptionally(
@@ -1276,7 +1190,7 @@ public class SegmentHelper {
             }
         };
 
-        WireCommands.ReadTableEntries cmd = new WireCommands.ReadTableEntries(requestId, qualifiedName, delegationToken,
+        WireCommands.ReadTableKeys cmd = new WireCommands.ReadTableKeys(requestId, qualifiedName, delegationToken,
                                                                         suggestedEntryCount, token.toBytes());
         sendRequestAsync(cmd, replyProcessor, result, ModelHelper.encode(uri));
         return result;
@@ -1289,7 +1203,15 @@ public class SegmentHelper {
         buf.release();
         return bytes;
     }
-    
+
+    private <T> void handleError(Exception error, CompletableFuture<T> result, WireCommandType type) {
+        if (Exceptions.unwrap(error) instanceof ConnectionFailedException) {
+            result.completeExceptionally(new WireCommandFailedException(error, type, WireCommandFailedException.Reason.ConnectionFailed));
+        } else {
+            result.completeExceptionally(error);
+        }
+    }
+
     private WireCommands.TableKey convertToWireCommand(final TableKey<byte[]> k) {
         WireCommands.TableKey key;
         if (k.getVersion() == null) {
@@ -1329,7 +1251,6 @@ public class SegmentHelper {
                             (((WireCommandFailedException) unwrap).getReason().equals(WireCommandFailedException.Reason.ConnectionDropped))
                             )) {
                         connectionFuture.thenAccept(connectionObject -> {
-//                            log.error("shivesh:: connection failed for our request.. returning failed connection" + request.getType());
                             connectionObject.failConnection();
                             pool.returnConnection(connectionObject);
                         });
@@ -1360,9 +1281,5 @@ public class SegmentHelper {
         }
 
         return new ImmutablePair<>(rateType, desiredRate);
-    }
-
-    public String retrieveMasterToken() {
-        return authHelper.retrieveMasterToken();
     }
 }

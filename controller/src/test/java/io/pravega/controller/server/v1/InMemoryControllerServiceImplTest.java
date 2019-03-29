@@ -29,9 +29,6 @@ import io.pravega.controller.server.eventProcessor.requesthandlers.TruncateStrea
 import io.pravega.controller.server.eventProcessor.requesthandlers.UpdateStreamTask;
 import io.pravega.controller.server.rpc.auth.AuthHelper;
 import io.pravega.controller.server.rpc.grpc.v1.ControllerServiceImpl;
-import io.pravega.controller.store.host.HostControllerStore;
-import io.pravega.controller.store.host.HostStoreFactory;
-import io.pravega.controller.store.host.impl.HostMonitorConfigImpl;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
@@ -52,7 +49,6 @@ import static org.mockito.Mockito.when;
 public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest {
 
     private TaskMetadataStore taskMetadataStore;
-    private HostControllerStore hostStore;
     private StreamMetadataTasks streamMetadataTasks;
     private StreamRequestHandler streamRequestHandler;
 
@@ -67,7 +63,6 @@ public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest
     public void setup() throws Exception {
         executorService = ExecutorServiceHelpers.newScheduledThreadPool(20, "testpool");
         taskMetadataStore = TaskStoreFactory.createInMemoryStore(executorService);
-        hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
         streamStore = StreamStoreFactory.createInMemoryStore(executorService);
         BucketStore bucketStore = StreamStoreFactory.createInMemoryBucketStore();
         requestTracker = new RequestTracker(true);
@@ -75,12 +70,11 @@ public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest
         connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
                                                                                         .controllerURI(URI.create("tcp://localhost"))
                                                                                         .build());
-        AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
-        segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, disabledAuthHelper);
+        segmentHelper = SegmentHelperMock.getSegmentHelperMock();
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelper,
-                executorService, "host", requestTracker);
+                executorService, "host", AuthHelper.getDisabledAuthHelper(), requestTracker);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper,
-                executorService, "host");
+                executorService, "host", AuthHelper.getDisabledAuthHelper());
         this.streamRequestHandler = new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamStore, executorService),
                 new ScaleOperationTask(streamMetadataTasks, streamStore, executorService),
                 new UpdateStreamTask(streamMetadataTasks, streamStore, bucketStore, executorService),
@@ -97,9 +91,8 @@ public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest
         Cluster mockCluster = mock(Cluster.class);
         when(mockCluster.getClusterMembers()).thenReturn(Collections.singleton(new Host("localhost", 9090, null)));
         controllerService = new ControllerServiceImpl(
-                new ControllerService(streamStore, hostStore, streamMetadataTasks, streamTransactionMetadataTasks,
-                                      new SegmentHelper(hostStore, connectionFactory, disabledAuthHelper), executorService, mockCluster), 
-                disabledAuthHelper, requestTracker, true, 2);
+                new ControllerService(streamStore, streamMetadataTasks, streamTransactionMetadataTasks,
+                                      SegmentHelperMock.getSegmentHelperMock(), executorService, mockCluster), AuthHelper.getDisabledAuthHelper(), requestTracker, true, 2);
     }
 
     @Override

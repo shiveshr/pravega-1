@@ -94,7 +94,8 @@ public class PravegaTableScope implements Scope {
         if (Objects.isNull(id)) {
             return storeHelper.getEntry(NameUtils.INTERNAL_SCOPE_NAME, SCOPES_TABLE, scopeName, x -> BitConverter.readUUID(x, 0))
                               .thenCompose(entry -> {
-                                  idRef.compareAndSet(null, entry.getObject());
+                                  UUID uuid = entry.getObject();
+                                  idRef.compareAndSet(null, uuid);
                                   return getId();
                               });
         } else {
@@ -144,7 +145,9 @@ public class PravegaTableScope implements Scope {
 
     CompletableFuture<Void> addStreamToScope(String stream) {
         return getStreamsInScopeTableName()
-                .thenCompose(tableName -> Futures.toVoid(storeHelper.addNewEntryIfAbsent(scopeName, tableName, stream, newId())));
+                .thenCompose(tableName -> {
+                    return Futures.toVoid(storeHelper.addNewEntryIfAbsent(scopeName, tableName, stream, newId()));
+                });
     }
 
     CompletableFuture<Void> removeStreamFromScope(String stream) {

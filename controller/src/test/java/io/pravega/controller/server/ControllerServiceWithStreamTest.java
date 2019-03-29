@@ -31,7 +31,6 @@ import io.pravega.controller.store.host.HostControllerStore;
 import io.pravega.controller.store.host.HostStoreFactory;
 import io.pravega.controller.store.host.impl.HostMonitorConfigImpl;
 import io.pravega.controller.store.stream.BucketStore;
-import io.pravega.controller.store.stream.Segment;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.records.StreamSegmentRecord;
@@ -109,10 +108,10 @@ public abstract class ControllerServiceWithStreamTest {
                                                                   .controllerURI(URI.create("tcp://localhost"))
                                                                   .build());
         AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
-        SegmentHelper segmentHelperMock = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, disabledAuthHelper);
+        SegmentHelper segmentHelperMock = SegmentHelperMock.getSegmentHelperMock();
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelperMock,
-                executor, "host", requestTracker);
-        streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelperMock, executor, "host");
+                executor, "host", disabledAuthHelper, requestTracker);
+        streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelperMock, executor, "host", disabledAuthHelper);
         StreamRequestHandler streamRequestHandler = new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamStore, executor),
                 new ScaleOperationTask(streamMetadataTasks, streamStore, executor),
                 new UpdateStreamTask(streamMetadataTasks, streamStore, bucketStore, executor),
@@ -123,8 +122,7 @@ public abstract class ControllerServiceWithStreamTest {
                 executor);
 
         streamMetadataTasks.setRequestEventWriter(new ControllerEventStreamWriterMock(streamRequestHandler, executor));
-        consumer = new ControllerService(streamStore, hostStore, streamMetadataTasks,
-                streamTransactionMetadataTasks, segmentHelperMock, executor, null);
+        consumer = new ControllerService(streamStore, streamMetadataTasks, streamTransactionMetadataTasks, segmentHelperMock, executor, null);
     }
 
     abstract StreamMetadataStore getStore();
@@ -133,10 +131,10 @@ public abstract class ControllerServiceWithStreamTest {
     public void teardown() throws Exception {
         streamMetadataTasks.close();
         streamTransactionMetadataTasks.close();
+        streamStore.close();
         zkClient.close();
         zkServer.close();
         connectionFactory.close();
-        streamStore.close();
         ExecutorServiceHelpers.shutdown(executor);
     }
 

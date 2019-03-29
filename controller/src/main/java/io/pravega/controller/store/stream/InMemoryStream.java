@@ -34,7 +34,6 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -529,8 +528,8 @@ public class InMemoryStream extends PersistentStreamBase {
         final VersionedMetadata<ActiveTxnRecord> txnData = new VersionedMetadata<>(data, new Version.IntVersion(0));
 
         synchronized (txnsLock) {
+            activeTxns.putIfAbsent(txId, txnData);
             epochTxnMap.compute(epoch, (x, y) -> {
-                activeTxns.putIfAbsent(txId, txnData);
                 if (y == null) {
                     y = new HashSet<>();
                 }
@@ -564,7 +563,7 @@ public class InMemoryStream extends PersistentStreamBase {
         synchronized (txnsLock) {
             if (!activeTxns.containsKey(txId)) {
                 result.completeExceptionally(StoreException.create(StoreException.Type.DATA_NOT_FOUND,
-                        String.format("Stream: %s Transaction: %s", getName(), txId.toString())));
+                        "Stream: " + getName() + " Transaction: " + txId.toString()));
             } else {
                 activeTxns.compute(txId, (x, y) -> {
                     if (data.getVersion().equals(y.getVersion())) {
@@ -572,7 +571,7 @@ public class InMemoryStream extends PersistentStreamBase {
                         return updatedCopy;
                     } else {
                         result.completeExceptionally(StoreException.create(StoreException.Type.WRITE_CONFLICT,
-                                String.format("Stream: %s transaction id : %s", getName(), txId)));
+                                "Stream: " + getName() + " transaction id : " + txId));
                         return y;
                     }
                 });
@@ -590,7 +589,7 @@ public class InMemoryStream extends PersistentStreamBase {
             VersionedMetadata<CompletedTxnRecord> value = completedTxns.getIfPresent(txId);
             if (value == null) {
                 return Futures.failedFuture(StoreException.create(StoreException.Type.DATA_NOT_FOUND,
-                        String.format("Stream: %s Transaction: %s", getName(), txId.toString())));
+                        "Stream: " + getName() + " Transaction: " + txId.toString()));
             }
             return CompletableFuture.completedFuture(value);
         }
@@ -679,7 +678,7 @@ public class InMemoryStream extends PersistentStreamBase {
     }
 
     @Override
-    CompletableFuture<Map<UUID, ActiveTxnRecord>> getCurrentTxns() {
+    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getActiveTxns() {
         synchronized (txnsLock) {
             return CompletableFuture.completedFuture(
                     activeTxns.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, x -> x.getValue().getObject())));
@@ -687,18 +686,18 @@ public class InMemoryStream extends PersistentStreamBase {
     }
 
     @Override
-    CompletableFuture<List<UUID>> getCommittingTxnsInEpoch(int epoch, int limit) {
+    CompletableFuture<Map<UUID, ActiveTxnRecord>> getTxnInEpoch(int epoch) {
         synchronized (txnsLock) {
             Set<UUID> transactions = epochTxnMap.get(epoch);
-            List<UUID> list;
+            Map<UUID, ActiveTxnRecord> map;
             if (transactions != null) {
-                list = activeTxns.entrySet().stream().filter(x -> transactions.contains(x.getKey()) 
-                        && x.getValue().getObject().getTxnStatus().equals(TxnStatus.COMMITTING))
-                                .limit(limit).map(Map.Entry::getKey).collect(Collectors.toList());
+                map = activeTxns.entrySet().stream().filter(x -> transactions.contains(x.getKey()))
+                        .collect(Collectors.toMap(Map.Entry::getKey, x -> x.getValue().getObject()));
+                map = Collections.unmodifiableMap(map);
             } else {
-                list = Collections.emptyList();
+                map = Collections.emptyMap();
             }
-            return CompletableFuture.completedFuture(list);
+            return CompletableFuture.completedFuture(map);
         }
     }
     

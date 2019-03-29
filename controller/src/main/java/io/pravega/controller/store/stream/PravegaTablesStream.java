@@ -11,10 +11,7 @@ package io.pravega.controller.store.stream;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.pravega.client.stream.StreamConfiguration;
-import io.pravega.client.tables.impl.IteratorState;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.BitConverter;
 import io.pravega.controller.store.stream.records.ActiveTxnRecord;
@@ -23,7 +20,6 @@ import io.pravega.controller.store.stream.records.CompletedTxnRecord;
 import io.pravega.controller.store.stream.records.EpochRecord;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
 import io.pravega.controller.store.stream.records.HistoryTimeSeries;
-import io.pravega.controller.store.stream.records.RecordHelper;
 import io.pravega.controller.store.stream.records.RetentionSet;
 import io.pravega.controller.store.stream.records.SealedSegmentsMapShard;
 import io.pravega.controller.store.stream.records.StateRecord;
@@ -32,12 +28,12 @@ import io.pravega.controller.store.stream.records.StreamCutRecord;
 import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.shared.NameUtils;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.tuple.Pair;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -47,13 +43,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BiFunction;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static io.pravega.controller.store.stream.AbstractStreamMetadataStore.DATA_NOT_EMPTY_PREDICATE;
 import static io.pravega.controller.store.stream.PravegaTablesStreamMetadataStore.SEPARATOR;
 import static io.pravega.controller.store.stream.PravegaTablesStreamMetadataStore.DATA_NOT_FOUND_PREDICATE;
 import static io.pravega.controller.store.stream.PravegaTablesStreamMetadataStore.COMPLETED_TRANSACTIONS_BATCH_TABLE_FORMAT;
@@ -71,7 +67,9 @@ import static io.pravega.controller.store.stream.PravegaTablesStreamMetadataStor
 class PravegaTablesStream extends PersistentStreamBase {
     private static final String STREAM_TABLE_PREFIX = "Table" + SEPARATOR + "%s" + SEPARATOR; // stream name
     private static final String METADATA_TABLE = STREAM_TABLE_PREFIX + "metadata" + SEPARATOR + "%s";
-    private static final String TRANSACTIONS_TABLE = STREAM_TABLE_PREFIX + "transactionsTable" + SEPARATOR + "%s";
+
+    private static final String EPOCHS_WITH_TRANSACTIONS_TABLE = STREAM_TABLE_PREFIX + "epochsWithTransactions" + SEPARATOR + "%s";
+    private static final String TRANSACTIONS_IN_EPOCH_TABLE_FORMAT = STREAM_TABLE_PREFIX + "%s" + SEPARATOR + "transactionsInEpoch-%d";
 
     // metadata keys
     private static final String CREATION_TIME_KEY = "creationTime";
@@ -146,59 +144,58 @@ class PravegaTablesStream extends PersistentStreamBase {
     private String getMetadataTableName(String id) {
         return String.format(METADATA_TABLE, getName(), id);
     }
-
-    private CompletableFuture<String> getTransactionsTable() {
-        return getId().thenApply(this::getTransactionsTableName);
+    
+    private CompletableFuture<String> getEpochsWithTransactionsTable() {
+        return getId().thenApply(this::getEpochsWithTransactionsTableName);
     }
 
-    private String getTransactionsTableName(String id) {
-        return String.format(TRANSACTIONS_TABLE, getName(), id);
+    private String getEpochsWithTransactionsTableName(String id) {
+        return String.format(EPOCHS_WITH_TRANSACTIONS_TABLE, getName(), id);
+    }
+
+    private CompletableFuture<String> getTransactionsInEpochTable(int epoch) {
+        return getId().thenApply(id -> getTransactionsInEpochTableName(epoch, id));
+    }
+
+    private String getTransactionsInEpochTableName(int epoch, String id) {
+        return String.format(TRANSACTIONS_IN_EPOCH_TABLE_FORMAT, getName(), id, epoch);
     }
 
     // region overrides
 
     @Override
-    public CompletableFuture<Integer> getNumberOfOngoingTransactions() {
-        AtomicInteger count = new AtomicInteger(0);
-        
-        AtomicReference<ByteBuf> token = new AtomicReference<>(Unpooled.wrappedBuffer(new byte[0]));
-        AtomicBoolean canContinue = new AtomicBoolean(true);
-        return getTransactionsTable()
-                .thenCompose(table -> Futures.loop(canContinue::get, 
-                        () -> storeHelper.getKeysPaginated(getScope(), table, token.get(), 1000)
-                                                 .thenAccept(v -> {
-                                                     canContinue.set(!v.getValue().isEmpty());
-                                                     count.addAndGet(v.getValue().size());
-                                                     token.set(v.getKey());
-                                                 }), executor))
-                .thenApply(v -> count.get());
-    }
+    public CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record) {
+        // create all transaction entries in committing txn list. 
+        // remove all entries from active txn in epoch. 
+        // reset CommittingTxnRecord
+        long time = System.currentTimeMillis();
 
-    @Override
-    public CompletableFuture<Void> deleteStream() {
-        String scope = getScope();
-        return getId()
-                .thenCompose(id -> {
-                    String transactionsTable = getTransactionsTableName(id);
-
-                    return CompletableFuture.allOf(Futures.exceptionallyExpecting(
-                            storeHelper.deleteTable(scope, transactionsTable, false),
-                            DATA_NOT_FOUND_PREDICATE, null),
-                            Futures.exceptionallyExpecting(
-                                    storeHelper.deleteTable(scope, getMetadataTableName(id), false),
-                                    DATA_NOT_FOUND_PREDICATE, null));
-                });
+        Map<String, byte[]> completedRecords = record.getObject().getTransactionsToCommit().stream()
+                                                               .collect(Collectors.toMap(UUID::toString, 
+                                                                       x -> new CompletedTxnRecord(time, TxnStatus.COMMITTED).toBytes()));
+        CompletableFuture<Void> future;
+        if (record.getObject().getTransactionsToCommit().size() == 0) {
+            future = CompletableFuture.completedFuture(null);
+        } else {
+            future = createCompletedTxEntries(completedRecords)
+                    .thenCompose(x -> getTransactionsInEpochTable(record.getObject().getEpoch())
+                            .thenCompose(table -> storeHelper.removeEntries(getScope(), table, completedRecords.keySet())))
+                    .thenCompose(x -> tryRemoveOlderTransactionsInEpochTables(epoch -> epoch < record.getObject().getEpoch()));
+        }
+        return future
+                .thenCompose(x -> Futures.toVoid(updateCommittingTxnRecord(new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY,
+                        record.getVersion()))));
     }
 
     @Override
     CompletableFuture<Void> createStreamMetadata() {
         return getId().thenCompose(id -> {
             String metadataTable = getMetadataTableName(id);
-            String epochTxnTable = getTransactionsTableName(id);
+            String epochWithTxnTable = getEpochsWithTransactionsTableName(id);
             return CompletableFuture.allOf(storeHelper.createTable(getScope(), metadataTable),
-                    storeHelper.createTable(getScope(), epochTxnTable))
+                    storeHelper.createTable(getScope(), epochWithTxnTable))
                                     .thenAccept(v -> log.debug("stream {}/{} metadata tables {} & {} created", getScope(), getName(), metadataTable,
-                                            epochTxnTable));
+                                            epochWithTxnTable));
         });
     }
 
@@ -250,6 +247,25 @@ class PravegaTablesStream extends PersistentStreamBase {
         return getMetadataTable()
                 .thenCompose(metadataTable -> storeHelper.getCachedData(getScope(), metadataTable, CREATION_TIME_KEY, 
                         data -> BitConverter.readLong(data, 0))).thenApply(VersionedMetadata::getObject);
+    }
+
+    @Override
+    public CompletableFuture<Void> deleteStream() {
+        // delete all tables for this stream even if they are not empty!
+        // 1. read epoch table 
+        // delete all epoch txn specific tables
+        // delete epoch txn base table
+        // delete metadata table
+
+        // delete stream in scope 
+        String scope = getScope();
+        return getId()
+                .thenCompose(id -> tryRemoveOlderTransactionsInEpochTables(epoch -> true)
+                        .thenCompose(v -> getEpochsWithTransactionsTable()
+                                .thenCompose(epochWithTxnTable -> Futures.exceptionallyExpecting(
+                                        storeHelper.deleteTable(scope, epochWithTxnTable, false),
+                                        DATA_NOT_FOUND_PREDICATE, null))
+                                .thenCompose(deleted -> storeHelper.deleteTable(scope, getMetadataTableName(id), false))));
     }
 
     @Override
@@ -381,9 +397,17 @@ class PravegaTablesStream extends PersistentStreamBase {
         String key = String.format(EPOCH_RECORD_KEY_FORMAT, epoch);
         return getMetadataTable()
                 .thenCompose(metadataTable -> storeHelper.addNewEntryIfAbsent(getScope(), metadataTable, key, data.toBytes())
-                                                         .thenAccept(v -> storeHelper.invalidateCache(getScope(), metadataTable, key)));
+                                                         .thenAccept(v -> storeHelper.invalidateCache(getScope(), metadataTable, key)))
+                .thenCompose(v -> {
+                    if (data.getEpoch() == data.getReferenceEpoch()) {
+                        // this is an original epoch. we should create transactions in epoch table
+                        return createTransactionsInEpochTable(epoch);
+                    } else {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                });
     }
-
+    
     @Override
     CompletableFuture<VersionedMetadata<EpochRecord>> getEpochRecordData(int epoch) {
         return getMetadataTable()
@@ -523,118 +547,173 @@ class PravegaTablesStream extends PersistentStreamBase {
     }
 
     @Override
-    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getCurrentTxns() {
-        return getTxnWithFilter((x, y) -> true, Integer.MAX_VALUE);
+    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getActiveTxns() {
+        return getEpochsWithTransactions()
+                .thenCompose(epochsWithTransactions -> {
+                    return Futures.allOfWithResults(epochsWithTransactions.stream().map(this::getTxnInEpoch).collect(Collectors.toList()));
+                }).thenApply(list -> {
+            Map<UUID, ActiveTxnRecord> map = new HashMap<>();
+            list.forEach(map::putAll);
+            return map;
+        });
     }
 
     @Override
-    public CompletableFuture<List<UUID>> getCommittingTxnsInEpoch(int epoch, int limit) {
-        return getTxnWithFilter((x, y) -> RecordHelper.getTransactionEpoch(x) == epoch && 
-            y.getTxnStatus().equals(TxnStatus.COMMITTING), limit)
-                .thenApply(map -> {
-                    List<UUID> list = map.entrySet().stream().map(Map.Entry::getKey).collect(Collectors.toList());
-                    log.info("shivesh:: found txn committing list: {}", list);
-                    return list;
-                })
-                .handle((r, e) -> {
-                   if (e != null) {
-                       log.warn("shivesh:: fmt:: map to list conversion failed {}", e);
-                       throw new CompletionException(e);
-                   } else {
-                       log.info("shivesh:: found committing list::", r);
-                       return r;
-                   }
+    public CompletableFuture<Integer> getNumberOfOngoingTransactions() {
+        List<CompletableFuture<Integer>> futures = new ArrayList<>();
+        return getEpochsWithTransactionsTable()
+                .thenCompose(table -> storeHelper.getAllKeys(getScope(), table)
+                                                 .collectRemaining(x -> {
+                                                     futures.add(getNumberOfOngoingTransactions(Integer.parseInt(x)));
+                                                     return true;
+                                                 })
+                                                 .thenCompose(v -> Futures.allOfWithResults(futures)
+                                                                          .thenApply(list -> list.stream().reduce(0, Integer::sum))));
+    }
+
+    private CompletableFuture<Integer> getNumberOfOngoingTransactions(int epoch) {
+        AtomicInteger count = new AtomicInteger(0);
+        return getTransactionsInEpochTable(epoch)
+                .thenCompose(tableName -> storeHelper.getAllKeys(getScope(), tableName).collectRemaining(x -> {
+                    count.incrementAndGet();
+                    return true;
+                }).thenApply(x -> count.get()));
+    }
+
+    private CompletableFuture<List<Integer>> getEpochsWithTransactions() {
+        return getEpochsWithTransactionsTable()
+                .thenCompose(epochWithTxnTable -> {
+                    List<Integer> epochsWithTransactions = new ArrayList<>();
+                    return storeHelper.getAllKeys(getScope(), epochWithTxnTable)
+                               .collectRemaining(x -> {
+                                   epochsWithTransactions.add(Integer.parseInt(x));
+                                   return true;
+                               }).thenApply(v -> epochsWithTransactions);
                 });
     }
-
-    private CompletableFuture<Map<UUID, ActiveTxnRecord>> getTxnWithFilter(
-            BiFunction<UUID, ActiveTxnRecord, Boolean> filter, int limit) {
+    
+    @Override
+    public CompletableFuture<Map<UUID, ActiveTxnRecord>> getTxnInEpoch(int epoch) {
         String scope = getScope();
         Map<UUID, ActiveTxnRecord> result = new ConcurrentHashMap<>();
-        AtomicBoolean canContinue = new AtomicBoolean(true);
-        AtomicReference<ByteBuf> token = new AtomicReference<>(IteratorState.EMPTY.toBytes());
-        AtomicInteger shivesh = new AtomicInteger(0);
-        return getTransactionsTable()
-                .thenCompose(epochTxnTable -> Futures.exceptionallyExpecting(
-                        Futures.loop(canContinue::get,
-                                () -> storeHelper.getEntriesPaginated(scope, epochTxnTable, token.get(), limit, ActiveTxnRecord::fromBytes)
-                                                 .thenAccept(v -> {
-                                                     log.info("shivesh:: found #txn {} in epoch page: {}", v.getValue().size(), shivesh.incrementAndGet());
-                                                     // we exit if we have either received `limit` number of entries
-                                                     List<Pair<String, VersionedMetadata<ActiveTxnRecord>>> pair = v.getValue();
-                                                     for (Pair<String, VersionedMetadata<ActiveTxnRecord>> val : pair) {
-                                                         UUID txnId = UUID.fromString(val.getKey());
-                                                         ActiveTxnRecord txnRecord = val.getValue().getObject();
-                                                         if (filter.apply(txnId, txnRecord)) {
-                                                             result.put(txnId, txnRecord);
-                                                             if (result.size() == limit) {
-                                                                 log.info("shivesh:: met our limit requirements of {}", limit);
-
-                                                                 break;
-                                                             }
-                                                         }
-                                                     }
-                                                     // if we get less than the requested number, then there isnt really more available. 
-                                                     // it may become available but its a good exit situation for us. 
-                                                     canContinue.set(!(v.getValue().size() < limit || result.size() >= limit));
-                                                     if (!canContinue.get()) {
-                                                         log.info("shivesh:: read all available keys.. nothing more to do.. total result = ", result.size());
-                                                     } else {
-                                                         log.info("shivesh: calling paginated again as we have not found our mojo.. only found {} while previous page had {}", result.size(), v.getValue().size());
-                                                     }
-                                                     token.set(v.getKey());
-                                                 }).handle((r, e) -> {
-                                                     if (e!=null) {
-                                                         log.info("shivesh:: error in reading all entries pagianted", e);
-                                                         throw new CompletionException(e);
-                                                     } else {
-                                                         log.info("shivesh: exited the loop.. read all entries paginated and found {} entries.", result.size());
-                                                         return r;
-                                                     }
-                                        }), executor)
-                                   .thenApply(x -> result), DATA_NOT_FOUND_PREDICATE, Collections.emptyMap()));
+        return getTransactionsInEpochTable(epoch)
+            .thenCompose(tableName -> Futures.exceptionallyExpecting(storeHelper.getAllEntries(scope, tableName, ActiveTxnRecord::fromBytes)
+                                                         .forEachRemaining(x -> {
+                                                             result.put(UUID.fromString(x.getKey()), x.getValue().getObject());
+                                                         }, executor)
+                                                         .thenApply(x -> result), DATA_NOT_FOUND_PREDICATE, Collections.emptyMap()));
     }
 
     @Override
-    CompletableFuture<Version> createNewTransaction(final int epoch, final UUID txId, final ActiveTxnRecord txnRecord) {
+    public CompletableFuture<Version> createNewTransaction(final int epoch, final UUID txId, final ActiveTxnRecord txnRecord) {
         String scope = getScope();
-        return getTransactionsTable()
-                .thenCompose(transactionsTable -> storeHelper.addNewEntry(scope, transactionsTable, txId.toString(), txnRecord.toBytes()));
+        // create txn ==> 
+        // if epoch table exists, add txn to epoch 
+        //  1. add epochs_with_txn entry for the epoch
+        //  2. create txns-in-epoch table
+        //  3. create txn in txns-in-epoch
+        return getTransactionsInEpochTable(epoch)
+                .thenCompose(epochTable -> storeHelper.addNewEntry(scope, epochTable, txId.toString(), txnRecord.toBytes()));
+    }
+
+    private CompletableFuture<Void> createTransactionsInEpochTable(int epoch) {
+        return getEpochsWithTransactionsTable()
+                .thenCompose(epochsWithTxnTable -> {
+                    return storeHelper.addNewEntryIfAbsent(getScope(), epochsWithTxnTable, Integer.toString(epoch), new byte[0]);
+                }).thenCompose(epochTxnEntryCreated -> {
+                    return getTransactionsInEpochTable(epoch)
+                            .thenCompose(epochTable ->
+                                    storeHelper.createTable(getScope(), epochTable));
+                });
     }
 
     @Override
     CompletableFuture<VersionedMetadata<ActiveTxnRecord>> getActiveTx(final int epoch, final UUID txId) {
-        return getTransactionsTable()
+        return getTransactionsInEpochTable(epoch)
                 .thenCompose(epochTxnTable -> storeHelper.getEntry(getScope(), epochTxnTable, txId.toString(), ActiveTxnRecord::fromBytes));
     }
 
     @Override
     CompletableFuture<Version> updateActiveTx(final int epoch, final UUID txId, final VersionedMetadata<ActiveTxnRecord> data) {
-        return getTransactionsTable()
-                .thenCompose(epochTxnTable -> storeHelper.updateEntry(getScope(), epochTxnTable, txId.toString(), 
-                        data.getObject().toBytes(), data.getVersion()));
+        return getTransactionsInEpochTable(epoch)
+                .thenCompose(epochTxnTable -> storeHelper.updateEntry(getScope(), epochTxnTable, txId.toString(), data.getObject().toBytes(), data.getVersion()));
     }
 
     @Override
     CompletableFuture<Void> removeActiveTxEntry(final int epoch, final UUID txId) {
-        return getTransactionsTable()
+        // 1. remove txn from txn-in-epoch table
+        // 2. get current epoch --> if txn-epoch < activeEpoch.reference epoch, try deleting empty epoch table.
+        return getTransactionsInEpochTable(epoch)
                 .thenCompose(epochTransactionsTableName ->
-                        storeHelper.removeEntry(getScope(), epochTransactionsTableName, txId.toString()));
+                        storeHelper.removeEntry(getScope(), epochTransactionsTableName, txId.toString()))
+                // this is only best case attempt. If the epoch table is not empty, it will be ignored. 
+                // if we fail to do this after having removed the transaction, in retried attempt
+                // the caller may not find the transaction and never attempt to remove this table.  
+                // this can lead to proliferation of tables. 
+                // But remove transaction entry is called from . 
+                .thenCompose(v -> tryRemoveOlderTransactionsInEpochTables(e -> e < epoch));
+    }
+    
+    private CompletableFuture<Void> tryRemoveOlderTransactionsInEpochTables(Predicate<Integer> epochPredicate) {
+        return getEpochsWithTransactions()
+                .thenCompose(list -> {
+                    return Futures.allOf(list.stream().filter(epochPredicate)
+                                             .map(this::tryRemoveTransactionsInEpochTable)
+                                             .collect(Collectors.toList()));
+                });
     }
 
+    private CompletableFuture<Void> tryRemoveTransactionsInEpochTable(int epoch) {
+        return getTransactionsInEpochTable(epoch)
+                .thenCompose(epochTable -> 
+                        storeHelper.deleteTable(getScope(), epochTable, true)
+                                                                  .handle((r, e) -> {
+                                                                      if (e != null) {
+                                                                          if (DATA_NOT_FOUND_PREDICATE.test(e)) {
+                                                                              return true;
+                                                                          } else if (DATA_NOT_EMPTY_PREDICATE.test(e)) {
+                                                                              return false;
+                                                                          } else {
+                                                                              throw new CompletionException(e);
+                                                                          }
+                                                                      } else {
+                                                                          return true;
+                                                                      }
+                                                                  })
+                      .thenCompose(deleted -> {
+                          if (deleted) {
+                              return getEpochsWithTransactionsTable()
+                                .thenCompose(table -> storeHelper.removeEntry(getScope(), table, "" + epoch));
+                          } else {
+                              return CompletableFuture.completedFuture(null);
+                          }
+                      }));
+    }
+    
     @Override
     CompletableFuture<Void> createCompletedTxEntry(final UUID txId, final CompletedTxnRecord complete) {
+        return createCompletedTxEntries(Collections.singletonMap(txId.toString(), complete.toBytes()));
+    }
+
+    private CompletableFuture<Void> createCompletedTxEntries(Map<String, byte[]> complete) {
         Integer batch = currentBatchSupplier.get();
         String tableName = String.format(COMPLETED_TRANSACTIONS_BATCH_TABLE_FORMAT, batch);
 
-        String key = String.format(COMPLETED_TRANSACTIONS_KEY_FORMAT, getScope(), getName(), txId.toString());
+        Map<String, byte[]> map = complete.entrySet().stream().collect(Collectors.toMap(
+                x -> String.format(COMPLETED_TRANSACTIONS_KEY_FORMAT, getScope(), getName(), x.getKey().toString()), Map.Entry::getValue));
 
-        return Futures.exceptionallyComposeExpecting(
-                Futures.toVoid(storeHelper.addNewEntryIfAbsent(NameUtils.INTERNAL_SCOPE_NAME, tableName, key, complete.toBytes())),
-                DATA_NOT_FOUND_PREDICATE, () -> tryCreateBatchTable(batch, key, complete.toBytes()));
+        return Futures.toVoid(Futures.exceptionallyComposeExpecting(
+                storeHelper.addNewEntriesIfAbsent(NameUtils.INTERNAL_SCOPE_NAME, tableName, map),
+                DATA_NOT_FOUND_PREDICATE, () -> tryCreateBatchTable(batch)
+                        .thenCompose(v -> storeHelper.addNewEntriesIfAbsent(NameUtils.INTERNAL_SCOPE_NAME, tableName, map))))
+                .exceptionally(e -> {
+                    throw new CompletionException(e);
+                });
     }
 
-    private CompletableFuture<Void> tryCreateBatchTable(int batch, String key, byte[] complete) {
+    
+    
+    private CompletableFuture<Void> tryCreateBatchTable(int batch) {
         String batchTable = String.format(COMPLETED_TRANSACTIONS_BATCH_TABLE_FORMAT, batch);
 
         return storeHelper.createTable(NameUtils.INTERNAL_SCOPE_NAME, COMPLETED_TRANSACTIONS_BATCHES_TABLE)
@@ -642,11 +721,7 @@ class PravegaTablesStream extends PersistentStreamBase {
                                   COMPLETED_TRANSACTIONS_BATCHES_TABLE))
                           .thenCompose(v -> storeHelper.addNewEntryIfAbsent(NameUtils.INTERNAL_SCOPE_NAME, COMPLETED_TRANSACTIONS_BATCHES_TABLE,
                                   "" + batch, new byte[0]))
-                          .thenCompose(v -> storeHelper.createTable(NameUtils.INTERNAL_SCOPE_NAME, batchTable))
-                          .thenCompose(v -> {
-                              log.debug("batch table {} created", batchTable);
-                              return Futures.toVoid(storeHelper.addNewEntryIfAbsent(NameUtils.INTERNAL_SCOPE_NAME, batchTable, key, complete));
-                          });
+                          .thenCompose(v -> storeHelper.createTable(NameUtils.INTERNAL_SCOPE_NAME, batchTable));
     }
 
     @Override

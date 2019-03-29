@@ -9,7 +9,6 @@
  */
 package io.pravega.controller.server.eventProcessor;
 
-import io.pravega.client.netty.impl.ConnectionFactory;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.Exceptions;
@@ -70,7 +69,6 @@ import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.Mockito.mock;
 
 /**
  * Controller Event ProcessorTests.
@@ -103,12 +101,15 @@ public abstract class ControllerEventProcessorTest {
         streamStore = createStore();
         bucketStore = StreamStoreFactory.createZKBucketStore(zkClient, executor);
         hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
-        ConnectionFactory connectionFactory = mock(ConnectionFactory.class);
-        segmentHelperMock = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, AuthHelper.getDisabledAuthHelper());
+        segmentHelperMock = SegmentHelperMock.getSegmentHelperMock();
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, TaskStoreFactory.createInMemoryStore(executor),
-                segmentHelperMock, executor, "1", requestTracker);
+                segmentHelperMock, executor, "1", AuthHelper.getDisabledAuthHelper(), requestTracker);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelperMock,
-                executor, "host");
+                executor, "host", AuthHelper.getDisabledAuthHelper());
+        streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, TaskStoreFactory.createInMemoryStore(executor),
+                segmentHelperMock, executor, "1", AuthHelper.getDisabledAuthHelper(), requestTracker);
+        streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelperMock,
+                executor, "host", AuthHelper.getDisabledAuthHelper());
         streamTransactionMetadataTasks.initializeStreamWriters("commitStream", new EventStreamWriterMock<>(), "abortStream",
                 new EventStreamWriterMock<>());
 

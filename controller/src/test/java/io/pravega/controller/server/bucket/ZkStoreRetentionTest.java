@@ -9,8 +9,6 @@
  */
 package io.pravega.controller.server.bucket;
 
-import io.pravega.client.ClientConfig;
-import io.pravega.client.netty.impl.ConnectionFactoryImpl;
 import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.impl.StreamImpl;
 import io.pravega.common.concurrent.ExecutorServiceHelpers;
@@ -19,9 +17,6 @@ import io.pravega.common.tracing.RequestTracker;
 import io.pravega.controller.mocks.SegmentHelperMock;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.rpc.auth.AuthHelper;
-import io.pravega.controller.store.host.HostControllerStore;
-import io.pravega.controller.store.host.HostStoreFactory;
-import io.pravega.controller.store.host.impl.HostMonitorConfigImpl;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
@@ -139,14 +134,12 @@ public class ZkStoreRetentionTest extends BucketServiceTest {
         StreamMetadataStore streamMetadataStore2 = StreamStoreFactory.createZKStore(zkClient2, executor2);
 
         TaskMetadataStore taskMetadataStore = TaskStoreFactory.createInMemoryStore(executor2);
-        HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
 
-        ConnectionFactoryImpl connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
-        AuthHelper disabledAuthHelper = AuthHelper.getDisabledAuthHelper();
-        SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, disabledAuthHelper);
+        SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock();
 
         StreamMetadataTasks streamMetadataTasks2 = new StreamMetadataTasks(streamMetadataStore2, bucketStore2, 
-                taskMetadataStore, segmentHelper, executor2, hostId, requestTracker);
+                taskMetadataStore, segmentHelper, executor2, hostId, AuthHelper.getDisabledAuthHelper(), 
+                requestTracker);
 
         String scope = "scope1";
         String streamName = "stream1";
@@ -170,7 +163,6 @@ public class ZkStoreRetentionTest extends BucketServiceTest {
         zkClient2.close();
         zkServer2.close();
         streamMetadataTasks2.close();
-        connectionFactory.close();
         ExecutorServiceHelpers.shutdown(executor2);
     }
 

@@ -178,8 +178,8 @@ public abstract class StreamMetadataStoreTest {
         assertEquals(0, store.getActiveSegments(scope, stream1, null, executor).get().size());
 
         // seal a non-existent stream.
-        AssertExtensions.assertFutureThrows("streamNonExistent", store.setSealed(scope, "streamNonExistent", null, executor),
-                e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException);
+        AssertExtensions.assertFutureThrows("", store.setSealed(scope, "streamNonExistent", null, executor),
+            e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException);
         // endregion
 
         // region delete scope and stream
@@ -191,7 +191,7 @@ public abstract class StreamMetadataStoreTest {
         // Delete a deleted stream, should fail with node not found error.
         AssertExtensions.assertFutureThrows("Should throw StoreException",
                 store.deleteStream(scope, stream1, null, executor),
-                (Throwable t) -> Exceptions.unwrap(t) instanceof StoreException.DataNotFoundException);
+                t -> Exceptions.unwrap(t) instanceof StoreException.DataNotFoundException);
 
         // Delete other stream from the scope.
         assertNull(store.deleteStream(scope, stream2, null, executor).join());
@@ -946,6 +946,8 @@ public abstract class StreamMetadataStoreTest {
 
         truncationProperty = store.getTruncationRecord(scope, stream, null, executor).join().getObject();
         assertEquals(truncation, truncationProperty.getStreamCut());
+
+        assertTrue(truncationProperty.getSpan().size() == 2);
 
         Map<Long, Long> truncation3 = new HashMap<>();
         truncation3.put(0L, 2L);

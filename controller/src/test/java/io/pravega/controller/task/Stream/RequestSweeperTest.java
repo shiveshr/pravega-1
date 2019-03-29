@@ -94,9 +94,10 @@ public abstract class RequestSweeperTest {
         ConnectionFactoryImpl connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder()
                                                                                         .controllerURI(URI.create("tcp://localhost"))
                                                                                         .build());
-        segmentHelperMock = SegmentHelperMock.getSegmentHelperMock(hostStore, connectionFactory, AuthHelper.getDisabledAuthHelper());
+        segmentHelperMock = SegmentHelperMock.getSegmentHelperMock();
         streamMetadataTasks = new StreamMetadataTasks(streamStore, StreamStoreFactory.createInMemoryBucketStore(),
-                TaskStoreFactory.createInMemoryStore(executor), segmentHelperMock, executor, HOSTNAME, requestTracker);
+                TaskStoreFactory.createInMemoryStore(executor), segmentHelperMock, executor, HOSTNAME, AuthHelper.getDisabledAuthHelper(), 
+                requestTracker);
         requestEventWriter = spy(new EventStreamWriterMock<>());
         streamMetadataTasks.setRequestEventWriter(requestEventWriter);
 
@@ -140,7 +141,7 @@ public abstract class RequestSweeperTest {
         doAnswer(x -> {
             signalQueue.take().complete(x.getArgument(0));
             return waitQueue.take();
-        }).when(requestEventWriter).writeEvent(any());
+        }).when(requestEventWriter).writeEvent(any(), any());
         
         streamMetadataTasks.manualScale(SCOPE, stream1, sealedSegments, Arrays.asList(segment1, segment2), 
                 System.currentTimeMillis(), null);
