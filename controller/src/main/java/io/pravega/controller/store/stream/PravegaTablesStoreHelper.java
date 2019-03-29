@@ -373,6 +373,8 @@ public class PravegaTablesStoreHelper {
         AtomicInteger retryCount = new AtomicInteger();
         AtomicLong previous = new AtomicLong(System.nanoTime());
         long context = shivesh.incrementAndGet();
+
+        String s = errorMessage.get();
         try {
             return RetryHelper.withRetriesAsync(exceptionalCallback(futureSupplier, errorMessage),
                     e -> {
@@ -380,7 +382,7 @@ public class PravegaTablesStoreHelper {
                         boolean b = unwrap instanceof StoreException.StoreConnectionException;
                         if (b) {
                             long time = System.nanoTime();
-                            log.info("shivesh:: {} Retry#{} got store connection error in our infinite retry loop while trying to work. {}", context, retryCount.incrementAndGet(), time - previous.get());
+                            log.info("shivesh:: {} Retry#{} got store connection error in our infinite retry loop while trying to work. {}\n caller supplied error message {}", context, retryCount.incrementAndGet(), time - previous.get(), s);
                             previous.set(time);
                         } else {
                             if (unwrap instanceof StoreException.UnknownException || unwrap instanceof StoreException.IllegalStateException) {

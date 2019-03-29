@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import io.pravega.shared.segment.StreamSegmentNameUtils;
 import lombok.SneakyThrows;
@@ -90,7 +91,9 @@ public class ZKHostStore implements HostControllerStore {
 
     @Synchronized
     private void updateMap() {
+        log.info("shivesh:: mapping before update: ", hostContainerMap.get().getHostContainerMap().entrySet().stream().collect(Collectors.toMap(x -> x.getKey().getIpAddr(), x-> x.getValue())));
         hostContainerMap.set(HostContainerMap.fromBytes(hostContainerMapNode.getCurrentData().getData()));
+        log.info("shivesh:: mapping after update: ", hostContainerMap.get().getHostContainerMap().entrySet().stream().collect(Collectors.toMap(x -> x.getKey().getIpAddr(), x-> x.getValue())));
         // Following signal is meant only for testing
         Listener consumer = listenerRef.get();
         if (consumer != null) {
@@ -112,7 +115,7 @@ public class ZKHostStore implements HostControllerStore {
         byte[] serializedMap = HostContainerMap.createHostContainerMap(newMapping).toBytes();
         try {
             zkClient.setData().forPath(zkPath, serializedMap);
-            log.info("Successfully updated segment container map");
+            log.info("Successfully updated segment container map {}", newMapping);
         } catch (Exception e) {
             throw new HostStoreException("Failed to persist segment container map to zookeeper", e);
         }
