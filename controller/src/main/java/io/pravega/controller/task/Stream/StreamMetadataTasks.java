@@ -535,33 +535,35 @@ public class StreamMetadataTasks extends TaskBase {
      */
     public CompletableFuture<ScaleStatusResponse> checkScale(String scope, String stream, int epoch,
                                                                         OperationContext context) {
-        return streamMetadataStore.getEpochTransition(scope, stream, context, executor)
-            .thenCompose(etr -> streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor)
-                        .handle((activeEpoch, ex) -> {
-                            ScaleStatusResponse.Builder response = ScaleStatusResponse.newBuilder();
-
-                            if (ex != null) {
-                                Throwable e = Exceptions.unwrap(ex);
-                                if (e instanceof StoreException.DataNotFoundException) {
-                                    response.setStatus(ScaleStatusResponse.ScaleStatus.INVALID_INPUT);
+        CompletableFuture<EpochTransitionRecord> epochTransitionFuture = streamMetadataStore.getEpochTransition(scope, stream, context, executor)
+                                                                                                         .thenApply(VersionedMetadata::getObject);
+        CompletableFuture<EpochRecord> activeEpochFuture = streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor);
+        return CompletableFuture.allOf(epochTransitionFuture, activeEpochFuture)
+                            .handle((r, ex) -> {
+                                ScaleStatusResponse.Builder response = ScaleStatusResponse.newBuilder();
+    
+                                if (ex != null) {
+                                    Throwable e = Exceptions.unwrap(ex);
+                                    if (e instanceof StoreException.DataNotFoundException) {
+                                        response.setStatus(ScaleStatusResponse.ScaleStatus.INVALID_INPUT);
+                                    } else {
+                                        response.setStatus(ScaleStatusResponse.ScaleStatus.INTERNAL_ERROR);
+                                    }
                                 } else {
-                                    response.setStatus(ScaleStatusResponse.ScaleStatus.INTERNAL_ERROR);
+                                    EpochRecord activeEpoch = activeEpochFuture.join();
+                                    EpochTransitionRecord epochTransitionRecord = epochTransitionFuture.join(); 
+                                    if (epoch > activeEpoch.getEpoch()) {
+                                        response.setStatus(ScaleStatusResponse.ScaleStatus.INVALID_INPUT);
+                                    } else if (activeEpoch.getEpoch() == epoch || activeEpoch.getReferenceEpoch() == epoch ||
+                                            (epochTransitionRecord.getNewEpoch() == activeEpoch.getEpoch() && activeEpoch.getReferenceEpoch() == epoch + 1)) {
+                                        response.setStatus(ScaleStatusResponse.ScaleStatus.IN_PROGRESS);
+                                    } else {
+                                        response.setStatus(ScaleStatusResponse.ScaleStatus.SUCCESS);
+                                    }
                                 }
-                            } else {
-                                Preconditions.checkNotNull(activeEpoch);
-                                EpochTransitionRecord epochTransitionRecord = etr.getObject();
-                                if (epoch > activeEpoch.getEpoch()) {
-                                    response.setStatus(ScaleStatusResponse.ScaleStatus.INVALID_INPUT);
-                                } else if (activeEpoch.getEpoch() == epoch || activeEpoch.getReferenceEpoch() == epoch ||
-                                        (epochTransitionRecord.getNewEpoch() == activeEpoch.getEpoch() && activeEpoch.getReferenceEpoch() == epoch + 1)) {
-                                    response.setStatus(ScaleStatusResponse.ScaleStatus.IN_PROGRESS);
-                                } else {
-                                    response.setStatus(ScaleStatusResponse.ScaleStatus.SUCCESS);
-                                }
-                            }
-
-                            return response.build();
-                        }));
+    
+                                return response.build();
+                            });
     }
 
     /**
