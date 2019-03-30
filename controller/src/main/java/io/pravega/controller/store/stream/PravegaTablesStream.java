@@ -41,7 +41,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
@@ -571,14 +570,11 @@ class PravegaTablesStream extends PersistentStreamBase {
     
     @Override
     public CompletableFuture<Map<UUID, ActiveTxnRecord>> getTxnInEpoch(int epoch) {
-        String scope = getScope();
-        Map<UUID, ActiveTxnRecord> result = new ConcurrentHashMap<>();
         return getTransactionsInEpochTable(epoch)
-            .thenCompose(tableName -> Futures.exceptionallyExpecting(storeHelper.getAllEntries(scope, tableName, ActiveTxnRecord::fromBytes)
-                                                         .forEachRemaining(x -> {
-                                                             result.put(UUID.fromString(x.getKey()), x.getValue().getObject());
-                                                         }, executor)
-                                                         .thenApply(x -> result), DATA_NOT_FOUND_PREDICATE, Collections.emptyMap()));
+            .thenCompose(tableName -> Futures.exceptionallyExpecting(storeHelper.getEntriesWithFilter(
+                    getScope(), tableName, UUID::fromString, ActiveTxnRecord::fromBytes,
+                    (x, y) -> y.getTxnStatus().equals(TxnStatus.COMMITTING), 1000), 
+                    DATA_NOT_FOUND_PREDICATE, Collections.emptyMap()));
     }
 
     @Override

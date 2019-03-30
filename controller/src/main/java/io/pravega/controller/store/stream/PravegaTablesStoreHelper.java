@@ -40,14 +40,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+
+import static io.pravega.controller.store.stream.AbstractStreamMetadataStore.DATA_NOT_FOUND_PREDICATE;
 
 @Slf4j
 public class PravegaTablesStoreHelper {
@@ -100,19 +104,19 @@ public class PravegaTablesStoreHelper {
         this.authToken = new AtomicReference<>(authHelper.retrieveMasterToken());
     }
 
-    <T> CompletableFuture<VersionedMetadata<T>> getCachedData(String scope, String table, String key, Function<byte[], T> fromBytes) {
+    public <T> CompletableFuture<VersionedMetadata<T>> getCachedData(String scope, String table, String key, Function<byte[], T> fromBytes) {
         return cache.getCachedData(new TableCacheKey<>(scope, table, key, fromBytes))
                     .thenApply(this::getVersionedMetadata);
     }
 
     @SuppressWarnings("unchecked")
-    private <T> VersionedMetadata<T> getVersionedMetadata(VersionedMetadata v) {
+    private <T> VersionedMetadata<T> getVersionedMetadata(VersionedMetadata<?> v) {
         // Since cache is untyped and holds all types of deserialized objects, we typecast it to the requested object type
         // based on the type in caller's supplied Deserialization function. 
         return new VersionedMetadata<>((T) v.getObject(), v.getVersion());
     }
 
-    void invalidateCache(String scope, String table, String key) {
+    public void invalidateCache(String scope, String table, String key) {
         cache.invalidateCache(new TableCacheKey<>(scope, table, key, x -> null));
     }
 
@@ -252,15 +256,7 @@ public class PravegaTablesStoreHelper {
                 () -> String.format("remove entries: keys: %s table: %s/%s", keys.toString(), scope, tableName)), null)
                 .thenAcceptAsync(v -> log.debug("entry for keys {} removed from table {}/{}", keys, scope, tableName), executor);
     }
-
-    private <T> CompletableFuture<T> expectingDataNotFound(CompletableFuture<T> future, T toReturn) {
-        return Futures.exceptionallyExpecting(future, e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, toReturn);
-    }
-
-    private <T> CompletableFuture<T> expectingDataExists(CompletableFuture<T> future, T toReturn) {
-        return Futures.exceptionallyExpecting(future, e -> Exceptions.unwrap(e) instanceof StoreException.DataExistsException, toReturn);
-    }
-
+    
     public CompletableFuture<Map.Entry<ByteBuf, List<String>>> getKeysPaginated(String scope, String tableName, ByteBuf continuationToken, int limit) {
         log.debug("get keys paginated called for : {}/{}", scope, tableName);
 
@@ -275,8 +271,8 @@ public class PravegaTablesStoreHelper {
                              }, executor);
     }
 
-    public <T> CompletableFuture<Map.Entry<ByteBuf, List<Pair<String, VersionedMetadata<T>>>>> getEntriesPaginated(String scope, String tableName, 
-                                                                                               ByteBuf continuationToken, int limit, Function<byte[], T> fromBytes) {
+    public <Value> CompletableFuture<Map.Entry<ByteBuf, List<Pair<String, VersionedMetadata<Value>>>>> 
+    getEntriesPaginated(String scope, String tableName, ByteBuf continuationToken, int limit, Function<byte[], Value> fromBytes) {
         log.info("get entries paginated called for : {}/{}", scope, tableName);
 
         return withRetries(() -> segmentHelper.readTableEntries(scope, tableName, limit,
@@ -287,15 +283,65 @@ public class PravegaTablesStoreHelper {
                 () -> String.format("get entries paginated for table: %s/%s", scope, tableName))
                 .thenApplyAsync(result -> {
                     log.info("shivesh:: get entries paginated returned result {}", result.getItems().size());
-                    List<Pair<String, VersionedMetadata<T>>> items = result.getItems().stream().map(x -> {
+                    List<Pair<String, VersionedMetadata<Value>>> items = result.getItems().stream().map(x -> {
                         String key = new String(x.getKey().getKey(), Charsets.UTF_8);
-                        T deserialized = fromBytes.apply(x.getValue());
-                        VersionedMetadata<T> value = new VersionedMetadata<>(deserialized, new Version.LongVersion(x.getKey().getVersion().getSegmentVersion()));
+                        Value deserialized = fromBytes.apply(x.getValue());
+                        VersionedMetadata<Value> value = new VersionedMetadata<>(deserialized, new Version.LongVersion(x.getKey().getVersion().getSegmentVersion()));
                         return new ImmutablePair<>(key, value);
                     }).collect(Collectors.toList());
                     log.info("shivesh:: get entries paginated on table {}/{} returned number of items are deserialized successfully{}", scope, tableName, items.size());
                     return new AbstractMap.SimpleEntry<>(result.getState().toBytes(), items);
                 }, executor);
+    }
+
+
+    public <Key, Value> CompletableFuture<Map<Key, Value>> getEntriesWithFilter(
+            String scope, String table, Function<String, Key> fromStringKey,
+            Function<byte[], Value> fromBytesValue, BiFunction<Key, Value, Boolean> filter,int limit) {
+        Map<Key, Value> result = new ConcurrentHashMap<>();
+        AtomicBoolean canContinue = new AtomicBoolean(true);
+        AtomicReference<ByteBuf> token = new AtomicReference<>(IteratorState.EMPTY.toBytes());
+        AtomicInteger shivesh = new AtomicInteger(0);
+
+        return Futures.exceptionallyExpecting(
+                Futures.loop(canContinue::get,
+                        () -> getEntriesPaginated(scope, table, token.get(), limit, fromBytesValue)
+                                .thenAccept(v -> {
+                                    log.info("shivesh:: found #txn {} in epoch page: {}", v.getValue().size(), shivesh.incrementAndGet());
+                                    // we exit if we have either received `limit` number of entries
+                                    List<Pair<String, VersionedMetadata<Value>>> pair = v.getValue();
+                                    for (Pair<String, VersionedMetadata<Value>> val : pair) {
+                                        Key key = fromStringKey.apply(val.getKey());
+                                        Value value = val.getValue().getObject();
+                                        if (filter.apply(key, value)) {
+                                            result.put(key, value);
+                                            if (result.size() == limit) {
+                                                log.info("shivesh:: met our limit requirements of {}", limit);
+
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    // if we get less than the requested number, then we will exit the loop. 
+                                    // otherwise if we have collected all the desired results
+                                    canContinue.set(!(v.getValue().size() < limit || result.size() >= limit));
+                                    token.get().release();
+                                    if (!canContinue.get()) {
+                                        log.info("shivesh:: read all available keys.. nothing more to do.. total result = ", result.size());
+                                    } else {
+                                        token.set(v.getKey());
+                                        log.info("shivesh: calling paginated again as we have not found our mojo.. only found {} while previous page had {}", result.size(), v.getValue().size());
+                                    }
+                                }).handle((r, e) -> {
+                                    if (e != null) {
+                                        log.info("shivesh:: error in reading all entries pagianted", e);
+                                        throw new CompletionException(e);
+                                    } else {
+                                        log.info("shivesh: exited the loop.. read all entries paginated and found {} entries.", result.size());
+                                        return r;
+                                    }
+                                }), executor)
+                       .thenApply(x -> result), DATA_NOT_FOUND_PREDICATE, Collections.emptyMap());
     }
 
     public AsyncIterator<String> getAllKeys(String scope, String tableName) {
@@ -310,6 +356,14 @@ public class PravegaTablesStoreHelper {
                     return new AbstractMap.SimpleEntry<>(result.getKey(), result.getValue());
                 }, executor),
                 IteratorState.EMPTY.toBytes());
+    }
+
+    private <T> CompletableFuture<T> expectingDataNotFound(CompletableFuture<T> future, T toReturn) {
+        return Futures.exceptionallyExpecting(future, e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, toReturn);
+    }
+
+    private <T> CompletableFuture<T> expectingDataExists(CompletableFuture<T> future, T toReturn) {
+        return Futures.exceptionallyExpecting(future, e -> Exceptions.unwrap(e) instanceof StoreException.DataExistsException, toReturn);
     }
 
     private <T> Supplier<CompletableFuture<T>> exceptionalCallback(Supplier<CompletableFuture<T>> future, Supplier<String> errorMessageSupplier) {
