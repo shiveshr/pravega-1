@@ -317,7 +317,6 @@ public class PravegaTablesStoreHelper {
                                             result.put(key, value);
                                             if (result.size() == limit) {
                                                 log.info("shivesh:: met our limit requirements of {}", limit);
-
                                                 break;
                                             }
                                         }
