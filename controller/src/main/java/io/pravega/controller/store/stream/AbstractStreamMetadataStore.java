@@ -551,12 +551,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                                          final OperationContext context,
                                                                          final Executor executor) {
         Stream stream = getStream(scopeName, streamName, context);
-        return withCompletion(stream.createTransaction(txnId, lease, maxExecutionTime), executor)
-                .thenApply(result -> {
-//                    stream.getNumberOfOngoingTransactions().thenAccept(count ->
-//                            TransactionMetrics.reportOpenTransactions(scopeName, streamName, count));
-                    return result;
-                });
+        return withCompletion(stream.createTransaction(txnId, lease, maxExecutionTime), executor);
     }
 
     @Override
@@ -589,12 +584,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                           final UUID txId, final OperationContext context,
                                                           final Executor executor) {
         Stream stream = getStream(scope, streamName, context);
-        return withCompletion(stream.commitTransaction(txId), executor)
-                .thenApply(result -> {
-                    stream.getNumberOfOngoingTransactions().thenAccept(count ->
-                            TransactionMetrics.reportOpenTransactions(scope, streamName, count));
-                    return result;
-                });
+        return withCompletion(stream.commitTransaction(txId), executor);
     }
 
     @Override
@@ -614,12 +604,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                          final UUID txId, final OperationContext context,
                                                          final Executor executor) {
         Stream stream = getStream(scope, streamName, context);
-        return withCompletion(stream.abortTransaction(txId), executor)
-                .thenApply(result -> {
-//                    stream.getNumberOfOngoingTransactions().thenAccept(count ->
-//                            TransactionMetrics.reportOpenTransactions(scope, streamName, count));
-                    return result;
-                });
+        return withCompletion(stream.abortTransaction(txId), executor);
     }
 
     @Override
@@ -797,14 +782,13 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
         return scope;
     }
 
-    private <T> CompletableFuture<T> withCompletion(CompletableFuture<T> future, final Executor executor) {
+    protected  <T> CompletableFuture<T> withCompletion(CompletableFuture<T> future, final Executor executor) {
 
         // Following makes sure that the result future given out to caller is actually completed on
         // caller's executor. So any chaining, if done without specifying an executor, will either happen on
         // caller's executor or fork join pool but never on someone else's executor.
 
         CompletableFuture<T> result = new CompletableFuture<>();
-
         future.whenCompleteAsync((r, e) -> {
             if (e != null) {
                 result.completeExceptionally(e);

@@ -349,10 +349,14 @@ public class PravegaTablesStoreHelper {
                         toThrow = StoreException.create(StoreException.Type.UNKNOWN, wcfe, errorMessage);
                 }
             } else if (cause instanceof HostStoreException) {
-                log.warn("Host Store exception {}", cause.getMessage());
+
+                toThrow = StoreException.create(StoreException.Type.CONNECTION_ERROR, cause, errorMessage);
+            } else if (cause instanceof ArrayIndexOutOfBoundsException) {
+                // todo: temporary hack added to work around issue
+                log.warn("shivesh:: array out of bounds", cause.getMessage());
                 toThrow = StoreException.create(StoreException.Type.CONNECTION_ERROR, cause, errorMessage);
             } else {
-                log.warn("error {} {}", errorMessage, cause.getClass());
+                log.warn("exception of unknown type thrown {} ", errorMessage, cause);
                 toThrow = StoreException.create(StoreException.Type.UNKNOWN, cause, errorMessage);
             }
 
@@ -393,9 +397,7 @@ public class PravegaTablesStoreHelper {
                     }, NUM_OF_TRIES, executor)
                     .handle((r, e) -> {
                         if (e != null) {
-                            if (retryCount.get() > 0) {
-                                log.info("shivesh:: {} Failed after retries. retrycount at the time of failure {}", context, retryCount.get());
-                            } 
+                            log.info("shivesh:: {} Failed after retries. retrycount at the time of failure {}", context, retryCount.get());
                             throw new CompletionException(e);
                         } else if (retryCount.get() > 0) {
                             log.info("shivesh:: {} succeeded after retries. retrycount before success {}", context, retryCount.get());

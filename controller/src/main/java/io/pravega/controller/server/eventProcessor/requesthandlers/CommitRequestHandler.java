@@ -101,14 +101,14 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                         Throwable cause = Exceptions.unwrap(e);
                         // for operation not allowed, we will report the event
                         if (cause instanceof StoreException.OperationNotAllowedException) {
-                            log.debug("Cannot commit transaction on epoch {} on stream {}/{}. Postponing", epoch, scope, stream);
+                            log.debug("Cannot commit transaction on epoch {} for on stream {}/{}. Postponing", epoch, scope, stream);
                         } else {
-                            log.error("Exception while attempting to commit transaction on epoch {} on stream {}/{}", epoch, scope, stream, e);
+                            log.error("Exception while attempting to commit transaction on epoch {} on stream {}/{}.. event = {}", epoch, scope, stream, event.getShivesh(), e);
                         }
                         future.completeExceptionally(cause);
                     } else {
                         log.debug("Successfully committed transactions on epoch {} on stream {}/{}", epoch, scope, stream);
-                        log.info("shivesh:: Successfully committed transactions on epoch {} on stream {}/{}. took time {}", epoch, scope, stream, System.nanoTime() - time);
+                        log.info("shivesh:: Successfully committed transactions on epoch {} on stream {}/{}. took time {}.. event = {}", epoch, scope, stream, System.nanoTime() - time, event.getShivesh());
                         if (processedEvents != null) {
                             processedEvents.offer(event);
                         }
