@@ -82,6 +82,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+
+import lombok.Synchronized;
 import org.apache.commons.lang3.NotImplementedException;
 import org.slf4j.LoggerFactory;
 
@@ -132,14 +134,17 @@ public class StreamMetadataTasks extends TaskBase {
         this.setReady();
     }
 
+    @Synchronized
     public void initializeStreamWriters(final EventStreamClientFactory clientFactory,
                                         final String streamName) {
         this.requestStreamName = streamName;
         this.clientFactory = clientFactory;
         
-        requestWriterFuture.complete(clientFactory.createEventWriter(requestStreamName,
-                ControllerEventProcessors.CONTROLLER_EVENT_SERIALIZER,
-                EventWriterConfig.builder().build()));
+        if (!requestWriterFuture.isDone()) {
+            requestWriterFuture.complete(clientFactory.createEventWriter(requestStreamName,
+                    ControllerEventProcessors.CONTROLLER_EVENT_SERIALIZER,
+                    EventWriterConfig.builder().build()));
+        }
     }
 
     /**
@@ -659,7 +664,7 @@ public class StreamMetadataTasks extends TaskBase {
     public void setRequestEventWriter(EventStreamWriter<ControllerEvent> requestEventWriter) {
         requestWriterFuture.complete(requestEventWriter);
     }
-    
+
     @VisibleForTesting
     CompletableFuture<CreateStreamStatus.Status> createStreamBody(String scope, String stream, StreamConfiguration config, long timestamp) {
         final long requestId = requestTracker.getRequestIdFor("createStream", scope, stream);
@@ -929,9 +934,12 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     @Override
+    @Synchronized
     public void close() {
         if (requestWriterFuture.isDone()) {
             requestWriterFuture.join().close();
+        } else {
+            requestWriterFuture.cancel(true);
         }
     }
 
