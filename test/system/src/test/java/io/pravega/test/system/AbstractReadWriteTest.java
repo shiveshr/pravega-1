@@ -196,7 +196,7 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
 
                     // Renewal of routing key to test writing in multiple segments for the same writer.
                     if (seqNumber == RK_RENEWAL_RATE_WRITER) {
-                        log.info("Renew writer routing key and reinitialize seqNumber at event {}.", seqNumber);
+                        log.debug("Renew writer routing key and reinitialize seqNumber at event {}.", seqNumber);
                         uniqueRoutingKey = UUID.randomUUID().toString();
                         seqNumber = 0;
                     }
@@ -233,7 +233,7 @@ abstract class AbstractReadWriteTest extends AbstractSystemTest {
 
                         // Renewal of routing key to test writing in multiple segments for the same transaction.
                         if (j % RK_RENEWAL_RATE_TRANSACTION == 0) {
-                            log.info("Renew transaction writer routing key and reinitialize seqNumber at event {}.", j);
+                            log.debug("Renew transaction writer routing key and reinitialize seqNumber at event {}.", j);
                             uniqueRoutingKey = UUID.randomUUID().toString();
                             seqNumber = 0;
                         }

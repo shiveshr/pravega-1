@@ -430,7 +430,7 @@ public class SegmentHelper {
             @Override
             public void noSuchSegment(WireCommands.NoSuchSegment noSuchSegment) {
                 if (noSuchSegment.getSegment().equals(transactionName)) {
-                    log.info("commitTransaction {} NoSuchSegment", transactionName);
+                    log.debug("commitTransaction {} NoSuchSegment", transactionName);
                     result.complete(TxnStatus.newBuilder().setStatus(TxnStatus.Status.SUCCESS).build());
                 } else {
                     log.warn("commitTransaction {} Source Segment not found", noSuchSegment.getSegment());
@@ -490,7 +490,7 @@ public class SegmentHelper {
 
             @Override
             public void noSuchSegment(WireCommands.NoSuchSegment noSuchSegment) {
-                log.info("abortTransaction {} NoSuchSegment", transactionName);
+                log.debug("abortTransaction {} NoSuchSegment", transactionName);
                 result.complete(TxnStatus.newBuilder().setStatus(TxnStatus.Status.SUCCESS).build());
             }
 
