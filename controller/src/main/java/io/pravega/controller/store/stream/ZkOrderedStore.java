@@ -13,6 +13,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Charsets;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
+import io.pravega.common.util.BitConverter;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +24,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -159,8 +161,8 @@ class ZkOrderedStore {
      * @param stream stream stream
      * @return CompletableFuture which when completed will contain all positions to entities in the set. 
      */
-    CompletableFuture<Map<Long, String>> getEntitiesWithPosition(String scope, String stream) {
-        Map<Long, String> result = new ConcurrentHashMap<>();
+    CompletableFuture<Map<Long, UUID>> getEntitiesWithPosition(String scope, String stream) {
+        Map<Long, UUID> result = new ConcurrentHashMap<>();
         return Futures.exceptionallyExpecting(storeHelper.getChildren(getStreamPath(scope, stream)), DATA_NOT_FOUND_PREDICATE, Collections.emptyList())
                           .thenCompose(children -> {
                               // start with smallest collection and collect records
@@ -172,10 +174,11 @@ class ZkOrderedStore {
                                                     .thenCompose(entities -> Futures.allOf(
                                                                     entities.stream().map(x -> {
                                                                         int pos = getPositionFromPath(x);
-                                                                        return storeHelper.getData(getEntityPath(scope, stream, collectionNumber, pos))
+                                                                        return storeHelper.getData(getEntityPath(scope, stream, collectionNumber, pos),
+                                                                                m -> new String(m, Charsets.UTF_8))
                                                                                           .thenAccept(r -> {
-                                                                                              result.put(Position.toLong(collectionNumber, pos),
-                                                                                                      new String(r.getData(), Charsets.UTF_8));
+                                                                                              result.put(Position.toLong(collectionNumber, pos), 
+                                                                                                      UUID.fromString(r.getObject()));
                                                                                           });
                                                                     }).collect(Collectors.toList()))
                                                     ).thenApply(v -> true);
@@ -271,19 +274,19 @@ class ZkOrderedStore {
     
     @VisibleForTesting
     CompletableFuture<Boolean> isSealed(String scope, String stream, int collectionNum) {
-        return Futures.exceptionallyExpecting(storeHelper.getData(getCollectionSealedPath(scope, stream, collectionNum)).thenApply(v -> true), 
+        return Futures.exceptionallyExpecting(storeHelper.getData(getCollectionSealedPath(scope, stream, collectionNum), x -> x).thenApply(v -> true), 
             e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, false);        
     }
     
     @VisibleForTesting
     CompletableFuture<Boolean> isDeleted(String scope, String stream, int collectionNum) {
-        return Futures.exceptionallyExpecting(storeHelper.getData(getCollectionPath(scope, stream, collectionNum)).thenApply(v -> false), 
+        return Futures.exceptionallyExpecting(storeHelper.getData(getCollectionPath(scope, stream, collectionNum), x -> x).thenApply(v -> false), 
             e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, true);
     }
 
     @VisibleForTesting
     CompletableFuture<Boolean> positionExists(String scope, String stream, long position) {
-        return Futures.exceptionallyExpecting(storeHelper.getData(getEntityPath(scope, stream, position)).thenApply(v -> true), 
+        return Futures.exceptionallyExpecting(storeHelper.getData(getEntityPath(scope, stream, position), x -> x).thenApply(v -> true), 
             e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, false);
     }
     

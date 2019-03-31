@@ -24,6 +24,7 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -34,7 +35,6 @@ import java.util.Set;
  * once transition completes.
  */
 @Data
-@Builder
 public class EpochTransitionRecord {
     public static final EpochTransitionRecordSerializer SERIALIZER = new EpochTransitionRecordSerializer();
     public static final EpochTransitionRecord EMPTY = new EpochTransitionRecord(Integer.MIN_VALUE, Long.MIN_VALUE, ImmutableSet.of(), ImmutableMap.of());
@@ -56,15 +56,29 @@ public class EpochTransitionRecord {
      */
     final Map<Long, Map.Entry<Double, Double>> newSegmentsWithRange;
 
-    public static class EpochTransitionRecordBuilder implements ObjectBuilder<EpochTransitionRecord> {
+    private static class EpochTransitionRecordBuilder implements ObjectBuilder<EpochTransitionRecord> {
 
     }
 
-    public EpochTransitionRecord(int activeEpoch, long time, Set<Long> segmentsToSeal, Map<Long, Map.Entry<Double, Double>> newSegmentsWithRange) {
+    @Builder
+    private EpochTransitionRecord(int activeEpoch, long time, Set<Long> segmentsToSeal, Map<Long, Map.Entry<Double, Double>> newSegmentsWithRange, 
+                                 boolean copyCollection) {
         this.activeEpoch = activeEpoch;
         this.time = time;
-        this.segmentsToSeal = ImmutableSet.copyOf(segmentsToSeal);
-        this.newSegmentsWithRange = ImmutableMap.copyOf(newSegmentsWithRange);
+        this.segmentsToSeal = copyCollection ? ImmutableSet.copyOf(segmentsToSeal) : segmentsToSeal;
+        this.newSegmentsWithRange = copyCollection ? ImmutableMap.copyOf(newSegmentsWithRange) : newSegmentsWithRange;
+    }
+    
+    public EpochTransitionRecord(int activeEpoch, long time, Set<Long> segmentsToSeal, Map<Long, Map.Entry<Double, Double>> newSegmentsWithRange) {
+        this(activeEpoch, time, segmentsToSeal, newSegmentsWithRange, true);
+    }
+
+    public Set<Long> getSegmentsToSeal() {
+        return Collections.unmodifiableSet(segmentsToSeal);
+    }
+
+    public Map<Long, Map.Entry<Double, Double>> getNewSegmentsWithRange() {
+        return Collections.unmodifiableMap(newSegmentsWithRange);
     }
 
     public int getNewEpoch() {
@@ -104,6 +118,7 @@ public class EpochTransitionRecord {
             epochTransitionRecordBuilder
                     .segmentsToSeal(ImmutableSet.copyOf(ts))
                     .newSegmentsWithRange(ImmutableMap.copyOf(kvMap))
+                    .copyCollection(false)
                     .build();
         }
 

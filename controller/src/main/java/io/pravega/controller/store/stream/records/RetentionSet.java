@@ -19,7 +19,6 @@ import io.pravega.common.io.serialization.VersionedSerializer;
 import io.pravega.common.util.CollectionHelpers;
 import lombok.Builder;
 import lombok.Data;
-import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -30,7 +29,6 @@ import java.util.List;
 import java.util.function.Function;
 
 @Slf4j
-@Builder
 @Data
 /**
  * Data class to capture a retention set. This contains a sorted (by recording time) list of retention set records.
@@ -38,11 +36,15 @@ import java.util.function.Function;
 public class RetentionSet {
     public static final RetentionSetSerializer SERIALIZER = new RetentionSetSerializer();
 
-    @Getter
     private final List<StreamCutReferenceRecord> retentionRecords;
 
-    RetentionSet(List<StreamCutReferenceRecord> streamCutReferenceRecords) {
-        this.retentionRecords = ImmutableList.copyOf(streamCutReferenceRecords);
+    @Builder
+    private RetentionSet(List<StreamCutReferenceRecord> retentionRecords, boolean copyCollections) {
+        this.retentionRecords = copyCollections ? ImmutableList.copyOf(retentionRecords) : retentionRecords;
+    }
+
+    public RetentionSet(List<StreamCutReferenceRecord> retentionRecords) {
+        this(retentionRecords, true);
     }
 
     /**
@@ -91,6 +93,10 @@ public class RetentionSet {
         return retentionRecords.get(beforeIndex);
     }
 
+    public List<StreamCutReferenceRecord> getRetentionRecords() {
+        return Collections.unmodifiableList(retentionRecords);
+    }
+
     /**
      * Get a list of all retention reference stream cut records on or before (inclusive) the given record.
      * @param record reference record
@@ -135,7 +141,7 @@ public class RetentionSet {
         return retentionRecords.get(retentionRecords.size() - 1);
     }
 
-    public static class RetentionSetBuilder implements ObjectBuilder<RetentionSet> {
+    private static class RetentionSetBuilder implements ObjectBuilder<RetentionSet> {
     }
 
     @SneakyThrows(IOException.class)
@@ -163,7 +169,7 @@ public class RetentionSet {
         private void read00(RevisionDataInput revisionDataInput, RetentionSet.RetentionSetBuilder retentionRecordBuilder)
                 throws IOException {
             retentionRecordBuilder.retentionRecords(revisionDataInput.readCollection(StreamCutReferenceRecord.SERIALIZER::deserialize,
-                    ArrayList::new));
+                    ArrayList::new)).copyCollections(false);
         }
 
         private void write00(RetentionSet retentionRecord, RevisionDataOutput revisionDataOutput) throws IOException {

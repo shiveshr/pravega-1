@@ -14,16 +14,15 @@ import io.pravega.common.ObjectBuilder;
 import io.pravega.common.io.serialization.RevisionDataInput;
 import io.pravega.common.io.serialization.RevisionDataOutput;
 import io.pravega.common.io.serialization.VersionedSerializer;
-import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Data;
-import lombok.Getter;
 import lombok.SneakyThrows;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,21 +45,27 @@ public class EpochRecord {
     private final int referenceEpoch;
     private final List<StreamSegmentRecord> segments;
     private final long creationTime;
-    @Getter(AccessLevel.PRIVATE)
     private final Map<Long, StreamSegmentRecord> segmentMap = new HashMap<>();
     
     @Builder
-    EpochRecord(int epoch, int referenceEpoch, List<StreamSegmentRecord> segments, long creationTime) {
+    private EpochRecord(int epoch, int referenceEpoch, List<StreamSegmentRecord> segments, long creationTime, boolean copyCollections) {
         this.epoch = epoch;
         this.referenceEpoch = referenceEpoch;
-        this.segments = ImmutableList.copyOf(segments);
+        this.segments = copyCollections ? ImmutableList.copyOf(segments) : segments;
         this.creationTime = creationTime;
         this.segmentMap.putAll(segments.stream().collect(Collectors.toMap(StreamSegmentRecord::segmentId, x -> x)));
     }
 
-    @Builder
-    EpochRecord(int epoch, List<StreamSegmentRecord> segments, long creationTime) {
-        this(epoch, epoch, segments, creationTime);
+    public EpochRecord(int epoch, int referenceEpoch, List<StreamSegmentRecord> segments, long creationTime) {
+        this(epoch, referenceEpoch, segments, creationTime, true);
+    }
+    
+    public List<StreamSegmentRecord> getSegments() {
+        return Collections.unmodifiableList(segments);
+    }
+
+    private Map<Long, StreamSegmentRecord> getSegmentMap() {
+        return Collections.unmodifiableMap(segmentMap);
     }
 
     @SneakyThrows(IOException.class)
@@ -90,7 +95,7 @@ public class EpochRecord {
         return segmentMap.containsKey(segmentId);
     }
 
-    public static class EpochRecordBuilder implements ObjectBuilder<EpochRecord> {
+    private static class EpochRecordBuilder implements ObjectBuilder<EpochRecord> {
 
     }
     
@@ -109,7 +114,8 @@ public class EpochRecord {
             builder.epoch(revisionDataInput.readInt())
                    .referenceEpoch(revisionDataInput.readInt())
                    .segments(revisionDataInput.readCollection(StreamSegmentRecord.SERIALIZER::deserialize, ArrayList::new))
-                   .creationTime(revisionDataInput.readLong());
+                   .creationTime(revisionDataInput.readLong())
+                   .copyCollections(false);
         }
 
         private void write00(EpochRecord history, RevisionDataOutput revisionDataOutput) throws IOException {

@@ -24,6 +24,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Data
@@ -39,16 +40,14 @@ public class HistoryTimeSeriesRecord {
     private final int epoch;
     @Getter
     private final int referenceEpoch;
-    @Getter
     private final List<StreamSegmentRecord> segmentsSealed;
-    @Getter
     private final List<StreamSegmentRecord> segmentsCreated;
     @Getter
     private final long scaleTime;
 
     @Builder
-    HistoryTimeSeriesRecord(int epoch, int referenceEpoch, List<StreamSegmentRecord> segmentsSealed, List<StreamSegmentRecord> segmentsCreated,
-                            long creationTime) {
+    private HistoryTimeSeriesRecord(int epoch, int referenceEpoch, List<StreamSegmentRecord> segmentsSealed, List<StreamSegmentRecord> segmentsCreated,
+                            long creationTime, boolean copyCollections) {
         if (epoch == referenceEpoch) {
             if (epoch != 0) {
                 Exceptions.checkNotNullOrEmpty(segmentsSealed, "segments sealed");
@@ -61,14 +60,27 @@ public class HistoryTimeSeriesRecord {
         }
         this.epoch = epoch;
         this.referenceEpoch = referenceEpoch;
-        this.segmentsSealed = segmentsSealed == null ? null : ImmutableList.copyOf(segmentsSealed);
-        this.segmentsCreated = segmentsCreated == null ? null : ImmutableList.copyOf(segmentsCreated);
+        List<StreamSegmentRecord> segmentsSealedList = copyCollections ? ImmutableList.copyOf(segmentsSealed) : segmentsSealed;
+        this.segmentsSealed = segmentsSealedList == null ? ImmutableList.of() : segmentsSealedList;
+        List<StreamSegmentRecord> segmentsCreatedList = copyCollections ? ImmutableList.copyOf(segmentsCreated) : segmentsCreated;
+        this.segmentsCreated = segmentsCreatedList == null ? ImmutableList.of() : segmentsCreatedList;
         this.scaleTime = creationTime;
     }
 
-    @Builder
-    HistoryTimeSeriesRecord(int epoch, List<StreamSegmentRecord> segmentsSealed, List<StreamSegmentRecord> segmentsCreated, long creationTime) {
-        this(epoch, epoch, segmentsSealed, segmentsCreated, creationTime);
+    public HistoryTimeSeriesRecord(int epoch, int referenceEpoch, List<StreamSegmentRecord> segmentsSealed, List<StreamSegmentRecord> segmentsCreated, long creationTime) {
+        this(epoch, referenceEpoch, segmentsSealed, segmentsCreated, creationTime, true);
+    }
+
+    HistoryTimeSeriesRecord(int epoch, int referenceEpoch, long creationTime) {
+        this(epoch, referenceEpoch, Collections.emptyList(), Collections.emptyList(), creationTime, false);
+    }
+
+    public List<StreamSegmentRecord> getSegmentsSealed() {
+        return Collections.unmodifiableList(segmentsSealed);
+    }
+
+    public List<StreamSegmentRecord> getSegmentsCreated() {
+        return Collections.unmodifiableList(segmentsCreated);
     }
 
     public boolean isDuplicate() {
@@ -86,7 +98,7 @@ public class HistoryTimeSeriesRecord {
         return SERIALIZER.deserialize(inputStream);
     }
 
-    public static class HistoryTimeSeriesRecordBuilder implements ObjectBuilder<HistoryTimeSeriesRecord> {
+    private static class HistoryTimeSeriesRecordBuilder implements ObjectBuilder<HistoryTimeSeriesRecord> {
 
     }
     
@@ -107,7 +119,8 @@ public class HistoryTimeSeriesRecord {
                    .referenceEpoch(revisionDataInput.readInt())
                    .segmentsSealed(revisionDataInput.readCollection(StreamSegmentRecord.SERIALIZER::deserialize, ArrayList::new))
                    .segmentsCreated(revisionDataInput.readCollection(StreamSegmentRecord.SERIALIZER::deserialize, ArrayList::new))
-                   .creationTime(revisionDataInput.readLong());
+                   .creationTime(revisionDataInput.readLong())
+                   .copyCollections(false);
         }
 
         private void write00(HistoryTimeSeriesRecord history, RevisionDataOutput revisionDataOutput) throws IOException {

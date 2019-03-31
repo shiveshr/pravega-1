@@ -23,6 +23,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 @Data
@@ -37,8 +38,16 @@ public class HistoryTimeSeries {
     private final List<HistoryTimeSeriesRecord> historyRecords;
 
     @Builder
-    HistoryTimeSeries(List<HistoryTimeSeriesRecord> historyRecords) {
-        this.historyRecords = ImmutableList.copyOf(historyRecords);
+    private HistoryTimeSeries(List<HistoryTimeSeriesRecord> historyRecords, boolean copyCollection) {
+        this.historyRecords = copyCollection ? ImmutableList.copyOf(historyRecords) : historyRecords;
+    }
+
+    public HistoryTimeSeries(List<HistoryTimeSeriesRecord> historyRecords) {
+        this(historyRecords, true);
+    }
+
+    public List<HistoryTimeSeriesRecord> getHistoryRecords() {
+        return Collections.unmodifiableList(historyRecords);
     }
 
     @SneakyThrows(IOException.class)
@@ -52,7 +61,7 @@ public class HistoryTimeSeries {
         return SERIALIZER.deserialize(inputStream);
     }
 
-    public static class HistoryTimeSeriesBuilder implements ObjectBuilder<HistoryTimeSeries> {
+    private static class HistoryTimeSeriesBuilder implements ObjectBuilder<HistoryTimeSeries> {
 
     }
     
@@ -87,7 +96,8 @@ public class HistoryTimeSeries {
 
         private void read00(RevisionDataInput revisionDataInput, HistoryTimeSeries.HistoryTimeSeriesBuilder builder) throws IOException {
             builder.historyRecords(revisionDataInput.readCollection(HistoryTimeSeriesRecord.SERIALIZER::deserialize,
-                    ArrayList::new));
+                    ArrayList::new))
+                   .copyCollection(false);
         }
 
         private void write00(HistoryTimeSeries history, RevisionDataOutput revisionDataOutput) throws IOException {

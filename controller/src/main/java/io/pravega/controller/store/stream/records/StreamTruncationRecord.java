@@ -24,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Map;
@@ -72,7 +73,7 @@ public class StreamTruncationRecord {
      * This is non empty while truncation is ongoing.
      * This is reset to empty once truncation completes by calling mergeDeleted method.
      */
-    private final ImmutableSet<Long> toDelete;
+    private final Set<Long> toDelete;
     /**
      * Size till stream cut.
      */
@@ -81,16 +82,33 @@ public class StreamTruncationRecord {
     private final boolean updating;
 
     @Builder
-    public StreamTruncationRecord(Map<Long, Long> streamCut, Map<StreamSegmentRecord, Integer> span,
-                                  Set<Long> deletedSegments, Set<Long> toDelete, long sizeTill, boolean updating) {
-        this.streamCut = ImmutableMap.copyOf(streamCut);
-        this.span = ImmutableMap.copyOf(span);
-        this.deletedSegments = ImmutableSet.copyOf(deletedSegments);
-        this.toDelete = ImmutableSet.copyOf(toDelete);
+    private StreamTruncationRecord(Map<Long, Long> streamCut, Map<StreamSegmentRecord, Integer> span,
+                                  Set<Long> deletedSegments, Set<Long> toDelete, long sizeTill, boolean updating, boolean copyCollections) {
+        this.streamCut = copyCollections ? ImmutableMap.copyOf(streamCut) : streamCut;
+        this.span = copyCollections ? ImmutableMap.copyOf(span) : span;
+        this.deletedSegments = copyCollections ? ImmutableSet.copyOf(deletedSegments) : deletedSegments;
+        this.toDelete = copyCollections ? ImmutableSet.copyOf(toDelete) : toDelete;
         this.sizeTill = sizeTill;
         this.updating = updating;
         this.spanEpochLow = span.values().stream().min(Comparator.naturalOrder()).orElse(Integer.MIN_VALUE);
         this.spanEpochHigh = span.values().stream().max(Comparator.naturalOrder()).orElse(Integer.MIN_VALUE);
+    }
+    
+    public StreamTruncationRecord(Map<Long, Long> streamCut, Map<StreamSegmentRecord, Integer> span,
+                                  Set<Long> deletedSegments, Set<Long> toDelete, long sizeTill, boolean updating) {
+        this(streamCut, span, deletedSegments, toDelete, sizeTill, updating, true);
+    }
+
+    public Map<Long, Long> getStreamCut() {
+        return Collections.unmodifiableMap(streamCut);
+    }
+
+    public Set<Long> getDeletedSegments() {
+        return Collections.unmodifiableSet(deletedSegments);
+    }
+
+    public Set<Long> getToDelete() {
+        return Collections.unmodifiableSet(toDelete);
     }
 
     /**
@@ -110,10 +128,11 @@ public class StreamTruncationRecord {
                                      .deletedSegments(deleted)
                                      .toDelete(ImmutableSet.of())
                                      .sizeTill(toComplete.sizeTill)
+                                     .copyCollections(false)
                                      .build();
     }
 
-    public static class StreamTruncationRecordBuilder implements ObjectBuilder<StreamTruncationRecord> {
+    private static class StreamTruncationRecordBuilder implements ObjectBuilder<StreamTruncationRecord> {
 
     }
 
@@ -148,7 +167,8 @@ public class StreamTruncationRecord {
                     .deletedSegments(new HashSet<>(revisionDataInput.readCollection(DataInput::readLong)))
                     .toDelete(new HashSet<>(revisionDataInput.readCollection(DataInput::readLong)))
                     .sizeTill(revisionDataInput.readLong())
-                    .updating(revisionDataInput.readBoolean());
+                    .updating(revisionDataInput.readBoolean())
+                    .copyCollections(false);
         }
 
         private void write00(StreamTruncationRecord streamTruncationRecord, RevisionDataOutput revisionDataOutput)
