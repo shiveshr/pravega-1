@@ -10,6 +10,7 @@
 package io.pravega.controller.task.Stream;
 
 import io.pravega.client.ClientConfig;
+import io.pravega.client.netty.impl.ConnectionFactory;
 import io.pravega.client.netty.impl.ConnectionFactoryImpl;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.StreamConfiguration;
@@ -74,7 +75,8 @@ public class IntermittentCnxnFailureTest {
 
     private SegmentHelper segmentHelperMock;
     private RequestTracker requestTracker = new RequestTracker(true);
-
+    private ConnectionFactory connectionFactory;
+    
     @Before
     public void setup() throws Exception {
         zkServer = new TestingServerStarter().start();
@@ -87,8 +89,7 @@ public class IntermittentCnxnFailureTest {
         bucketStore = StreamStoreFactory.createZKBucketStore(zkClient, executor);
         TaskMetadataStore taskMetadataStore = TaskStoreFactory.createZKStore(zkClient, executor);
         HostControllerStore hostStore = HostStoreFactory.createInMemoryStore(HostMonitorConfigImpl.dummyConfig());
-        ConnectionFactoryImpl connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
-
+        connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
         segmentHelperMock = spy(new SegmentHelper(connectionFactory, hostStore));
 
         doReturn(Controller.NodeUri.newBuilder().setEndpoint("localhost").setPort(Config.SERVICE_PORT).build()).when(segmentHelperMock).getSegmentUri(
@@ -112,6 +113,7 @@ public class IntermittentCnxnFailureTest {
         streamTransactionMetadataTasks.close();
         zkClient.close();
         zkServer.close();
+        connectionFactory.close();
         ExecutorServiceHelpers.shutdown(executor);
     }
 
