@@ -23,7 +23,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
@@ -160,8 +159,8 @@ class ZkOrderedStore {
      * @param stream stream stream
      * @return CompletableFuture which when completed will contain all positions to entities in the set. 
      */
-    CompletableFuture<Map<Long, UUID>> getEntitiesWithPosition(String scope, String stream) {
-        Map<Long, UUID> result = new ConcurrentHashMap<>();
+    CompletableFuture<Map<Long, String>> getEntitiesWithPosition(String scope, String stream) {
+        Map<Long, String> result = new ConcurrentHashMap<>();
         return Futures.exceptionallyExpecting(storeHelper.getChildren(getStreamPath(scope, stream)), DATA_NOT_FOUND_PREDICATE, Collections.emptyList())
                           .thenCompose(children -> {
                               // start with smallest collection and collect records
@@ -176,8 +175,8 @@ class ZkOrderedStore {
                                                                         return storeHelper.getData(getEntityPath(scope, stream, collectionNumber, pos),
                                                                                 m -> new String(m, Charsets.UTF_8))
                                                                                           .thenAccept(r -> {
-                                                                                              result.put(Position.toLong(collectionNumber, pos), 
-                                                                                                      UUID.fromString(r.getObject()));
+                                                                                              result.put(Position.toLong(collectionNumber, pos),
+                                                                                                      r.getObject());
                                                                                           });
                                                                     }).collect(Collectors.toList()))
                                                     ).thenApply(v -> true);

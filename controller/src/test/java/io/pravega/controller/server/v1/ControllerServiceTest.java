@@ -97,7 +97,9 @@ public class ControllerServiceTest {
                 segmentHelper, executor, "host", AuthHelper.getDisabledAuthHelper(), requestTracker);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore,
                 segmentHelper, executor, "host", AuthHelper.getDisabledAuthHelper());
-        
+        consumer = new ControllerService(streamStore, streamMetadataTasks, streamTransactionMetadataTasks,
+                segmentHelper, executor, null);
+
         final ScalingPolicy policy1 = ScalingPolicy.fixed(2);
         final ScalingPolicy policy2 = ScalingPolicy.fixed(3);
         final StreamConfiguration configuration1 = StreamConfiguration.builder().scalingPolicy(policy1).build();

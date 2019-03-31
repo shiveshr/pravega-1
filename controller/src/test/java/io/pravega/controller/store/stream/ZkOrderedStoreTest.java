@@ -24,7 +24,6 @@ import org.junit.rules.Timeout;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -89,7 +88,7 @@ public class ZkOrderedStoreTest {
         assertTrue(store.isSealed(scope, stream, 1).join());
 
         // get entries and verify that we are able to get all 5 entries. 
-        Map<Long, UUID> entities = store.getEntitiesWithPosition(scope, stream).join();
+        Map<Long, String> entities = store.getEntitiesWithPosition(scope, stream).join();
         assertEquals(5, entities.size());
         assertTrue(entities.containsKey(position1) && entities.get(position1).equals(test + 1));
         assertTrue(entities.containsKey(position2) && entities.get(position2).equals(test + 2));

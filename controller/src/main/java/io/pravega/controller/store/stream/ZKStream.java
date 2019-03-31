@@ -651,7 +651,7 @@ class ZKStream extends PersistentStreamBase {
                       .thenCompose(allTxns -> {
                           // group transactions by epoch and then iterate over it from smallest epoch to largest
                           val groupByEpoch = allTxns.entrySet().stream().collect(
-                                  Collectors.groupingBy(x -> RecordHelper.getTransactionEpoch(x.getValue())));
+                                  Collectors.groupingBy(x -> RecordHelper.getTransactionEpoch(UUID.fromString(x.getValue()))));
 
                           // sort transaction groups by epoch
                           val iterator = groupByEpoch
@@ -682,17 +682,17 @@ class ZKStream extends PersistentStreamBase {
         return Futures.exceptionallyExpecting(txnCommitOrderer.getEntitiesWithPosition(getScope(), getName()),
                 DATA_NOT_FOUND_PREDICATE, Collections.emptyMap())
                 .thenApply(map -> map.entrySet().stream()
-                                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)));
+                                     .collect(Collectors.toMap(Map.Entry::getKey, x -> UUID.fromString(x.getValue()))));
     }
 
-    private CompletableFuture<Void> processTransactionsInEpoch(Map.Entry<Integer, List<Map.Entry<Long, UUID>>> nextEpoch,
+    private CompletableFuture<Void> processTransactionsInEpoch(Map.Entry<Integer, List<Map.Entry<Long, String>>> nextEpoch,
                                                                ConcurrentSet<Long> toPurge,
                                                                ConcurrentHashMap<UUID, ActiveTxnRecord> transactionsMap) {
         int epoch = nextEpoch.getKey();
-        List<Map.Entry<Long, UUID>> txnIds = nextEpoch.getValue();
+        List<Map.Entry<Long, String>> txnIds = nextEpoch.getValue();
         
         return Futures.allOf(txnIds.stream().map(txnIdOrder -> {
-            UUID txnId = txnIdOrder.getValue();
+            UUID txnId = UUID.fromString(txnIdOrder.getValue());
             long order = txnIdOrder.getKey();
             return Futures.exceptionallyExpecting(getTxnRecord(epoch, txnId), DATA_NOT_FOUND_PREDICATE, ActiveTxnRecord.EMPTY)
                           .thenAccept(txnRecord -> {

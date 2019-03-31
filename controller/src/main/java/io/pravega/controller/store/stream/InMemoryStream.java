@@ -708,9 +708,8 @@ public class InMemoryStream extends PersistentStreamBase {
             // take smallest epoch and collection transactions from smallest epoch.
             transactionCommitOrder
                     .forEach((order, txId) -> {
-                        String key = txId.toString();
                         int epoch = RecordHelper.getTransactionEpoch(txId);
-                        ActiveTxnRecord record = activeTxns.containsKey(key) ? activeTxns.get(key).getObject() :
+                        ActiveTxnRecord record = activeTxns.containsKey(txId) ? activeTxns.get(txId).getObject() :
                                 ActiveTxnRecord.EMPTY;
 
                         switch (record.getTxnStatus()) {
