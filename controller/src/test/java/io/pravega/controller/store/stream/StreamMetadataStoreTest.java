@@ -1109,6 +1109,30 @@ public abstract class StreamMetadataStoreTest {
         state = store.updateVersionedState(scope, stream, State.ACTIVE, state, null, executor).join();
     }
 
+    protected void scale(String scope, String stream, int numOfSegments) {
+        List<Map.Entry<Double, Double>> newRanges = new ArrayList<>();
+        double delta = 1.0 / numOfSegments;
+        for (int i = 0; i < numOfSegments; i++) {
+            double low = delta * i;
+            double high = i == numOfSegments - 1 ? 1.0 : delta * (i + 1);
+
+            newRanges.add(new SimpleEntry<>(low, high));
+        }
+
+        List<Long> segmentsToSeal = store.getActiveSegments(scope, stream, null, executor).join()
+                                         .stream().map(StreamSegmentRecord::segmentId).collect(Collectors.toList());
+        VersionedMetadata<EpochTransitionRecord> versioned = store.submitScale(scope, stream, segmentsToSeal,
+                newRanges, System.currentTimeMillis(), null, null, executor).join();
+        VersionedMetadata<State> state = store.getVersionedState(scope, stream, null, executor).join();
+        state = store.updateVersionedState(scope, stream, State.SCALING, state, null, executor).join();
+        store.startScale(scope, stream, false, versioned, state, null, executor).join();
+        store.scaleCreateNewEpochs(scope, stream, versioned, null, executor).join();
+        store.scaleSegmentsSealed(scope, stream, segmentsToSeal.stream().collect(Collectors.toMap(x -> x, x -> 10L)), versioned,
+                null, executor).join();
+        store.completeScale(scope, stream, versioned, null, executor).join();
+        store.setState(scope, stream, State.ACTIVE, null, executor).join();
+    }
+
     @Test
     public void truncationTest() throws Exception {
         final String scope = "ScopeTruncate";
@@ -1185,31 +1209,7 @@ public abstract class StreamMetadataStoreTest {
         assertTrue(store.isStreamCutValid(scope, stream, valid, null, executor).join());
         assertFalse(store.isStreamCutValid(scope, stream, invalid, null, executor).join());
     }
-
-    protected void scale(String scope, String stream, int numOfSegments) {
-        List<Map.Entry<Double, Double>> newRanges = new ArrayList<>();
-        double delta = 1.0 / numOfSegments;
-        for (int i = 0; i < numOfSegments; i++) {
-            double low = delta * i;
-            double high = i == numOfSegments - 1 ? 1.0 : delta * (i + 1);
-
-            newRanges.add(new SimpleEntry<>(low, high));
-        }
-
-        List<Long> segmentsToSeal = store.getActiveSegments(scope, stream, null, executor).join()
-                                         .stream().map(StreamSegmentRecord::segmentId).collect(Collectors.toList());
-        VersionedMetadata<EpochTransitionRecord> versioned = store.submitScale(scope, stream, segmentsToSeal,
-                newRanges, System.currentTimeMillis(), null, null, executor).join();
-        VersionedMetadata<State> state = store.getVersionedState(scope, stream, null, executor).join();
-        state = store.updateVersionedState(scope, stream, State.SCALING, state, null, executor).join();
-        store.startScale(scope, stream, false, versioned, state, null, executor).join();
-        store.scaleCreateNewEpochs(scope, stream, versioned, null, executor).join();
-        store.scaleSegmentsSealed(scope, stream, segmentsToSeal.stream().collect(Collectors.toMap(x -> x, x -> 10L)), versioned,
-                null, executor).join();
-        store.completeScale(scope, stream, versioned, null, executor).join();
-        store.setState(scope, stream, State.ACTIVE, null, executor).join();
-    }
-
+    
     @Test
     public void retentionSetTest() throws Exception {
         final String scope = "ScopeRetain";

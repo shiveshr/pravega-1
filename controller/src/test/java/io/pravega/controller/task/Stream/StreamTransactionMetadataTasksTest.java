@@ -564,8 +564,8 @@ public class StreamTransactionMetadataTasksTest {
     public void writerInitializationTest() {
         StreamMetadataStore streamStoreMock = StreamStoreFactory.createZKStore(zkClient, executor);
 
-        txnTasks = new StreamTransactionMetadataTasks(streamStoreMock, hostStore,
-                SegmentHelperMock.getSegmentHelperMock(), executor, "host", connectionFactory,
+        txnTasks = new StreamTransactionMetadataTasks(streamStoreMock, 
+                SegmentHelperMock.getSegmentHelperMock(), executor, "host", 
                 new AuthHelper(this.authEnabled, "secret"));
 
         streamStore.createScope(SCOPE).join();
@@ -598,8 +598,8 @@ public class StreamTransactionMetadataTasksTest {
     public void writerRoutingKeyTest() throws InterruptedException {
         StreamMetadataStore streamStoreMock = StreamStoreFactory.createZKStore(zkClient, executor);
 
-        txnTasks = new StreamTransactionMetadataTasks(streamStoreMock, hostStore,
-                SegmentHelperMock.getSegmentHelperMock(), executor, "host", connectionFactory,
+        txnTasks = new StreamTransactionMetadataTasks(streamStoreMock, 
+                SegmentHelperMock.getSegmentHelperMock(), executor, "host", 
                 new AuthHelper(this.authEnabled, "secret"));
 
         streamStore.createScope(SCOPE).join();
