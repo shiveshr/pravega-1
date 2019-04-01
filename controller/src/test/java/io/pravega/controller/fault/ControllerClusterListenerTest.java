@@ -277,8 +277,7 @@ public class ControllerClusterListenerTest {
         doCallRealMethod().when(txnSweeper).isReady();
 
         // Complete txn sweeper initialization by adding event writers.
-        txnTasks.initializeStreamWriters("commitStream", new EventStreamWriterMock<>(), "abortStream",
-                new EventStreamWriterMock<>());
+        txnTasks.initializeStreamWriters(new EventStreamWriterMock<>(), new EventStreamWriterMock<>());
         txnSweeper.awaitInitialization();
 
         assertTrue(Futures.await(txnSweep, 3000));
