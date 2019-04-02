@@ -1339,11 +1339,12 @@ public abstract class PersistentStreamBase implements Stream {
                                         return CompletableFuture.completedFuture(versioned);
                                     } else {
                                         Map.Entry<UUID, ActiveTxnRecord> firstEntry = list.get(0);
-                                        List<UUID> txIdList = list.stream().map(Map.Entry::getKey).collect(Collectors.toList());
+                                        ImmutableList.Builder<UUID> txIdList = ImmutableList.builder(); 
+                                        list.forEach(x -> txIdList.add(x.getKey()));
                                         List<Long> positions = list.stream().map(x -> x.getValue().getCommitOrder()).collect(Collectors.toList());
                                         int epoch = RecordHelper.getTransactionEpoch(firstEntry.getKey());
                                         CommittingTransactionsRecord record =
-                                                new CommittingTransactionsRecord(epoch, txIdList);
+                                                new CommittingTransactionsRecord(epoch, txIdList.build());
                                         return updateCommittingTxnRecord(new VersionedMetadata<>(record, versioned.getVersion()))
                                                 // now that we have included transactions from positions for commit, we
                                                 // can safely remove the position references in orderer. 
