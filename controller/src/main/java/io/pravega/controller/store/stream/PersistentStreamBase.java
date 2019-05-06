@@ -1377,7 +1377,7 @@ public abstract class PersistentStreamBase implements Stream {
                     // mark transaction as committed in metadata store.
                     .thenCompose(x -> commitTransaction(txnId)
                             .thenAccept(done -> {
-                                log.debug("transaction {} on stream {}/{} committed successfully", txnId, scope, name);
+                                log.info("transaction {} on stream {}/{} committed successfully", txnId, scope, name);
                             }));
         }
         return future
@@ -1479,7 +1479,7 @@ public abstract class PersistentStreamBase implements Stream {
                                           // if entry matches record's position then include it
                                           transactionsMap.put(txnId, txnRecord);
                                       } else {
-                                          log.debug("duplicate txn {} at position {}. removing {}", txnId, txnRecord.getCommitOrder(), order);
+                                          log.info("duplicate txn {} at position {}. removing from orderer at {}", txnId, txnRecord.getCommitOrder(), order);
                                           toPurge.add(order);
                                       }
                                       break;
@@ -1493,7 +1493,7 @@ public abstract class PersistentStreamBase implements Stream {
                                   case ABORTED:
                                   case UNKNOWN:
                                       // Aborting, aborted, unknown and committed 
-                                      log.debug("stale txn {} with status. removing {}", txnId, txnRecord.getTxnStatus(), order);
+                                      log.info("stale txn {} with status {}. removing from orderer at {}", txnId, txnRecord.getTxnStatus(), order);
                                       toPurge.add(order);
                                       break;
                               }

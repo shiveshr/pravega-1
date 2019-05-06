@@ -80,7 +80,7 @@ public class AbortRequestHandler extends SerializedRequestHandler<AbortEvent> {
                         log.error("Failed aborting transaction {} on stream {}/{}", event.getTxid(),
                                 event.getScope(), event.getStream());
                     } else {
-                        log.debug("Successfully aborted transaction {} on stream {}/{}", event.getTxid(),
+                        log.info("Successfully aborted transaction {} on stream {}/{}", event.getTxid(),
                                 event.getScope(), event.getStream());
                         if (processedEvents != null) {
                             processedEvents.offer(event);

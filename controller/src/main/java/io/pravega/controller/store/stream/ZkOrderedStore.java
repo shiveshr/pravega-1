@@ -122,7 +122,7 @@ class ZkOrderedStore {
                     if (e != null) {
                         log.error("error encountered while trying to add entity {} for stream {}/{}", entity, scope, stream, e);
                     } else {
-                        log.debug("entity {} added for stream {}/{} at position {}", entity, scope, stream, r);
+                        log.info("entity {} added for stream {}/{} at position {}", entity, scope, stream, r);
                     }
                 });
     }
@@ -152,7 +152,7 @@ class ZkOrderedStore {
                           if (e != null) {
                               log.error("error encountered while trying to remove entity positions {} for stream {}/{}", entities, scope, stream, e);
                           } else {
-                              log.debug("entities at positions {} removed for stream {}/{}", entities, scope, stream);
+                              log.info("entities at positions {} removed for stream {}/{}", entities, scope, stream);
                           }
                       });
     }
