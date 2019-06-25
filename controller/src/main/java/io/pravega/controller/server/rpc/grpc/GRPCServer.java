@@ -90,7 +90,7 @@ public class GRPCServer extends AbstractIdleService {
         long traceId = LoggerHelpers.traceEnterWithContext(log, this.objectId, "shutDown");
         try {
             log.info("Stopping gRPC server listening on port: {}", this.config.getPort());
-            this.server.shutdown();
+            this.server.shutdownNow();
             log.info("Awaiting termination of gRPC server");
             this.server.awaitTermination();
             log.info("gRPC server terminated");

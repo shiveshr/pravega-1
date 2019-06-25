@@ -95,7 +95,7 @@ public class RESTServer extends AbstractIdleService {
         long traceId = LoggerHelpers.traceEnterWithContext(log, this.objectId, "shutDown");
         try {
             log.info("Stopping REST server listening on port: {}", this.restServerConfig.getPort());
-            final GrizzlyFuture<HttpServer> shutdown = httpServer.shutdown(30, TimeUnit.SECONDS);
+            final GrizzlyFuture<HttpServer> shutdown = httpServer.shutdown(5, TimeUnit.SECONDS);
             log.info("Awaiting termination of REST server");
             shutdown.get();
             log.info("REST server terminated");
