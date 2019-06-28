@@ -11,7 +11,6 @@ package io.pravega.controller.server;
 
 import com.google.common.base.Preconditions;
 import io.pravega.common.LoggerHelpers;
-import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.metrics.ZookeeperMetrics;
 import io.pravega.controller.store.client.StoreClient;
 import io.pravega.controller.store.client.StoreClientFactory;
