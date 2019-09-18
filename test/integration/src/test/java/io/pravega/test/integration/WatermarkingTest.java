@@ -72,7 +72,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -256,7 +255,7 @@ public class WatermarkingTest {
             controller.scaleStream(streamObj, Collections.singletonList(segmentNumber), map, executorService).getFuture().join();
         }
     }
-    
+
     private CompletableFuture<Void> writeEvents(EventStreamWriter<Long> writer, AtomicBoolean stopFlag) {
         AtomicInteger count = new AtomicInteger(0);
         AtomicLong currentTime = new AtomicLong();
