@@ -225,6 +225,7 @@ public class ClientFactoryImpl implements ClientFactory, EventStreamClientFactor
     }
 
     private Segment getSegmentForRevisionedClient(String scope, String streamName) {
+        val segment = getSegmentForRevisionedClient(scope, streamName);
         // This validates if the stream exists and returns zero segments if the stream is sealed.
         StreamSegments currentSegments = Futures.getAndHandleExceptions(controller.getCurrentSegments(scope, streamName), InvalidStreamException::new);
         if ( currentSegments == null || currentSegments.getSegments().size() == 0) {
