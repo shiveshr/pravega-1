@@ -22,6 +22,7 @@ import io.pravega.client.stream.TruncatedDataException;
 import io.pravega.client.stream.impl.StreamImpl;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.ExecutorServiceHelpers;
+import io.pravega.common.concurrent.Futures;
 import io.pravega.common.tracing.RequestTracker;
 import io.pravega.controller.mocks.SegmentHelperMock;
 import io.pravega.controller.server.rpc.auth.GrpcAuthHelper;
@@ -40,6 +41,7 @@ import io.pravega.shared.segment.StreamSegmentNameUtils;
 import io.pravega.shared.watermarks.Watermark;
 import io.pravega.test.common.AssertExtensions;
 import io.pravega.test.common.TestingServerStarter;
+
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -409,6 +411,93 @@ public class WatermarkWorkflowTest {
         assertEquals(watermark.getStreamCut().size(), 2);
         assertEquals(getSegmentOffset(watermark, segment3), 100L);
         assertEquals(getSegmentOffset(watermark, segment4), 500L);
+    }    
+    
+    @Test(timeout = 30000L)
+    public void testWatermarkingWorkflowWithWriterTimeout() {
+        SynchronizerClientFactory clientFactory = spy(SynchronizerClientFactory.class);
+
+        ConcurrentHashMap<String, MockRevisionedStreamClient> revisionedStreamClientMap = new ConcurrentHashMap<>();
+
+        doAnswer(x -> {
+            String streamName = x.getArgument(0);
+            return revisionedStreamClientMap.compute(streamName, (s, rsc) -> {
+                if (rsc != null) {
+                    return rsc;
+                } else {
+                    return new MockRevisionedStreamClient();
+                }
+            });
+        }).when(clientFactory).createRevisionedStreamClient(anyString(), any(), any());
+
+        ConcurrentHashMap<Stream, PeriodicWatermarking.WatermarkClient> watermarkClientMap = new ConcurrentHashMap<>();
+
+        Function<Stream, PeriodicWatermarking.WatermarkClient> supplier = stream -> {
+            return watermarkClientMap.compute(stream, (s, wc) -> {
+                if (wc != null) {
+                    return wc;
+                } else {
+                    return new PeriodicWatermarking.WatermarkClient(stream, clientFactory);
+                }
+            });
+        };
+
+        PeriodicWatermarking periodicWatermarking = new PeriodicWatermarking(streamMetadataStore, bucketStore, supplier, executor);
+
+        String streamName = "stream";
+        String scope = "scope";
+        streamMetadataStore.createScope(scope).join();
+        streamMetadataStore.createStream(scope, streamName, StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(3))
+                                                                               .timestampAggregationTimeout(3000L).build(),
+                System.currentTimeMillis(), null, executor).join();
+
+        streamMetadataStore.setState(scope, streamName, State.ACTIVE, null, executor).join();
+
+        // 2. note writer1, writer2, writer3 marks
+        // writer 1 reports segments 0, 1. 
+        // writer 2 reports segments 1, 2, 
+        // writer 3 reports segment 0, 2
+        String writer1 = "writer1";
+        streamMetadataStore.noteWriterMark(scope, streamName, writer1, 102L,
+                ImmutableMap.of(0L, 100L, 1L, 0L, 2L, 0L), null, executor).join();
+        String writer2 = "writer2";
+        streamMetadataStore.noteWriterMark(scope, streamName, writer2, 101L,
+                ImmutableMap.of(0L, 0L, 1L, 100L, 2L, 0L), null, executor).join();
+        String writer3 = "writer3";
+        streamMetadataStore.noteWriterMark(scope, streamName, writer3, 100L,
+                ImmutableMap.of(0L, 0L, 1L, 0L, 2L, 100L), null, executor).join();
+
+        // 3. run watermarking workflow. 
+        StreamImpl stream = new StreamImpl(scope, streamName);
+        periodicWatermarking.watermark(stream).join();
+
+        // verify that a watermark has been emitted. 
+        MockRevisionedStreamClient revisionedClient = revisionedStreamClientMap.get(NameUtils.getMarkStreamForStream(streamName));
+        assertEquals(revisionedClient.watermarks.size(), 1);
+
+        // Don't report time from writer3
+        streamMetadataStore.noteWriterMark(scope, streamName, writer1, 200L,
+                ImmutableMap.of(0L, 200L, 1L, 0L, 2L, 0L), null, executor).join();
+        streamMetadataStore.noteWriterMark(scope, streamName, writer2, 201L,
+                ImmutableMap.of(0L, 0L, 1L, 200L, 2L, 0L), null, executor).join();
+
+        // no new watermark should be emitted
+        periodicWatermarking.watermark(stream).join();
+        assertEquals(revisionedClient.watermarks.size(), 1);
+
+        // call again. Still no new watermark should be emitted
+        periodicWatermarking.watermark(stream).join();
+        assertEquals(revisionedClient.watermarks.size(), 1);
+
+        Futures.delayedFuture(() -> periodicWatermarking.watermark(stream), 5000L, executor).join();
+        // watermark should be emitted. without considering writer3 
+        assertEquals(revisionedClient.watermarks.size(), 2);
+        Watermark watermark = revisionedClient.watermarks.get(1).getValue();
+        assertEquals(watermark.getLowerTimeBound(), 200L);
+        assertEquals(watermark.getStreamCut().size(), 3);
+        assertEquals(getSegmentOffset(watermark, 0L), 200L);
+        assertEquals(getSegmentOffset(watermark, 1L), 200L);
+        assertEquals(getSegmentOffset(watermark, 2L), 100L);
     }
 
     private long getSegmentOffset(Watermark watermark, long segmentId) {

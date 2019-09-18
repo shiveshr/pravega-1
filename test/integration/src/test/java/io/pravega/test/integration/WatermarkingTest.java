@@ -91,6 +91,7 @@ public class WatermarkingTest {
     private StreamSegmentStore store;
     private TableStore tableStore;
     private ScheduledExecutorService executorService;
+    private AtomicLong timer = new AtomicLong();
 
     @Before
     public void setup() throws Exception {
@@ -255,8 +256,6 @@ public class WatermarkingTest {
             controller.scaleStream(streamObj, Collections.singletonList(segmentNumber), map, executorService).getFuture().join();
         }
     }
-
-    AtomicLong timer = new AtomicLong();
     
     private CompletableFuture<Void> writeEvents(EventStreamWriter<Long> writer, AtomicBoolean stopFlag) {
         AtomicInteger count = new AtomicInteger(0);

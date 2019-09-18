@@ -22,6 +22,7 @@ import io.pravega.client.state.Revision;
 import io.pravega.client.state.RevisionedStreamClient;
 import io.pravega.client.state.SynchronizerConfig;
 import io.pravega.client.stream.Stream;
+import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.watermark.WatermarkSerializer;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
@@ -135,54 +136,68 @@ public class PeriodicWatermarking {
 
     private CompletionStage<Void> filterWritersAndComputeWatermark(String scope, String streamName, OperationContext context, 
                                                                    WatermarkClient watermarkClient, Map<String, WriterMark> writers) {
-        // 1. filter writers that are active.
-        List<Entry<String, WriterMark>> activeWriters = new ArrayList<>();
-        List<Entry<String, WriterMark>> inactiveWriters = new ArrayList<>();
-        AtomicBoolean allActiveAreParticipating = new AtomicBoolean(true);
-        writers.entrySet().forEach(x -> {
-            if (watermarkClient.isWriterActive(x.getValue().getTimestamp())) {
-                activeWriters.add(x);
-                if (!watermarkClient.isWriterParticipating(x.getValue().getTimestamp())) {
-                    allActiveAreParticipating.set(false);
+        CompletableFuture<StreamConfiguration> configFuture = streamMetadataStore.getConfiguration(
+                scope, streamName, context, executor);
+        
+        return configFuture.thenCompose(config -> {
+            // 1. filter writers that are active.
+            List<Entry<String, WriterMark>> activeWriters = new ArrayList<>();
+            List<Entry<String, WriterMark>> inactiveWriters = new ArrayList<>();
+            AtomicBoolean allActiveAreParticipating = new AtomicBoolean(true);
+            writers.entrySet().forEach(x -> {
+                if (watermarkClient.isWriterActive(x.getValue().getTimestamp())) {
+                    watermarkClient.untrackWriterActivity(x.getKey());
+                    activeWriters.add(x);
+                    if (!watermarkClient.isWriterParticipating(x.getValue().getTimestamp())) {
+                        allActiveAreParticipating.set(false);
+                    }
+                } else {
+                    // track the writer as inactive and make it a removal candidate if config.getTimestampAggregationTimeout
+                    // has elapsed.
+                    watermarkClient.trackWriterActivity(x.getKey());
+                    if (watermarkClient.isWriterInactive(x.getKey(), config.getTimestampAggregationTimeout())) {
+                        inactiveWriters.add(x);
+                    } else {
+                        allActiveAreParticipating.set(false);
+                    }
                 }
-            } else {
-                inactiveWriters.add(x);
+            });
+    
+            // Stop all inactive writers that have been shutdown.
+            CompletableFuture<Void> removeInactiveWriters =
+                    Futures.allOf(inactiveWriters.stream().map(x ->
+                            Futures.exceptionallyExpecting(
+                                    streamMetadataStore.removeWriter(scope, streamName, x.getKey(),
+                                    x.getValue(), context, executor),
+                                    e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, null))
+                                                            .collect(Collectors.toList()))
+                    .thenAccept(v -> inactiveWriters.forEach(x -> watermarkClient.untrackWriterActivity(x.getKey())));
+
+            if (activeWriters.isEmpty()) {
+                // this will prevent the periodic cycles being spent in running watermarking workflow for a silent stream. 
+                // as soon as any writer reports its mark, stream will be added to bucket and background 
+                // periodic processing will resume.
+                return removeInactiveWriters
+                        .thenCompose(v -> bucketStore.removeStreamFromBucketStore(BucketStore.ServiceType.WatermarkingService,
+                                scope, streamName, executor));
             }
+
+            CompletableFuture<Watermark> watermarkFuture;
+            if (!allActiveAreParticipating.get()) {
+                // there are active writers that have not reported their marks. We should wait 
+                // until they either report or become inactive. So we will complete this iteration without 
+                // emitting any watermark (null) and in subsequent iterations if these writers have made progress
+                // we will emit watermark or evict writers from watermark computation. 
+                watermarkFuture = CompletableFuture.completedFuture(null);
+            } else {
+                // compute new mark
+                watermarkFuture = computeWatermark(scope, streamName, context, activeWriters,
+                        watermarkClient.getPreviousWatermark());
+            }
+
+            // we will compute watermark and remove inactive writers concurrently
+            return CompletableFuture.allOf(removeInactiveWriters, watermarkFuture.thenAccept(watermarkClient::completeIteration));
         });
-
-        // Stop all inactive writers that have been shutdown.
-        CompletableFuture<List<Void>> removeInactiveWriters = 
-                Futures.allOfWithResults(inactiveWriters.stream().map(x ->
-                        Futures.exceptionallyExpecting(
-                                streamMetadataStore.removeWriter(scope, streamName, x.getKey(),
-                                x.getValue(), context, executor), 
-                                e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException, null))
-                                                        .collect(Collectors.toList()));
-
-        if (activeWriters.isEmpty()) {
-            // this will prevent the periodic cycles being spent in running watermarking workflow for a silent stream. 
-            // as soon as any writer reports its mark, stream will be added to bucket and background 
-            // periodic processing will resume.
-            return removeInactiveWriters
-                    .thenCompose(v -> bucketStore.removeStreamFromBucketStore(BucketStore.ServiceType.WatermarkingService,
-                            scope, streamName, executor));
-        }
-
-        CompletableFuture<Watermark> watermarkFuture;
-        if (!allActiveAreParticipating.get()) {
-            // there are active writers that have not reported their marks. We should wait 
-            // until they either report or become inactive. So we will complete this iteration without 
-            // emitting any watermark (null) and in subsequent iterations if these writers have made progress
-            // we will emit watermark or evict writers from watermark computation. 
-            watermarkFuture = CompletableFuture.completedFuture(null);
-        } else {
-            // compute new mark
-            watermarkFuture = computeWatermark(scope, streamName, context, activeWriters, 
-                    watermarkClient.getPreviousWatermark());
-        }
-
-        // we will compute watermark and remove inactive writers concurrently
-        return CompletableFuture.allOf(removeInactiveWriters, watermarkFuture.thenAccept(watermarkClient::completeIteration));
     }
 
     /**
@@ -368,6 +383,9 @@ public class PeriodicWatermarking {
         private AtomicInteger windowStart;
         private final int windowSize;
 
+        // non participating writers
+        private ConcurrentHashMap<String, Long> inactiveWriters;
+        
         WatermarkClient(Stream stream, ClientConfig clientConfig) {
             this(stream, SynchronizerClientFactory.withScope(stream.getScope(), clientConfig));
         }
@@ -379,6 +397,7 @@ public class PeriodicWatermarking {
                     new WatermarkSerializer(), SynchronizerConfig.builder().build());
             this.windowStart = new AtomicInteger();
             windowSize = WINDOW_SIZE;
+            this.inactiveWriters = new ConcurrentHashMap<>();
         }
 
         @Synchronized
@@ -417,6 +436,7 @@ public class PeriodicWatermarking {
          * Active window: A reference to an existing older watermark.   
          * Only active writers are considered for emitting watermarks. A watermark is emitted only if all participating 
          * writers have reported times greater than last watermark.  
+         * Inactive writer: Writer which has not reported a mark for at least {@link StreamConfiguration#timestampAggregationTimeout}.
          * Active window is progressed forward in each iteration conditionally. We try to maintain an active window of 
          * last two watermarks. 
          * Bootstrap: If there are less than 2 watermarks, active window is null. If no new watermark is emitted in current 
@@ -518,6 +538,37 @@ public class PeriodicWatermarking {
             }
             
             return time > latest.getValue().getLowerTimeBound();
+        }
+
+        /**
+         * Method to track writer. This method stores the writer id against current wall clock time. 
+         * If a writer becomes active, untrack will be called. 
+         * 
+         * @param writerId: id of writer that is being tracked. 
+         */
+        void trackWriterActivity(String writerId) {
+            inactiveWriters.putIfAbsent(writerId, System.currentTimeMillis());
+        }
+
+        /**
+         * Method to untrack writer.
+         *
+         * @param writerId: id of writer to remove from tracking. 
+         */
+        void untrackWriterActivity(String writerId) {
+            inactiveWriters.remove(writerId);
+        }
+
+        /**
+         * Method to check if a writer is inactive.
+         * If writer continues to be inactive since tracking began and aggregation timeout has elapsed then this method 
+         * will declare it inactive. 
+         * 
+         * @param writerId: id of writer to remove from tracking.
+         * @return true if inactive, false otherwise. 
+         */
+        boolean isWriterInactive(String writerId, long aggregationTimeout) {
+            return System.currentTimeMillis() - inactiveWriters.getOrDefault(writerId, Long.MAX_VALUE) >= aggregationTimeout;
         }
     }
 }
