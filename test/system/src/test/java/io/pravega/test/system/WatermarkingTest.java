@@ -193,9 +193,9 @@ public class WatermarkingTest extends AbstractSystemTest {
         assertTrue(watermark3.getLowerTimeBound() <= watermark3.getUpperTimeBound());
 
         // verify that watermarks are increasing in time.
-        assertTrue(watermark0.getLowerTimeBound() <= watermark1.getLowerTimeBound());
-        assertTrue(watermark1.getLowerTimeBound() <= watermark2.getLowerTimeBound());
-        assertTrue(watermark2.getLowerTimeBound() <= watermark3.getLowerTimeBound());
+        assertTrue(watermark0.getLowerTimeBound() < watermark1.getLowerTimeBound());
+        assertTrue(watermark1.getLowerTimeBound() < watermark2.getLowerTimeBound());
+        assertTrue(watermark2.getLowerTimeBound() < watermark3.getLowerTimeBound());
         
         // use watermark as lower and upper bounds.
         Map<Segment, Long> positionMap0 = watermark0.getStreamCut()
@@ -245,12 +245,10 @@ public class WatermarkingTest extends AbstractSystemTest {
             log.info("event read = {}, position = {}", time, event.getPosition());
             event.getPosition();
             assertTrue(time >= currentTimeWindow.getLowerTimeBound());
-            assertTrue(time <= currentTimeWindow.getUpperTimeBound());
             event = reader.readNextEvent(10000L);
             if (event.isCheckpoint()) {
                 event = reader.readNextEvent(10000L);
             }
-            assertEquals(currentTimeWindow, reader.getCurrentTimeWindow(streamObj));
         }
     }
 
@@ -263,12 +261,6 @@ public class WatermarkingTest extends AbstractSystemTest {
                 Map.Entry<Revision, Watermark> next = marks.next();
                 Watermark watermark = next.getValue();
                 log.info("watermark = {}", watermark);
-                log.info("segments = ", 
-                        watermark.getStreamCut().entrySet().stream().map(x -> {
-                            long segmentId = x.getKey().getSegmentId();
-                            return StreamSegmentNameUtils.getSegmentNumber(segmentId) + "#epoch."+ StreamSegmentNameUtils.getEpoch(segmentId) 
-                                    + "/" + x.getValue();
-                        }).collect(Collectors.toList()));
 
                 watermarks.add(watermark);
                 revision.set(next.getKey());
