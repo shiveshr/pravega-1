@@ -43,6 +43,7 @@ import io.pravega.common.concurrent.Futures;
 import io.pravega.common.hash.RandomFactory;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.shared.NameUtils;
+import io.pravega.shared.segment.StreamSegmentNameUtils;
 import io.pravega.shared.watermarks.Watermark;
 import io.pravega.test.common.AssertExtensions;
 import io.pravega.test.system.framework.Environment;
@@ -76,8 +77,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 @Slf4j
 @RunWith(SystemTestRunner.class)
@@ -242,14 +242,15 @@ public class WatermarkingTest extends AbstractSystemTest {
 
         while (event.getEvent() != null) {
             Long time = event.getEvent();
-            log.info("event read = {}", time);
-
+            log.info("event read = {}, position = {}", time, event.getPosition());
+            event.getPosition();
             assertTrue(time >= currentTimeWindow.getLowerTimeBound());
             assertTrue(time <= currentTimeWindow.getUpperTimeBound());
             event = reader.readNextEvent(10000L);
             if (event.isCheckpoint()) {
                 event = reader.readNextEvent(10000L);
             }
+            assertEquals(currentTimeWindow, reader.getCurrentTimeWindow(streamObj));
         }
     }
 
@@ -260,8 +261,16 @@ public class WatermarkingTest extends AbstractSystemTest {
             Iterator<Map.Entry<Revision, Watermark>> marks = watermarkReader.readFrom(revision.get());
             if (marks.hasNext()) {
                 Map.Entry<Revision, Watermark> next = marks.next();
-                log.info("watermark = {}", next.getValue());
-                watermarks.add(next.getValue());
+                Watermark watermark = next.getValue();
+                log.info("watermark = {}", watermark);
+                log.info("segments = ", 
+                        watermark.getStreamCut().entrySet().stream().map(x -> {
+                            long segmentId = x.getKey().getSegmentId();
+                            return StreamSegmentNameUtils.getSegmentNumber(segmentId) + "#epoch."+ StreamSegmentNameUtils.getEpoch(segmentId) 
+                                    + "/" + x.getValue();
+                        }).collect(Collectors.toList()));
+
+                watermarks.add(watermark);
                 revision.set(next.getKey());
             }
             return null;
