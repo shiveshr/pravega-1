@@ -428,6 +428,7 @@ public class EventStreamWriterImpl<Type> implements EventStreamWriter<Type>, Tra
                                              .stream()
                                              .collect(Collectors.toMap(e -> e.getKey(),
                                                                        e -> e.getValue().getLastObservedWriteOffset()));
+        log.info("revert me:: notetime = writerId = {}, timestamp = {}, position = {}", writerId, timestamp, offsets);
         WriterPosition position = new WriterPosition(offsets);
         controller.noteTimestampFromWriter(writerId, stream, timestamp, position);
         
