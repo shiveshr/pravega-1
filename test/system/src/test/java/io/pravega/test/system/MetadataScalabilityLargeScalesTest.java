@@ -26,6 +26,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.junit.Ignore;
+
+@Ignore
 
 /**
  * This test creates a stream with 10 segments and then rapidly scales it 1010 times.

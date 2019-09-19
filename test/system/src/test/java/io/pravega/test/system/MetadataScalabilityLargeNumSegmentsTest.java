@@ -27,6 +27,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import org.junit.Ignore;
+
+@Ignore
 
 /**
  * This test creates a stream with 10k segments and then rapidly scales it 10 times.

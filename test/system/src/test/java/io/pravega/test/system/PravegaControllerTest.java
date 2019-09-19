@@ -28,6 +28,9 @@ import static io.pravega.test.system.framework.Utils.REST_PORT;
 import static io.pravega.test.system.framework.services.kubernetes.AbstractService.CONTROLLER_GRPC_PORT;
 import static io.pravega.test.system.framework.services.kubernetes.AbstractService.CONTROLLER_REST_PORT;
 import static org.junit.Assert.assertTrue;
+import org.junit.Ignore;
+
+@Ignore
 
 @Slf4j
 @RunWith(SystemTestRunner.class)

@@ -47,6 +47,9 @@ import org.junit.runner.RunWith;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
+import org.junit.Ignore;
+
+@Ignore
 
 @Slf4j
 @RunWith(SystemTestRunner.class)

@@ -25,7 +25,9 @@ import org.junit.runner.RunWith;
 import java.net.URI;
 import static org.apache.curator.framework.imps.CuratorFrameworkState.STARTED;
 import static org.junit.Assert.assertEquals;
+import org.junit.Ignore;
 
+@Ignore
 @Slf4j
 @RunWith(SystemTestRunner.class)
 public class ZookeeperTest {

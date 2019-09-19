@@ -22,6 +22,9 @@ import org.junit.runner.RunWith;
 import java.net.URI;
 import java.util.List;
 import static org.junit.Assert.assertEquals;
+import org.junit.Ignore;
+
+@Ignore
 
 @Slf4j
 @RunWith(SystemTestRunner.class)

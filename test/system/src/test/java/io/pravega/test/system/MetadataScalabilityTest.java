@@ -47,6 +47,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.junit.Assert.assertTrue;
+import org.junit.Ignore;
+
+@Ignore
 
 /**
  * Base class for scalability tests. This class takes a stream name and number of segments and scales to perform and then
