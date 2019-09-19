@@ -49,7 +49,6 @@ import java.util.stream.Collectors;
 import static org.junit.Assert.assertTrue;
 import org.junit.Ignore;
 
-@Ignore
 
 /**
  * Base class for scalability tests. This class takes a stream name and number of segments and scales to perform and then
@@ -57,6 +56,7 @@ import org.junit.Ignore;
  * Then we perform truncation arbitrary number of times but the moment any truncation stream cut contains a segment from latest epoch,
  * the test concludes. Post which we seal and delete the stream.
  */
+@Ignore
 @Slf4j
 @RunWith(SystemTestRunner.class)
 public abstract class MetadataScalabilityTest extends AbstractScaleTests {

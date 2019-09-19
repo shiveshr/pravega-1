@@ -46,11 +46,11 @@ import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
 import org.junit.Ignore;
 
-@Ignore
 
 /**
  * Test cases for deploying multiple segment stores.
  */
+@Ignore
 @Slf4j
 @RunWith(SystemTestRunner.class)
 public class MultiSegmentStoreTest extends AbstractSystemTest {

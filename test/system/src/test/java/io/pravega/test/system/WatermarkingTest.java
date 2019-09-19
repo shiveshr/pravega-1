@@ -236,9 +236,12 @@ public class WatermarkingTest extends AbstractSystemTest {
         assertNotNull(currentTimeWindow);
         assertNotNull(currentTimeWindow.getLowerTimeBound());
         assertNotNull(currentTimeWindow.getUpperTimeBound());
-        
+        log.info("current time window = {}", currentTimeWindow);
+
         while (event.getEvent() != null) {
             Long time = event.getEvent();
+            log.info("event read = {}", time);
+
             assertTrue(time >= currentTimeWindow.getLowerTimeBound());
             assertTrue(time <= currentTimeWindow.getUpperTimeBound());
             event = reader.readNextEvent(10000L);

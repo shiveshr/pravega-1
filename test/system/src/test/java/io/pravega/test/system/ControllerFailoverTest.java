@@ -45,11 +45,10 @@ import org.junit.rules.Timeout;
 import org.junit.runner.RunWith;
 import org.junit.Ignore;
 
-@Ignore
-
 /**
  * Controller fail over system test.
  */
+@Ignore
 @Slf4j
 @RunWith(SystemTestRunner.class)
 public class ControllerFailoverTest extends AbstractSystemTest {
