@@ -13,6 +13,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import io.pravega.client.stream.Position;
 import io.pravega.common.Exceptions;
+import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.RetriesExhaustedException;
 import io.pravega.controller.eventProcessor.RequestHandler;
 import io.pravega.controller.retryable.RetryableException;
@@ -23,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ScheduledExecutorService;
@@ -101,7 +103,7 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
             running.add(pc);
 
             // In case of a retryable exception, retry few times before putting the event back into event stream.
-            withRetries(() -> requestHandler.process(request), executor)
+            withRetries(() -> requestHandler.process(request, stop::get), executor)
                     .whenCompleteAsync((r, e) -> {
                         CompletableFuture<Void> future;
                         if (e != null) {
@@ -112,8 +114,10 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
                             future = CompletableFuture.completedFuture(null);
                         }
 
-                        future.thenAcceptAsync(x -> {
-                            checkpoint(pc);
+                        future.whenCompleteAsync((res, ex) -> {
+                            if (!(Exceptions.unwrap(ex) instanceof CancellationException)) {
+                                checkpoint(pc);
+                            }
                             semaphore.release();
                         }, executor);
                     }, executor);
@@ -147,8 +151,8 @@ public class ConcurrentEventProcessor<R extends ControllerEvent, H extends Reque
 
             future = indefiniteRetries(() -> writeBack(request, writer), executor);
         } else {
-            log.error("ConcurrentEventProcessor Processing failed, exiting {}", e);
-            future = CompletableFuture.completedFuture(null);
+            log.warn("ConcurrentEventProcessor Processing failed, exiting {}", e);
+            future = Futures.failedFuture(e);
         }
 
         return future;

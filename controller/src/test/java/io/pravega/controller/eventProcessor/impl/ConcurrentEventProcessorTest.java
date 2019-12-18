@@ -27,6 +27,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.junit.Assert.assertTrue;
 
@@ -73,14 +74,14 @@ public class ConcurrentEventProcessorTest {
         private final Exception exception;
 
         @Override
-        public CompletableFuture<Void> process(TestEvent testEvent) {
+        public CompletableFuture<Void> process(TestEvent testEvent, Supplier<Boolean> isCancelled) {
             return Futures.failedFuture(exception);
         }
     }
 
     private class TestRequestHandler implements RequestHandler<TestEvent> {
         @Override
-        public CompletableFuture<Void> process(TestEvent testEvent) {
+        public CompletableFuture<Void> process(TestEvent testEvent, Supplier<Boolean> isCancelled) {
             if (runningcount.getAndIncrement() > 2) {
                 result.completeExceptionally(new RuntimeException("max concurrent not honoured"));
             }

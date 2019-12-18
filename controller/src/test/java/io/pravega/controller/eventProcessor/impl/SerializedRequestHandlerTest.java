@@ -61,11 +61,11 @@ public class SerializedRequestHandlerTest extends ThreadPooledTestSuite {
         assertNull(stream1Queue);
         // post 3 work for stream1
         TestEvent s1e1 = new TestEvent("scope", "stream1", 1);
-        CompletableFuture<Void> s1p1 = requestHandler.process(s1e1);
+        CompletableFuture<Void> s1p1 = requestHandler.process(s1e1, () -> false);
         TestEvent s1e2 = new TestEvent("scope", "stream1", 2);
-        CompletableFuture<Void> s1p2 = requestHandler.process(s1e2);
+        CompletableFuture<Void> s1p2 = requestHandler.process(s1e2, () -> false);
         TestEvent s1e3 = new TestEvent("scope", "stream1", 3);
-        CompletableFuture<Void> s1p3 = requestHandler.process(s1e3);
+        CompletableFuture<Void> s1p3 = requestHandler.process(s1e3, () -> false);
 
         stream1Queue = requestHandler.getEventQueueForKey(getKeyForStream("scope", "stream1"));
         assertTrue(stream1Queue.size() >= 2);
@@ -85,11 +85,11 @@ public class SerializedRequestHandlerTest extends ThreadPooledTestSuite {
 
         // post 3 work for stream2
         TestEvent s2e1 = new TestEvent("scope", "stream2", 1);
-        CompletableFuture<Void> s2p1 = requestHandler.process(s2e1);
+        CompletableFuture<Void> s2p1 = requestHandler.process(s2e1, () -> false);
         TestEvent s2e2 = new TestEvent("scope", "stream2", 2);
-        CompletableFuture<Void> s2p2 = requestHandler.process(s2e2);
+        CompletableFuture<Void> s2p2 = requestHandler.process(s2e2, () -> false);
         TestEvent s2e3 = new TestEvent("scope", "stream2", 3);
-        CompletableFuture<Void> s2p3 = requestHandler.process(s2e3);
+        CompletableFuture<Void> s2p3 = requestHandler.process(s2e3, () -> false);
 
         List<Pair<TestEvent, CompletableFuture<Void>>> stream2Queue = requestHandler.getEventQueueForKey(getKeyForStream("scope", "stream1"));
         assertTrue(stream2Queue.size() >= 2);
@@ -143,7 +143,7 @@ public class SerializedRequestHandlerTest extends ThreadPooledTestSuite {
         // now that we have drained all the work from the processor.
         // let's post new work for stream 1
         TestEvent s1e4 = new TestEvent("scope", "stream1", 4);
-        CompletableFuture<Void> s1p4 = requestHandler.process(s1e4);
+        CompletableFuture<Void> s1p4 = requestHandler.process(s1e4, () -> false);
 
         stream1Queue = requestHandler.getEventQueueForKey(getKeyForStream("scope", "stream1"));
         assertNotNull(stream1Queue);
@@ -195,11 +195,11 @@ public class SerializedRequestHandlerTest extends ThreadPooledTestSuite {
         assertNull(stream1Queue);
         // post 3 work for stream1
         TestEvent s1e1 = new TestEvent("scope", "stream1", 1);
-        CompletableFuture<Void> s1p1 = requestHandler.process(s1e1);
+        CompletableFuture<Void> s1p1 = requestHandler.process(s1e1, () -> false);
         TestEvent s1e2 = new TestEvent("scope", "stream1", 2);
-        CompletableFuture<Void> s1p2 = requestHandler.process(s1e2);
+        CompletableFuture<Void> s1p2 = requestHandler.process(s1e2, () -> false);
         TestEvent s1e3 = new TestEvent("scope", "stream1", 3);
-        CompletableFuture<Void> s1p3 = requestHandler.process(s1e3);
+        CompletableFuture<Void> s1p3 = requestHandler.process(s1e3, () -> false);
 
         // post events for some more arbitrary streams in background
         AtomicBoolean stop = new AtomicBoolean(false);
@@ -248,7 +248,7 @@ public class SerializedRequestHandlerTest extends ThreadPooledTestSuite {
         signalQueue.add(new ImmutablePair<>(new CompletableFuture<>(), CompletableFuture.completedFuture(null)));
         // we should have first event processing throw a synchronous exception
         AssertExtensions.assertFutureThrows("Processing should have failed in procesEvent method with synchronous exception", 
-                throwingRequestHandler.process(event), 
+                throwingRequestHandler.process(event, () -> false), 
                 e -> Exceptions.unwrap(e) instanceof RuntimeException && Exceptions.unwrap(e).getMessage().equals("1"));
 
         // verify that the processing is complete and the event is removed from the queue for the stream. 
@@ -261,8 +261,8 @@ public class SerializedRequestHandlerTest extends ThreadPooledTestSuite {
         CompletableFuture<Void> signal3 = new CompletableFuture<>();
         signalQueue.add(new ImmutablePair<>(wait2, signal2));
         signalQueue.add(new ImmutablePair<>(wait3, signal3));
-        CompletableFuture<Void> future2 = throwingRequestHandler.process(event2);
-        CompletableFuture<Void> future3 = throwingRequestHandler.process(event3);
+        CompletableFuture<Void> future2 = throwingRequestHandler.process(event2, () -> false);
+        CompletableFuture<Void> future3 = throwingRequestHandler.process(event3, () -> false);
         
         // processing for 2nd event is called. 
         wait2.join();
@@ -290,7 +290,7 @@ public class SerializedRequestHandlerTest extends ThreadPooledTestSuite {
             while (!stop.get()) {
                 TestEvent event = new TestEvent("scope", streamName, 0);
                 event.complete();
-                Futures.await(requestHandler.process(event));
+                Futures.await(requestHandler.process(event, () -> false));
             }
         });
     }
