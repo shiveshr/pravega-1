@@ -790,7 +790,7 @@ public class StreamTransactionMetadataTasksTest {
 
         ReaderGroupManager readerGroupManager = Mockito.mock(ReaderGroupManager.class);
 
-        EventProcessorSystemImpl system = new EventProcessorSystemImpl("system", "host", SCOPE, clientFactory, readerGroupManager);
+        EventProcessorSystemImpl system = new EventProcessorSystemImpl("system", "host", SCOPE, clientFactory, readerGroupManager, executorService);
 
         EventProcessorGroupConfig eventProcessorConfig = EventProcessorGroupConfigImpl.builder()
                 .eventProcessorCount(1)

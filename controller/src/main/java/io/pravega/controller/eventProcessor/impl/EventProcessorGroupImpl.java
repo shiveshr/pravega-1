@@ -11,6 +11,8 @@ package io.pravega.controller.eventProcessor.impl;
 
 import io.pravega.client.admin.ReaderGroupManager;
 import io.pravega.client.stream.Stream;
+import io.pravega.client.stream.notifications.Observable;
+import io.pravega.client.stream.notifications.ReadersImbalanceNotification;
 import io.pravega.common.LoggerHelpers;
 import io.pravega.controller.store.checkpoint.CheckpointStore;
 import io.pravega.controller.store.checkpoint.CheckpointStoreException;
@@ -38,6 +40,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
 
 @Slf4j
 public final class EventProcessorGroupImpl<T extends ControllerEvent> extends AbstractIdleService
@@ -59,6 +62,8 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
 
     private final CheckpointStore checkpointStore;
 
+    private final ScheduledExecutorService executorService;
+
     /**
      * We use this lock for mutual exclusion between shutDown and changeEventProcessorCount methods.
      */
@@ -66,10 +71,11 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
 
     EventProcessorGroupImpl(final EventProcessorSystemImpl actorSystem,
                             final EventProcessorConfig<T> eventProcessorConfig,
-                            final CheckpointStore checkpointStore) {
+                            final CheckpointStore checkpointStore, ScheduledExecutorService executorService) {
         this.objectId = String.format("EventProcessorGroup[%s]", eventProcessorConfig.getConfig().getReaderGroupName());
         this.actorSystem = actorSystem;
         this.eventProcessorConfig = eventProcessorConfig;
+        this.executorService = executorService;
         this.eventProcessorMap = new ConcurrentHashMap<>();
         this.writer = actorSystem
                 .clientFactory
@@ -146,6 +152,7 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
             eventProcessorMap.entrySet().forEach(entry -> entry.getValue().startAsync());
             log.info("Waiting for all all event processors in {} to start", this.toString());
             eventProcessorMap.entrySet().forEach(entry -> entry.getValue().awaitStartupComplete());
+            registerForNotification();
         } finally {
             LoggerHelpers.traceLeave(log, this.objectId, "startUp", traceId);
         }
@@ -263,6 +270,50 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
         return checkpointStore.getProcesses();
     }
 
+    private void registerForNotification() {
+        Observable<ReadersImbalanceNotification> observable = readerGroup
+                .getReaderImbalanceNotifier(executorService);
+        observable.registerListener(notification -> {
+            int readerCount = notification.getReaderCount();
+            int segmentCount = notification.getSegmentCount();
+            notification.getImbalancedReaders().forEach((readerId, value) -> {
+                int assigned = value;
+                // do we own the reader
+                if (eventProcessorMap.containsKey(readerId) && checkRebalance(readerId, assigned, readerCount, segmentCount)) {
+                    // check if we want to rebalance.
+                    replaceCell(readerId);
+                }
+            });
+        });
+    }
+
+    private boolean checkRebalance(String readerId, int assigned, int readerCount, int segmentCount) {
+        // TODO: add additional checks if needed, we do not want to rebalance very aggressively. 
+        // if (assigned > (segmentCount / readerCount) + 1) 
+        return true;
+    }
+
+    private void replaceCell(String readerId) {
+        // add a replacement reader and then shutdown existing reader
+        try {
+            createEventProcessors(1);
+        } catch (CheckpointStoreException e) {
+            log.warn("Unable to create a new event processor cell", e.getMessage());
+            return;
+        }
+
+        EventProcessorCell<T> cell = eventProcessorMap.get(readerId);
+        log.info("Stopping event processor cell: {}", cell);
+        cell.stopAsync();
+        log.info("Awaiting termination of event processor cell: {}", cell);
+        try {
+            cell.awaitTerminated();
+            eventProcessorMap.remove(readerId);
+        } catch (Exception e) {
+            log.warn("Failed terminating event processor cell {}.", cell, e);
+        }
+    }
+    
     @Override
     public void close() throws Exception {
         this.stopAsync();

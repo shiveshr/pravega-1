@@ -231,7 +231,7 @@ public class EventProcessorTest {
 
         EventProcessorSystem system = new EventProcessorSystemImpl("Controller", host, scope,
                 new ClientFactoryImpl(scope, controller, connectionFactory),
-                new ReaderGroupManagerImpl(scope, controller, clientFactory, connectionFactory));
+                new ReaderGroupManagerImpl(scope, controller, clientFactory, connectionFactory), executorService);
 
         CheckpointConfig.CheckpointPeriod period =
                 CheckpointConfig.CheckpointPeriod.builder()
@@ -299,7 +299,7 @@ public class EventProcessorTest {
 
         EventProcessorSystem system = new EventProcessorSystemImpl("Controller", host, scope,
                 new ClientFactoryImpl(scope, controller, connectionFactory),
-                new ReaderGroupManagerImpl(scope, controller, clientFactory, connectionFactory));
+                new ReaderGroupManagerImpl(scope, controller, clientFactory, connectionFactory), executorService);
         
         CheckpointConfig checkpointConfig =
                 CheckpointConfig.builder()
@@ -356,7 +356,7 @@ public class EventProcessorTest {
 
         system = new EventProcessorSystemImpl("Controller2", host, scope,
                 new ClientFactoryImpl(scope, controller, connectionFactory2),
-                new ReaderGroupManagerImpl(scope, controller, clientFactory2, connectionFactory2));
+                new ReaderGroupManagerImpl(scope, controller, clientFactory2, connectionFactory2), executorService);
 
         EventProcessorConfig<TestEvent> eventProcessorConfig2 = EventProcessorConfig.<TestEvent>builder()
                 .supplier(() -> new EventProcessor<TestEvent>() {

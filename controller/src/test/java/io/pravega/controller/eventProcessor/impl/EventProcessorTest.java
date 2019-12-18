@@ -529,7 +529,7 @@ public class EventProcessorTest {
         ReaderGroupManager readerGroupManager = Mockito.mock(ReaderGroupManager.class);
         Mockito.when(readerGroupManager.getReaderGroup(anyString())).then(invocation -> readerGroup);
 
-        return new EventProcessorSystemImpl(name, processId, scope, clientFactory, readerGroupManager);
+        return new EventProcessorSystemImpl(name, processId, scope, clientFactory, readerGroupManager, executorService);
     }
 
     private SequenceAnswer<EventStreamReader<TestEvent>> createEventReaders(int count, int[] input) throws ReinitializationRequiredException {

@@ -20,24 +20,28 @@ import io.pravega.controller.store.checkpoint.CheckpointStoreException;
 import io.pravega.shared.controller.event.ControllerEvent;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.concurrent.ScheduledExecutorService;
+
 @Slf4j
 public class EventProcessorSystemImpl implements EventProcessorSystem {
 
     final EventStreamClientFactory clientFactory;
     final ReaderGroupManager readerGroupManager;
-
+    final ScheduledExecutorService executorService;
+    
     private final String name;
     private final String process;
 
     private final String scope;
 
-    public EventProcessorSystemImpl(String name, String process, String scope, EventStreamClientFactory clientFactory, ReaderGroupManager readerGroupManager) {
+    public EventProcessorSystemImpl(String name, String process, String scope, EventStreamClientFactory clientFactory, ReaderGroupManager readerGroupManager, ScheduledExecutorService executorService) {
         this.name = name;
         this.process = process;
 
         this.scope = scope;
         this.clientFactory = clientFactory;
         this.readerGroupManager = readerGroupManager;
+        this.executorService = executorService;
     }
 
     @Override
@@ -65,7 +69,7 @@ public class EventProcessorSystemImpl implements EventProcessorSystem {
         EventProcessorGroupImpl<T> actorGroup;
 
         // Create event processor group.
-        actorGroup = new EventProcessorGroupImpl<>(this, eventProcessorConfig, checkpointStore);
+        actorGroup = new EventProcessorGroupImpl<>(this, eventProcessorConfig, checkpointStore, executorService);
 
         // Initialize it.
         actorGroup.initialize();
