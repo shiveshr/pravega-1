@@ -39,6 +39,7 @@ import io.pravega.client.stream.notifications.EndOfDataNotification;
 import io.pravega.client.stream.notifications.NotificationSystem;
 import io.pravega.client.stream.notifications.NotifierFactory;
 import io.pravega.client.stream.notifications.Observable;
+import io.pravega.client.stream.notifications.ReadersImbalanceNotification;
 import io.pravega.client.stream.notifications.SegmentNotification;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.shared.NameUtils;
@@ -343,6 +344,18 @@ public class ReaderGroupImpl implements ReaderGroup, ReaderGroupMetrics {
     public Observable<EndOfDataNotification> getEndOfDataNotifier(ScheduledExecutorService executor) {
         checkNotNull(executor, "executor");
         return this.notifierFactory.getEndOfDataNotifier(executor);
+    }
+
+    @Override
+    public Observable<ReadersImbalanceNotification> getReaderImbalanceNotifier(ScheduledExecutorService executor) {
+        checkNotNull(executor, "executor");
+        
+        return this.notifierFactory.getReaderImbalanceNotifier(this::readerSegmentCount, executor);
+    }
+
+    private int readerSegmentCount(String readerId) {
+        Map<SegmentWithRange, Long> assignedSegments = synchronizer.getState().getAssignedSegments(readerId);
+        return assignedSegments != null ? assignedSegments.size() : 0;
     }
 
     @Override

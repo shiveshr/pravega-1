@@ -12,9 +12,12 @@ package io.pravega.client.stream.notifications;
 import io.pravega.client.state.StateSynchronizer;
 import io.pravega.client.stream.impl.ReaderGroupState;
 import io.pravega.client.stream.notifications.notifier.EndOfDataNotifier;
+import io.pravega.client.stream.notifications.notifier.ReadersImbalanceNotifier;
 import io.pravega.client.stream.notifications.notifier.SegmentNotifier;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Function;
 import javax.annotation.concurrent.GuardedBy;
+
 import lombok.Synchronized;
 
 /**
@@ -31,6 +34,8 @@ public class NotifierFactory {
     private SegmentNotifier segmentNotifier;
     @GuardedBy("$lock")
     private EndOfDataNotifier endOfDataNotifier;
+    @GuardedBy("$lock")
+    private ReadersImbalanceNotifier readersImbalanceNotifier;
 
     public NotifierFactory(final NotificationSystem notificationSystem,
                            final StateSynchronizer<ReaderGroupState> synchronizer) {
@@ -52,6 +57,16 @@ public class NotifierFactory {
             endOfDataNotifier = new EndOfDataNotifier(this.system, this.synchronizer, executor);
         }
         return endOfDataNotifier;
+    }
+    
+    @Synchronized
+    public ReadersImbalanceNotifier getReaderImbalanceNotifier(final Function<String, Integer> readerSegmentCountFunction,
+                                                               final ScheduledExecutorService executor) {
+        if (readersImbalanceNotifier == null) {
+            readersImbalanceNotifier = new ReadersImbalanceNotifier(this.system, this.synchronizer, 
+                    readerSegmentCountFunction, executor);
+        }
+        return readersImbalanceNotifier;
     }
 
     // multiple such notifiers can be added.

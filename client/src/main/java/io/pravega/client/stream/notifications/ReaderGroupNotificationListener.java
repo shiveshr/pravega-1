@@ -52,4 +52,6 @@ public interface ReaderGroupNotificationListener {
      * @return Observable of type EndOfDataNotification.
      */
     Observable<EndOfDataNotification> getEndOfDataNotifier(final ScheduledExecutorService executor);
+
+    Observable<ReadersImbalanceNotification> getReaderImbalanceNotifier(final ScheduledExecutorService executor);
 }
