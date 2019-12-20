@@ -11,6 +11,7 @@ package io.pravega.client.stream.impl;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 import io.pravega.client.SynchronizerClientFactory;
 import io.pravega.client.netty.impl.ConnectionFactory;
 import io.pravega.client.security.auth.DelegationTokenProvider;
@@ -39,7 +40,7 @@ import io.pravega.client.stream.notifications.EndOfDataNotification;
 import io.pravega.client.stream.notifications.NotificationSystem;
 import io.pravega.client.stream.notifications.NotifierFactory;
 import io.pravega.client.stream.notifications.Observable;
-import io.pravega.client.stream.notifications.ReadersImbalanceNotification;
+import io.pravega.client.stream.notifications.ReadersSegmentDistributionNotification;
 import io.pravega.client.stream.notifications.SegmentNotification;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.shared.NameUtils;
@@ -107,7 +108,7 @@ public class ReaderGroupImpl implements ReaderGroup, ReaderGroupMetrics {
         synchronizer.fetchUpdates();
         return synchronizer.getState().getOnlineReaders();
     }
-
+    
     @Override
     public Set<String> getStreamNames() {
         synchronizer.fetchUpdates();
@@ -347,15 +348,21 @@ public class ReaderGroupImpl implements ReaderGroup, ReaderGroupMetrics {
     }
 
     @Override
-    public Observable<ReadersImbalanceNotification> getReaderImbalanceNotifier(ScheduledExecutorService executor) {
+    public Observable<ReadersSegmentDistributionNotification> getReaderSegmentDistributionNotifier(
+            ScheduledExecutorService executor) {
         checkNotNull(executor, "executor");
-        
-        return this.notifierFactory.getReaderImbalanceNotifier(this::readerSegmentCount, executor);
+        return this.notifierFactory.getReaderImbalanceNotifier(this::getReaderSegmentDistribution, executor);
     }
 
-    private int readerSegmentCount(String readerId) {
-        Map<SegmentWithRange, Long> assignedSegments = synchronizer.getState().getAssignedSegments(readerId);
-        return assignedSegments != null ? assignedSegments.size() : 0;
+    private ImmutableMap<String, Integer> getReaderSegmentDistribution() {
+        synchronizer.fetchUpdates();
+        ImmutableMap.Builder<String, Integer> mapBuilder = ImmutableMap.<String, Integer>builder();
+        synchronizer.getState().getOnlineReaders().forEach(reader -> {
+            Map<SegmentWithRange, Long> assigned = synchronizer.getState().getAssignedSegments(reader);
+            int size = assigned != null ? assigned.size() : 0;
+            mapBuilder.put(reader, size);
+        });
+        return mapBuilder.build();
     }
 
     @Override

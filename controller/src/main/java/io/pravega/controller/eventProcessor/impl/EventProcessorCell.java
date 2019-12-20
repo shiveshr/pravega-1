@@ -70,6 +70,9 @@ class EventProcessorCell<T extends ControllerEvent> {
      * This prevents sub-classes of EventProcessor from controlling EventProcessor's lifecycle.
      */
     private final Service delegate;
+    
+    @Getter
+    private final long creationTime;
 
     private class Delegate extends AbstractExecutionThreadService {
 
@@ -255,6 +258,7 @@ class EventProcessorCell<T extends ControllerEvent> {
         this.actor = createEventProcessor(eventProcessorConfig);
         this.delegate = new Delegate(eventProcessorConfig);
         this.lastCheckpoint = new AtomicReference<>();
+        this.creationTime = System.currentTimeMillis();
     }
 
     final void startAsync() {

@@ -15,15 +15,17 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 /**
- * Class to represent a reader imbalance notification. 
+ * Class to represent a reader segment distribution notification. 
  * This contains a map of readers to assigned segment count.
  * It also contains overall segment count and reader count for readers and segments managed by the readergroup.
  */
 @Data
 @EqualsAndHashCode(callSuper = false)
 @Builder
-public class ReadersImbalanceNotification extends Notification {
-    private final ImmutableMap<String, Integer> imbalancedReaders;
+public class ReadersSegmentDistributionNotification extends Notification {
+    public static final String PROPERTY_DISTRIBUTION_POLL_INTERVAL_SECONDS = "pravega.client.readerSegmentDistribution.poll.interval.seconds";
+
+    private final ImmutableMap<String, Integer> readerSegmentDistribution;
     private final int segmentCount;
     private final int readerCount;
 }

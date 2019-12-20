@@ -53,5 +53,10 @@ public interface ReaderGroupNotificationListener {
      */
     Observable<EndOfDataNotification> getEndOfDataNotifier(final ScheduledExecutorService executor);
 
-    Observable<ReadersImbalanceNotification> getReaderImbalanceNotifier(final ScheduledExecutorService executor);
+    /**
+     * TODO: shivesh
+     * @param executor
+     * @return
+     */
+    Observable<ReadersSegmentDistributionNotification> getReaderSegmentDistributionNotifier(final ScheduledExecutorService executor);
 }

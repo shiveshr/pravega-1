@@ -12,7 +12,7 @@ package io.pravega.controller.eventProcessor.impl;
 import io.pravega.client.admin.ReaderGroupManager;
 import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.notifications.Observable;
-import io.pravega.client.stream.notifications.ReadersImbalanceNotification;
+import io.pravega.client.stream.notifications.ReadersSegmentDistributionNotification;
 import io.pravega.common.LoggerHelpers;
 import io.pravega.controller.store.checkpoint.CheckpointStore;
 import io.pravega.controller.store.checkpoint.CheckpointStoreException;
@@ -63,7 +63,7 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
     private final CheckpointStore checkpointStore;
 
     private final ScheduledExecutorService executorService;
-
+    
     /**
      * We use this lock for mutual exclusion between shutDown and changeEventProcessorCount methods.
      */
@@ -86,7 +86,6 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
     }
 
     void initialize() throws CheckpointStoreException {
-
         try {
             checkpointStore.addReaderGroup(actorSystem.getProcess(), eventProcessorConfig.getConfig().getReaderGroupName());
         } catch (CheckpointStoreException e) {
@@ -102,7 +101,9 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
                 actorSystem.readerGroupManager,
                 eventProcessorConfig.getConfig().getReaderGroupName(),
                 ReaderGroupConfig.builder().disableAutomaticCheckpoints()
+                                 .disableAutomaticCheckpoints()
                                  .stream(Stream.of(actorSystem.getScope(), eventProcessorConfig.getConfig().getStreamName())).build());
+        registerForNotification();
 
         createEventProcessors(eventProcessorConfig.getConfig().getEventProcessorCount() - eventProcessorMap.values().size());
     }
@@ -152,7 +153,6 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
             eventProcessorMap.entrySet().forEach(entry -> entry.getValue().startAsync());
             log.info("Waiting for all all event processors in {} to start", this.toString());
             eventProcessorMap.entrySet().forEach(entry -> entry.getValue().awaitStartupComplete());
-            registerForNotification();
         } finally {
             LoggerHelpers.traceLeave(log, this.objectId, "startUp", traceId);
         }
@@ -271,26 +271,35 @@ public final class EventProcessorGroupImpl<T extends ControllerEvent> extends Ab
     }
 
     private void registerForNotification() {
-        Observable<ReadersImbalanceNotification> observable = readerGroup
-                .getReaderImbalanceNotifier(executorService);
+        Observable<ReadersSegmentDistributionNotification> observable = 
+                readerGroup.getReaderSegmentDistributionNotifier(executorService);
         observable.registerListener(notification -> {
-            int readerCount = notification.getReaderCount();
-            int segmentCount = notification.getSegmentCount();
-            notification.getImbalancedReaders().forEach((readerId, value) -> {
-                int assigned = value;
-                // do we own the reader
-                if (eventProcessorMap.containsKey(readerId) && checkRebalance(readerId, assigned, readerCount, segmentCount)) {
-                    // check if we want to rebalance.
-                    replaceCell(readerId);
-                }
-            });
+            checkForRebalance(notification);
         });
     }
 
-    private boolean checkRebalance(String readerId, int assigned, int readerCount, int segmentCount) {
-        // TODO: add additional checks if needed, we do not want to rebalance very aggressively. 
-        // if (assigned > (segmentCount / readerCount) + 1) 
-        return true;
+    private void checkForRebalance(ReadersSegmentDistributionNotification notification) {
+        int readerCount = notification.getReaderCount();
+        int segmentCount = notification.getSegmentCount();
+        // If there are idle readers (no segment assignments, then identify and replace overloaded readers). 
+        boolean idleReaders = notification.getReaderSegmentDistribution().entrySet().stream().anyMatch(x -> x.getValue() == 0);
+        if (idleReaders) {
+            notification.getReaderSegmentDistribution().forEach((readerId, value) -> {
+                int assigned = value;
+                // check if we own the reader and the reader is eligible for rebalance
+                if (eventProcessorMap.containsKey(readerId) && isRebalanceCandidate(readerId, assigned, readerCount, segmentCount)) {
+                    replaceCell(readerId);
+                }
+            });
+        }
+    }
+
+    private boolean isRebalanceCandidate(String readerId, int assigned, int readerCount, int segmentCount) {
+        EventProcessorCell<T> cell = eventProcessorMap.get(readerId);
+        long delta = System.currentTimeMillis() - cell.getCreationTime();
+        
+        return assigned > (segmentCount / readerCount) + 1 
+                && delta > eventProcessorConfig.getMinRebalanceIntervalMillis();
     }
 
     private void replaceCell(String readerId) {
