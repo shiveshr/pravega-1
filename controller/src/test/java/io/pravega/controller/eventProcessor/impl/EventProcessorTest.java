@@ -39,12 +39,16 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ArrayUtils;
+import org.junit.After;
 import org.junit.Assert;
+import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
@@ -207,6 +211,18 @@ public class EventProcessorTest {
         }
     }
 
+    private ScheduledExecutorService executor;
+    
+    @Before
+    public void setUp() {
+        executor = Executors.newSingleThreadScheduledExecutor();    
+    }
+    
+    @After
+    public void tearDown() {
+        executor.shutdownNow();
+    }
+    
     @Test(timeout = 10000)
     @SuppressWarnings("unchecked")
     public void testEventProcessorCell() throws CheckpointStoreException, ReinitializationRequiredException {
@@ -362,7 +378,7 @@ public class EventProcessorTest {
 
         // Create EventProcessorGroup.
         EventProcessorGroupImpl<TestEvent> group = (EventProcessorGroupImpl<TestEvent>)
-                system.createEventProcessorGroup(eventProcessorConfig, checkpointStore);
+                system.createEventProcessorGroup(eventProcessorConfig, checkpointStore, executor);
 
         // Await until it is ready.
         group.awaitRunning();
@@ -408,7 +424,7 @@ public class EventProcessorTest {
 
         // Create EventProcessorGroup.
         EventProcessorGroupImpl<TestEvent> group = (EventProcessorGroupImpl<TestEvent>)
-                system.createEventProcessorGroup(eventProcessorConfig, checkpointStore);
+                system.createEventProcessorGroup(eventProcessorConfig, checkpointStore, executor);
 
         // test idempotent initialize
         group.initialize();
@@ -443,7 +459,7 @@ public class EventProcessorTest {
 
         // Create EventProcessorGroup.
         EventProcessorGroupImpl<TestEvent> group = (EventProcessorGroupImpl<TestEvent>) system
-                .createEventProcessorGroup(eventProcessorConfig, checkpointStore);
+                .createEventProcessorGroup(eventProcessorConfig, checkpointStore, executor);
 
         // awaitRunning should succeed.
         group.awaitRunning();
@@ -475,7 +491,7 @@ public class EventProcessorTest {
 
         // Create EventProcessorGroup.
         EventProcessorGroupImpl<TestEvent> group = (EventProcessorGroupImpl<TestEvent>) system.createEventProcessorGroup(eventProcessorConfig,
-                    checkpointStore);
+                    checkpointStore, executor);
         group.awaitRunning();
 
         // Add a few event processors to the group.

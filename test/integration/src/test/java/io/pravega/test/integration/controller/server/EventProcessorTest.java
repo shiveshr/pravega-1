@@ -51,6 +51,7 @@ import io.pravega.test.integration.demo.ControllerWrapper;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -81,6 +82,7 @@ public class EventProcessorTest {
     private ServiceBuilder serviceBuilder;
     private StreamSegmentStore store;
     private TableStore tableStore;
+    private ScheduledExecutorService executor;
     
     public static class TestEventProcessor extends EventProcessor<TestEvent> {
         long sum;
@@ -262,7 +264,7 @@ public class EventProcessorTest {
                 .build();
         @Cleanup
         EventProcessorGroup<TestEvent> eventProcessorGroup =
-                system.createEventProcessorGroup(eventProcessorConfig, CheckpointStoreFactory.createInMemoryStore());
+                system.createEventProcessorGroup(eventProcessorConfig, CheckpointStoreFactory.createInMemoryStore(), executor);
 
         Long value = result.join();
         Assert.assertEquals(expectedSum, value.longValue());
@@ -334,7 +336,7 @@ public class EventProcessorTest {
                 .build();
         @Cleanup
         EventProcessorGroup<TestEvent> eventProcessorGroup =
-                system.createEventProcessorGroup(eventProcessorConfig, CheckpointStoreFactory.createInMemoryStore());
+                system.createEventProcessorGroup(eventProcessorConfig, CheckpointStoreFactory.createInMemoryStore(), executor);
 
         eventProcessorGroup.awaitRunning();
         // wait until both events are read
@@ -377,7 +379,7 @@ public class EventProcessorTest {
 
         @Cleanup
         EventProcessorGroup<TestEvent> eventProcessorGroup2 =
-                system.createEventProcessorGroup(eventProcessorConfig2, CheckpointStoreFactory.createInMemoryStore());
+                system.createEventProcessorGroup(eventProcessorConfig2, CheckpointStoreFactory.createInMemoryStore(), executor);
         eventProcessorGroup2.awaitRunning();
 
         // verify that both events are read again
