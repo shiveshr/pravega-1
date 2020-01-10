@@ -1665,41 +1665,48 @@ public abstract class PersistentStreamBase implements Stream {
                                                                ConcurrentSkipListSet<Long> toPurge,
                                                                ConcurrentHashMap<UUID, ActiveTxnRecord> transactionsMap) {
         int epoch = nextEpoch.getKey();
-        List<Map.Entry<Long, String>> txnIds = nextEpoch.getValue();
+        Map<Long, String> mapOfOrderedTxnIds = nextEpoch.getValue().stream()
+                                                        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        return getTransactionRecords(epoch, mapOfOrderedTxnIds).thenAccept(txns -> txns.forEach((order, txnRecord) -> {
+            UUID txnId = UUID.fromString(mapOfOrderedTxnIds.get(order));
+            
+              switch (txnRecord.getTxnStatus()) {
+                  case COMMITTING:
+                      if (txnRecord.getCommitOrder() == order) {
+                          // if entry matches record's position then include it
+                          transactionsMap.put(txnId, txnRecord);
+                      } else {
+                          log.debug("duplicate txn {} at position {}. removing {}", txnId, txnRecord.getCommitOrder(), order);
+                          toPurge.add(order);
+                      }
+                      break;
+                  case OPEN:  // do nothing
+                      // since we first add reference to transaction order followed by updating transaction
+                      // metadata record, which may or may not have happened. So we will ignore all open 
+                      // transactions for which references are found. 
+                      break;
+                  case COMMITTED:
+                  case ABORTING:
+                  case ABORTED:
+                  case UNKNOWN:
+                      // Aborting, aborted, unknown and committed 
+                      log.debug("stale txn {} with status. removing {}", txnId, txnRecord.getTxnStatus(), order);
+                      toPurge.add(order);
+                      break;
+              }
+        }));
+    }
 
-        return Futures.allOf(txnIds.stream().map(txnIdOrder -> {
-            UUID txnId = UUID.fromString(txnIdOrder.getValue());
-            long order = txnIdOrder.getKey();
-            return Futures.exceptionallyExpecting(getActiveTx(epoch, txnId).thenApply(VersionedMetadata::getObject),
-                    ZKStreamMetadataStore.DATA_NOT_FOUND_PREDICATE, ActiveTxnRecord.EMPTY)
-                          .thenAccept(txnRecord -> {
-                              switch (txnRecord.getTxnStatus()) {
-                                  case COMMITTING:
-                                      if (txnRecord.getCommitOrder() == order) {
-                                          // if entry matches record's position then include it
-                                          transactionsMap.put(txnId, txnRecord);
-                                      } else {
-                                          log.debug("duplicate txn {} at position {}. removing {}", txnId, txnRecord.getCommitOrder(), order);
-                                          toPurge.add(order);
-                                      }
-                                      break;
-                                  case OPEN:  // do nothing
-                                      // since we first add reference to transaction order followed by updating transaction
-                                      // metadata record, which may or may not have happened. So we will ignore all open 
-                                      // transactions for which references are found. 
-                                      break;
-                                  case COMMITTED:
-                                  case ABORTING:
-                                  case ABORTED:
-                                  case UNKNOWN:
-                                      // Aborting, aborted, unknown and committed 
-                                      log.debug("stale txn {} with status. removing {}", txnId, txnRecord.getTxnStatus(), order);
-                                      toPurge.add(order);
-                                      break;
-                              }
-                          });
-
-        }).collect(Collectors.toList()));
+    CompletableFuture<Map<Long, ActiveTxnRecord>> getTransactionRecords(int epoch, Map<Long, String> txnIds) {
+        ConcurrentHashMap<Long, CompletableFuture<ActiveTxnRecord>> map = new ConcurrentHashMap<>();
+        
+        txnIds.forEach((order, txnIdStr) -> {
+            UUID txnId = UUID.fromString(txnIdStr);
+            map.put(order, Futures.exceptionallyExpecting(getActiveTx(epoch, txnId).thenApply(VersionedMetadata::getObject),
+                    ZKStreamMetadataStore.DATA_NOT_FOUND_PREDICATE, ActiveTxnRecord.EMPTY));
+        });
+        
+        return Futures.allOfWithResults(map);
     }
 
     private CompletableFuture<Void> verifyLegalState() {
