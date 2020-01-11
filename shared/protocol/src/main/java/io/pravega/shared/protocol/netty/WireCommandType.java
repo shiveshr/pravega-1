@@ -103,6 +103,9 @@ public enum WireCommandType {
     READ_TABLE_ENTRIES(85, WireCommands.ReadTableEntries::readFrom),
     TABLE_ENTRIES_READ(86, WireCommands.TableEntriesRead::readFrom),
 
+    MERGE_MULTIPLE_SEGMENTS(87, WireCommands.MergeMultipleSegments::readFrom),
+    MULTIPLE_SEGMENTS_MERGED(88, WireCommands.MultipleSegmentsMerged::readFrom),
+
     KEEP_ALIVE(100, WireCommands.KeepAlive::readFrom);
 
     private final int code;

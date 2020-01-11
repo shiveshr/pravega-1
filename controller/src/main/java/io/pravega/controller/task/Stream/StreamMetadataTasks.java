@@ -1008,6 +1008,16 @@ public class StreamMetadataTasks extends TaskBase {
                 .thenRun(() -> TransactionMetrics.getInstance().commitTransactionSegments(timer.getElapsed()));
     }
 
+    public CompletableFuture<Void> notifyTxnCommit(final String scope, final String stream,
+                                                   final List<Long> segments, final List<UUID> txnIds) {
+        Timer timer = new Timer();
+        return Futures.allOf(segments.stream()
+                                     .parallel()
+                                     .map(segment -> notifyTxnCommit(scope, stream, segment, txnIds))
+                                     .collect(Collectors.toList()))
+                      .thenRun(() -> TransactionMetrics.getInstance().commitTransactionSegments(timer.getElapsed()));
+    }
+
     private CompletableFuture<Controller.TxnStatus> notifyTxnCommit(final String scope, final String stream,
                                                                     final long segmentNumber, final UUID txnId) {
         return TaskStepsRetryHelper.withRetries(() -> segmentHelper.commitTransaction(scope,
@@ -1015,6 +1025,16 @@ public class StreamMetadataTasks extends TaskBase {
                 segmentNumber,
                 segmentNumber,
                 txnId,
+                this.retrieveDelegationToken()), executor);
+    }
+    
+    private CompletableFuture<Controller.TxnStatus> notifyTxnCommit(final String scope, final String stream,
+                                                                    final long segmentNumber, final List<UUID> txnIds) {
+        return TaskStepsRetryHelper.withRetries(() -> segmentHelper.commitTransactions(scope,
+                stream,
+                segmentNumber,
+                segmentNumber,
+                txnIds,
                 this.retrieveDelegationToken()), executor);
     }
 

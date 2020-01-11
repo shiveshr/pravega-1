@@ -483,6 +483,42 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
                         }
                     });
     }
+    
+    @Override
+    public void mergeMultipleSegments(WireCommands.MergeMultipleSegments mergeSegments) {
+        // merge multiple segments in a loop
+        final String operation = "mergeSegments";
+
+        if (!verifyToken(mergeSegments.getSource(), mergeSegments.getRequestId(), mergeSegments.getDelegationToken(), operation)) {
+            return;
+        }
+
+        log.info(mergeSegments.getRequestId(), "Merging Segments {} ", mergeSegments);
+        segmentStore.mergeStreamSegment(mergeSegments.getTarget(), mergeSegments.getSource(), TIMEOUT)
+                    .thenAccept(mergeResult -> {
+                        recordStatForTransaction(mergeResult, mergeSegments.getTarget());
+                        connection.send(new WireCommands.SegmentsMerged(mergeSegments.getRequestId(),
+                                                                        mergeSegments.getTarget(),
+                                                                        mergeSegments.getSource(),
+                                                                        mergeResult.getTargetSegmentLength()));
+                    })
+                    .exceptionally(e -> {
+                        if (Exceptions.unwrap(e) instanceof StreamSegmentMergedException) {
+                            log.info(mergeSegments.getRequestId(), "Stream segment is already merged '{}'.",
+                                    mergeSegments.getSource());
+                            segmentStore.getStreamSegmentInfo(mergeSegments.getTarget(), TIMEOUT)
+                                        .thenAccept(properties -> {
+                                            connection.send(new WireCommands.SegmentsMerged(mergeSegments.getRequestId(),
+                                                                                            mergeSegments.getTarget(),
+                                                                                            mergeSegments.getSource(),
+                                                                                            properties.getLength()));
+                                        });
+                            return null;
+                        } else {
+                            return handleException(mergeSegments.getRequestId(), mergeSegments.getSource(), operation, e);
+                        }
+                    });
+    }
 
     @Override
     public void sealSegment(SealSegment sealSegment) {

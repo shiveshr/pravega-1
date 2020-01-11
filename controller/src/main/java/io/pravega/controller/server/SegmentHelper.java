@@ -89,6 +89,7 @@ public class SegmentHelper implements AutoCloseable {
                     WireCommands.SegmentIsTruncated.class))
             .put(WireCommands.MergeSegments.class, ImmutableSet.of(WireCommands.SegmentsMerged.class,
                     WireCommands.NoSuchSegment.class))
+            .put(WireCommands.MergeMultipleSegments.class, ImmutableSet.of(WireCommands.MultipleSegmentsMerged.class))
             .put(WireCommands.UpdateTableEntries.class, ImmutableSet.of(WireCommands.TableEntriesUpdated.class))
             .put(WireCommands.RemoveTableKeys.class, ImmutableSet.of(WireCommands.TableKeysRemoved.class,
                     WireCommands.TableKeyDoesNotExist.class))
@@ -106,6 +107,7 @@ public class SegmentHelper implements AutoCloseable {
             .put(WireCommands.ReadTable.class, ImmutableSet.of(WireCommands.NoSuchSegment.class))
             .put(WireCommands.ReadTableKeys.class, ImmutableSet.of(WireCommands.NoSuchSegment.class))
             .put(WireCommands.ReadTableEntries.class, ImmutableSet.of(WireCommands.NoSuchSegment.class))
+            .put(WireCommands.MergeMultipleSegments.class, ImmutableSet.of(WireCommands.NoSuchSegment.class))
             .build();
 
     private final HostControllerStore hostStore;
@@ -267,7 +269,33 @@ public class SegmentHelper implements AutoCloseable {
                 });
 
     }
+    
+    public CompletableFuture<TxnStatus> commitTransactions(final String scope,
+                                                          final String stream,
+                                                          final long targetSegmentId,
+                                                          final long sourceSegmentId,
+                                                          final List<UUID> txIds,
+                                                          String delegationToken) {
+        Preconditions.checkArgument(getSegmentNumber(targetSegmentId) == getSegmentNumber(sourceSegmentId));
+        final Controller.NodeUri uri = getSegmentUri(scope, stream, sourceSegmentId);
+        final String qualifiedNameTarget = getQualifiedStreamSegmentName(scope, stream, targetSegmentId);
+        final List<String> transactionNames = txIds.stream().map(txId -> getTransactionName(scope, stream, sourceSegmentId, txId))
+                                                   .collect(Collectors.toList());
+        final WireCommandType type = WireCommandType.MERGE_MULTIPLE_SEGMENTS;
 
+        RawClient connection = new RawClient(ModelHelper.encode(uri), connectionFactory);
+        final long requestId = connection.getFlow().asLong();
+        
+        WireCommands.MergeMultipleSegments request = new WireCommands.MergeMultipleSegments(requestId,
+                qualifiedNameTarget, transactionNames, delegationToken);
+
+        return sendRequest(connection, requestId, request)
+                .thenApply(r -> {
+                    handleReply(requestId, r, connection, qualifiedNameTarget, WireCommands.MergeMultipleSegments.class, type);
+                    return TxnStatus.newBuilder().setStatus(TxnStatus.Status.SUCCESS).build();
+                });
+    }
+    
     public CompletableFuture<TxnStatus> abortTransaction(final String scope,
                                                          final String stream,
                                                          final long segmentId,

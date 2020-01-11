@@ -90,6 +90,11 @@ public abstract class DelegatingReplyProcessor implements ReplyProcessor {
     }
 
     @Override
+    public void multipleSegmentsMerged(WireCommands.MultipleSegmentsMerged segmentsMerged) {
+        getNextReplyProcessor().multipleSegmentsMerged(segmentsMerged);
+    }
+
+    @Override
     public void segmentSealed(WireCommands.SegmentSealed segmentSealed) {
         getNextReplyProcessor().segmentSealed(segmentSealed);
     }

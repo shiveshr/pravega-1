@@ -50,6 +50,8 @@ public interface RequestProcessor {
     void createSegment(CreateSegment createSegment);
 
     void mergeSegments(MergeSegments mergeSegments);
+    
+    void mergeMultipleSegments(WireCommands.MergeMultipleSegments mergeMultipleSegments);
 
     void mergeTableSegments(MergeTableSegments mergeSegments);
 

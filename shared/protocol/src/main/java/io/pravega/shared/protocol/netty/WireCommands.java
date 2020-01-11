@@ -10,6 +10,7 @@
 package io.pravega.shared.protocol.netty;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.Unpooled;
@@ -37,6 +38,8 @@ import lombok.experimental.Accessors;
 import static io.netty.buffer.Unpooled.EMPTY_BUFFER;
 import static io.netty.buffer.Unpooled.wrappedBuffer;
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static java.util.Map.Entry;
+import static java.util.AbstractMap.SimpleEntry;
 
 /**
  * The complete list of all commands that go over the wire between clients and the server.
@@ -1216,6 +1219,45 @@ public final class WireCommands {
             return new MergeSegments(requestId, target, source, delegationToken);
         }
     }
+    
+    @Data
+    public static final class MergeMultipleSegments implements Request, WireCommand {
+        final WireCommandType type = WireCommandType.MERGE_MULTIPLE_SEGMENTS;
+        final long requestId;
+        final String target;
+        final List<String> sources;
+        @ToString.Exclude
+        final String delegationToken;
+
+        @Override
+        public void process(RequestProcessor cp) {
+            cp.mergeMultipleSegments(this);
+        }
+
+        @Override
+        public void writeFields(DataOutput out) throws IOException {
+            out.writeLong(requestId);
+            out.writeUTF(target);
+            out.writeInt(sources.size());
+            for (String source : sources) {
+                out.writeUTF(source);
+            }
+            out.writeUTF(delegationToken == null ? "" : delegationToken);
+        }
+
+        public static WireCommand readFrom(DataInput in, int length) throws IOException {
+            long requestId = in.readLong();
+            int numOfSources = in.readInt();
+            List<String> sources = new ArrayList<>(numOfSources);
+            for (int i = 0; i < numOfSources; i++) {
+                String source = in.readUTF();
+                sources.add(source);
+            }
+            String target = in.readUTF();
+            String delegationToken = in.readUTF();
+            return new MergeMultipleSegments(requestId, target, sources, delegationToken);
+        }
+    }
 
     @Data
     public static final class MergeTableSegments implements Request, WireCommand {
@@ -1275,6 +1317,49 @@ public final class WireCommands {
             String source = in.readUTF();
             long newTargetWriteOffset = in.available() > 0 ? in.readLong() : -1;
             return new SegmentsMerged(requestId, target, source, newTargetWriteOffset);
+        }
+    }
+    
+    @Data
+    public static final class MultipleSegmentsMerged implements Reply, WireCommand {
+        final WireCommandType type = WireCommandType.SEGMENTS_MERGED;
+        final long requestId;
+        final String target;
+        // Negative offset indicates target Segment was not found and hence could not be merged. 
+        final List<Entry<String, Long>> sourcesWithMergeOffset;
+
+        @Override
+        public void process(ReplyProcessor cp) {
+            cp.multipleSegmentsMerged(this);
+        }
+
+        @Override
+        public void writeFields(DataOutput out) throws IOException {
+            out.writeLong(requestId);
+            out.writeUTF(target);
+            // write map.size
+            out.writeInt(sourcesWithMergeOffset.size());
+            // write each key and then each value
+            for (Entry<String, Long> entry : sourcesWithMergeOffset) {
+                out.writeUTF(entry.getKey());
+                out.writeLong(entry.getValue());
+            }
+        }
+
+        public static WireCommand readFrom(ByteBufInputStream in, int length) throws IOException {
+            long requestId = in.readLong();
+            String target = in.readUTF();
+            // read size
+            int numOfSources = in.readInt();
+            List<Entry<String, Long>> sources = new ArrayList<>(numOfSources);
+
+            for (int i = 0; i < numOfSources; i++) {
+                String source = in.readUTF();
+                long offset = in.readLong();
+                sources.add(new SimpleEntry<>(source, offset));
+            }
+            
+            return new MultipleSegmentsMerged(requestId, target, sources);
         }
     }
 
