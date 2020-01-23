@@ -375,11 +375,6 @@ public class ControllerServiceStarter extends AbstractIdleService {
                 log.info("Stopping the segment container monitor");
                 monitor.stopAsync();
             }
-            if (controllerClusterListener != null) {
-                log.info("Stopping controller cluster listener");
-                controllerClusterListener.stopAsync();
-                log.info("Controller cluster listener shutdown");
-            }
 
             if (retentionService != null) {
                 log.info("Stopping auto retention service");
@@ -418,11 +413,6 @@ public class ControllerServiceStarter extends AbstractIdleService {
                 monitor.awaitTerminated();
             }
 
-            if (controllerClusterListener != null) {
-                log.info("Awaiting termination of controller cluster listener");
-                controllerClusterListener.awaitTerminated();
-            }
-
             if (retentionService != null) {
                 log.info("Awaiting termination of auto retention");
                 retentionService.awaitTerminated();
@@ -431,6 +421,14 @@ public class ControllerServiceStarter extends AbstractIdleService {
             if (watermarkingService != null) {
                 log.info("Awaiting termination of watermarking service");
                 watermarkingService.awaitTerminated();
+            }
+
+            if (controllerClusterListener != null) {
+                log.info("Stopping controller cluster listener");
+                controllerClusterListener.stopAsync();
+                log.info("Controller cluster listener shutdown");
+                log.info("Awaiting termination of controller cluster listener");
+                controllerClusterListener.awaitTerminated();
             }
         } catch (Exception e) {
             log.error("Controller Service Starter threw exception during shutdown", e);
