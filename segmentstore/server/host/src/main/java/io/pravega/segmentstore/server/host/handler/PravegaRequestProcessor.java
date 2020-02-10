@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,11 @@ import com.google.common.base.Throwables;
 import io.netty.buffer.ByteBuf;
 import io.pravega.auth.TokenException;
 import io.pravega.auth.TokenExpiredException;
+import io.pravega.client.segment.impl.NoSuchSegmentException;
 import io.pravega.common.Exceptions;
 import io.pravega.common.LoggerHelpers;
 import io.pravega.common.Timer;
+import io.pravega.common.concurrent.Futures;
 import io.pravega.common.io.StreamHelpers;
 import io.pravega.common.tracing.TagLogger;
 import io.pravega.common.util.ArrayView;
@@ -94,6 +96,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -458,66 +462,67 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
         }
 
         log.info(mergeSegments.getRequestId(), "Merging Segments {} ", mergeSegments);
-        segmentStore.mergeStreamSegment(mergeSegments.getTarget(), mergeSegments.getSource(), TIMEOUT)
-                    .thenAccept(mergeResult -> {
-                        recordStatForTransaction(mergeResult, mergeSegments.getTarget());
+        mergeSegment(mergeSegments.getTarget(), mergeSegments.getSource(), mergeSegments.getRequestId())
+                    .thenAccept(mergeLength -> {
                         connection.send(new WireCommands.SegmentsMerged(mergeSegments.getRequestId(),
                                                                         mergeSegments.getTarget(),
                                                                         mergeSegments.getSource(),
-                                                                        mergeResult.getTargetSegmentLength()));
+                                                                        mergeLength));
                     })
-                    .exceptionally(e -> {
-                        if (Exceptions.unwrap(e) instanceof StreamSegmentMergedException) {
-                            log.info(mergeSegments.getRequestId(), "Stream segment is already merged '{}'.",
-                                    mergeSegments.getSource());
-                            segmentStore.getStreamSegmentInfo(mergeSegments.getTarget(), TIMEOUT)
-                                        .thenAccept(properties -> {
-                                            connection.send(new WireCommands.SegmentsMerged(mergeSegments.getRequestId(),
-                                                                                            mergeSegments.getTarget(),
-                                                                                            mergeSegments.getSource(),
-                                                                                            properties.getLength()));
-                                        });
-                            return null;
-                        } else {
-                            return handleException(mergeSegments.getRequestId(), mergeSegments.getSource(), operation, e);
-                        }
-                    });
+                    .exceptionally(e -> handleException(mergeSegments.getRequestId(), mergeSegments.getSource(), operation, e));
     }
     
+    private CompletableFuture<Long> mergeSegment(String source, String target, long requestId) {
+        return Futures.handleCompose(segmentStore.mergeStreamSegment(target, source, TIMEOUT), 
+                           (mergeResult, e) -> {
+                               if (e == null) {
+                                   recordStatForTransaction(mergeResult, target);
+                               } else if (Exceptions.unwrap(e) instanceof StreamSegmentMergedException || 
+                                       Exceptions.unwrap(e) instanceof NoSuchSegmentException) {
+                                   // in idempotent case we will use current target segment length
+                                   log.info(requestId, "Stream segment is already merged '{}'.", source);
+                                   // if no such segment was for the target, this will throw the exception. 
+                                   return segmentStore.getStreamSegmentInfo(target, TIMEOUT)
+                                                      .thenApply(properties -> properties.getLength());
+                               } else {
+                                   log.warn(requestId, "Merging Stream segment {} into target segment {} threw exception {}", 
+                                           e.getClass().getName());
+                                   throw new CompletionException(e);
+                               }
+
+                               return CompletableFuture.completedFuture(mergeResult.getTargetSegmentLength());
+                           });
+    }
+
     @Override
     public void mergeMultipleSegments(WireCommands.MergeMultipleSegments mergeSegments) {
         // merge multiple segments in a loop
         final String operation = "mergeSegments";
 
-        if (!verifyToken(mergeSegments.getSource(), mergeSegments.getRequestId(), mergeSegments.getDelegationToken(), operation)) {
+        if (!verifyToken(mergeSegments.getTarget(), mergeSegments.getRequestId(), mergeSegments.getDelegationToken(), operation)) {
             return;
         }
 
         log.info(mergeSegments.getRequestId(), "Merging Segments {} ", mergeSegments);
-        segmentStore.mergeStreamSegment(mergeSegments.getTarget(), mergeSegments.getSource(), TIMEOUT)
-                    .thenAccept(mergeResult -> {
-                        recordStatForTransaction(mergeResult, mergeSegments.getTarget());
-                        connection.send(new WireCommands.SegmentsMerged(mergeSegments.getRequestId(),
-                                                                        mergeSegments.getTarget(),
-                                                                        mergeSegments.getSource(),
-                                                                        mergeResult.getTargetSegmentLength()));
-                    })
-                    .exceptionally(e -> {
-                        if (Exceptions.unwrap(e) instanceof StreamSegmentMergedException) {
-                            log.info(mergeSegments.getRequestId(), "Stream segment is already merged '{}'.",
-                                    mergeSegments.getSource());
-                            segmentStore.getStreamSegmentInfo(mergeSegments.getTarget(), TIMEOUT)
-                                        .thenAccept(properties -> {
-                                            connection.send(new WireCommands.SegmentsMerged(mergeSegments.getRequestId(),
-                                                                                            mergeSegments.getTarget(),
-                                                                                            mergeSegments.getSource(),
-                                                                                            properties.getLength()));
-                                        });
-                            return null;
-                        } else {
-                            return handleException(mergeSegments.getRequestId(), mergeSegments.getSource(), operation, e);
-                        }
-                    });
+
+        List<Long> sourcesWithMergeOffset = new ArrayList<>(mergeSegments.getSources().size());
+
+        CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
+        for(String source : mergeSegments.getSources()) {
+            future.thenCompose(v ->
+                    mergeSegment(source, mergeSegments.getTarget(), mergeSegments.getRequestId())
+                            .thenAccept(sourcesWithMergeOffset::add));
+        }
+
+        future.whenComplete((r, e) -> {
+            if (e != null) {
+                handleException(mergeSegments.getRequestId(), mergeSegments.getTarget(), operation, e);
+            } else {
+                connection.send(new WireCommands.MultipleSegmentsMerged(mergeSegments.getRequestId(),
+                        mergeSegments.getTarget(),
+                        sourcesWithMergeOffset));
+            }
+        });
     }
 
     @Override
@@ -979,7 +984,7 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
                      segment, containerId, operation);
             invokeSafely(connection::send, new WrongHost(requestId, segment, "", clientReplyStackTrace), failureHandler);
         } else if (u instanceof ReadCancellationException) {
-            log.info(requestId, "Closing connection {} while reading segment {} due to CancellationException.",
+            log.info(requestId, "Sending empty response on connection {} while reading segment {} due to CancellationException.",
                      connection, segment);
             invokeSafely(connection::send, new SegmentRead(segment, offset, true, false, EMPTY_BYTE_BUFFER, requestId), failureHandler);
         } else if (u instanceof CancellationException) {

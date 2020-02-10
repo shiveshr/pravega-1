@@ -29,6 +29,8 @@ import io.pravega.controller.task.Stream.StreamTransactionMetadataTasks;
 import io.pravega.shared.controller.event.CommitEvent;
 import lombok.extern.slf4j.Slf4j;
 
+import static io.pravega.shared.NameUtils.computeSegmentId;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -37,8 +39,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
-
-import static io.pravega.shared.segment.StreamSegmentNameUtils.computeSegmentId;
 
 /**
  * Request handler for processing commit events in commit-stream.
@@ -290,6 +290,11 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                                                        List<UUID> transactionsToCommit, OperationContext context, Timer timer) {
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
+
+        streamMetadataTasks.notifyTxnsCommit(scope, stream, segments, transactionsToCommit)
+                           .thenCompose(offsets -> transactionsToCommit.stream().forEach(txnId -> streamMetadataStore.recordCommitOffsets(scope, stream, txnId, map, context, executor))
+                           .thenRun(() -> TransactionMetrics.getInstance().commitTransaction(scope, stream, timer.getElapsed()));
+
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
         for (UUID txnId : transactionsToCommit) {
             log.info("Committing transaction {} on stream {}/{}", txnId, scope, stream);
@@ -303,7 +308,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                     // at which the transaction was committed into ActiveTxnRecord in an idempotent fashion. 
                     // Note: if its a rerun, transaction commit offsets may have been updated already in previous iteration
                     // so this will not update/modify it. 
-                    .thenCompose(v -> streamMetadataTasks.notifyTxnCommit(scope, stream, segments, txnId))
+                    .thenCompose(v -> streamMetadataTasks.notifyTxnsCommit(scope, stream, segments, txnId))
                     .thenCompose(v -> streamMetadataTasks.getCurrentSegmentSizes(scope, stream, segments))
                     .thenCompose(map -> streamMetadataStore.recordCommitOffsets(scope, stream, txnId, map, context, executor))
                     .thenRun(() -> TransactionMetrics.getInstance().commitTransaction(scope, stream, timer.getElapsed()));

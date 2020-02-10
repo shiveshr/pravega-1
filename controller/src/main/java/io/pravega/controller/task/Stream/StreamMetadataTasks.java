@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Dell Inc., or its subsidiaries. All Rights Reserved.
+ * Copyright (c) Dell Inc., or its subsidiaries. All Rights Reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,7 +70,6 @@ import io.pravega.shared.controller.event.SealStreamEvent;
 import io.pravega.shared.controller.event.TruncateStreamEvent;
 import io.pravega.shared.controller.event.UpdateStreamEvent;
 import io.pravega.shared.protocol.netty.WireCommands;
-import io.pravega.shared.segment.StreamSegmentNameUtils;
 import java.io.Serializable;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -88,7 +87,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-
 import lombok.Synchronized;
 import org.apache.commons.lang3.NotImplementedException;
 import org.slf4j.LoggerFactory;
@@ -767,7 +765,7 @@ public class StreamMetadataTasks extends TaskBase {
                         final int minNumSegments = response.getConfiguration().getScalingPolicy().getMinNumSegments();
                         List<Long> newSegments = IntStream.range(startingSegmentNumber, startingSegmentNumber + minNumSegments)
                                                            .boxed()
-                                                           .map(x -> StreamSegmentNameUtils.computeSegmentId(x, 0))
+                                                           .map(x -> NameUtils.computeSegmentId(x, 0))
                                                            .collect(Collectors.toList());
                         return notifyNewSegments(scope, stream, response.getConfiguration(), newSegments, this.retrieveDelegationToken(), requestId)
                                 .thenCompose(v -> createMarkStream(scope, stream, timestamp, requestId))
@@ -827,7 +825,7 @@ public class StreamMetadataTasks extends TaskBase {
         StreamConfiguration config = StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build();
         return this.streamMetadataStore.createStream(scope, markStream, config, timestamp, null, executor)
                                 .thenCompose(response -> {
-                                    final long segmentId = StreamSegmentNameUtils.computeSegmentId(response.getStartingSegmentNumber(), 0);
+                                    final long segmentId = NameUtils.computeSegmentId(response.getStartingSegmentNumber(), 0);
                                     return notifyNewSegment(scope, markStream, segmentId, response.getConfiguration().getScalingPolicy(),
                                             this.retrieveDelegationToken(), requestId);
                                 })
@@ -999,27 +997,27 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     public CompletableFuture<Void> notifyTxnCommit(final String scope, final String stream,
-                                                   final List<Long> segments, final UUID txnId) {
+                                                          final List<Long> segments, final UUID txnId) {
         Timer timer = new Timer();
         return Futures.allOf(segments.stream()
                 .parallel()
-                .map(segment -> notifyTxnCommit(scope, stream, segment, txnId))
+                .map(segment -> notifyTxnSegmentCommit(scope, stream, segment, txnId))
                 .collect(Collectors.toList()))
                 .thenRun(() -> TransactionMetrics.getInstance().commitTransactionSegments(timer.getElapsed()));
     }
 
-    public CompletableFuture<Void> notifyTxnCommit(final String scope, final String stream,
-                                                   final List<Long> segments, final List<UUID> txnIds) {
+    public CompletableFuture<List<Long>> notifyTxnsCommit(final String scope, final String stream,
+                                                           final List<Long> segments, final List<UUID> txnIds) {
         Timer timer = new Timer();
         return Futures.allOf(segments.stream()
                                      .parallel()
-                                     .map(segment -> notifyTxnCommit(scope, stream, segment, txnIds))
+                                     .map(segment -> notifyTxnsSegmentCommit(scope, stream, segment, txnIds))
                                      .collect(Collectors.toList()))
                       .thenRun(() -> TransactionMetrics.getInstance().commitTransactionSegments(timer.getElapsed()));
     }
 
-    private CompletableFuture<Controller.TxnStatus> notifyTxnCommit(final String scope, final String stream,
-                                                                    final long segmentNumber, final UUID txnId) {
+    private CompletableFuture<Controller.TxnStatus> notifyTxnSegmentCommit(final String scope, final String stream,
+                                                                           final long segmentNumber, final UUID txnId) {
         return TaskStepsRetryHelper.withRetries(() -> segmentHelper.commitTransaction(scope,
                 stream,
                 segmentNumber,
@@ -1028,8 +1026,8 @@ public class StreamMetadataTasks extends TaskBase {
                 this.retrieveDelegationToken()), executor);
     }
     
-    private CompletableFuture<Controller.TxnStatus> notifyTxnCommit(final String scope, final String stream,
-                                                                    final long segmentNumber, final List<UUID> txnIds) {
+    private CompletableFuture<List<Long>> notifyTxnsSegmentCommit(final String scope, final String stream,
+                                                                  final long segmentNumber, final List<UUID> txnIds) {
         return TaskStepsRetryHelper.withRetries(() -> segmentHelper.commitTransactions(scope,
                 stream,
                 segmentNumber,

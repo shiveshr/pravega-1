@@ -10,7 +10,6 @@
 package io.pravega.shared.protocol.netty;
 
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.Unpooled;
@@ -1325,8 +1324,7 @@ public final class WireCommands {
         final WireCommandType type = WireCommandType.SEGMENTS_MERGED;
         final long requestId;
         final String target;
-        // Negative offset indicates target Segment was not found and hence could not be merged. 
-        final List<Entry<String, Long>> sourcesWithMergeOffset;
+        final List<Long> mergeOffsets;
 
         @Override
         public void process(ReplyProcessor cp) {
@@ -1338,11 +1336,10 @@ public final class WireCommands {
             out.writeLong(requestId);
             out.writeUTF(target);
             // write map.size
-            out.writeInt(sourcesWithMergeOffset.size());
+            out.writeInt(mergeOffsets.size());
             // write each key and then each value
-            for (Entry<String, Long> entry : sourcesWithMergeOffset) {
-                out.writeUTF(entry.getKey());
-                out.writeLong(entry.getValue());
+            for (long offset : mergeOffsets) {
+                out.writeLong(offset);
             }
         }
 
@@ -1351,12 +1348,11 @@ public final class WireCommands {
             String target = in.readUTF();
             // read size
             int numOfSources = in.readInt();
-            List<Entry<String, Long>> sources = new ArrayList<>(numOfSources);
+            List<Long> sources = new ArrayList<>(numOfSources);
 
             for (int i = 0; i < numOfSources; i++) {
-                String source = in.readUTF();
                 long offset = in.readLong();
-                sources.add(new SimpleEntry<>(source, offset));
+                sources.add(offset);
             }
             
             return new MultipleSegmentsMerged(requestId, target, sources);
