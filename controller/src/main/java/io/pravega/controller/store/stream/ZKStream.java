@@ -62,7 +62,7 @@ import static io.pravega.controller.store.stream.AbstractStreamMetadataStore.DAT
  * This shall reduce store round trips for answering queries, thus making them efficient.
  */
 @Slf4j
-class ZKStream extends PersistentStreamBase {
+class ZKStream extends AbstractStream {
     private static final String SCOPE_PATH = "/store/%s";
     private static final String STREAM_PATH = SCOPE_PATH + "/%s";
     private static final String CREATION_TIME_PATH = STREAM_PATH + "/creationTime";

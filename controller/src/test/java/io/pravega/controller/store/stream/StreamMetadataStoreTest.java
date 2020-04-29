@@ -294,8 +294,8 @@ public abstract class StreamMetadataStoreTest {
         assertTrue("List streams in scope", streamInScope.containsKey(partial));
 
         // now deliberately throw data not found exception for getConfiguration on partial. 
-        PersistentStreamBase streamObj = (PersistentStreamBase) ((AbstractStreamMetadataStore) store).getStream("Scope", partial, null);
-        PersistentStreamBase streamObjSpied = spy(streamObj);
+        AbstractStream streamObj = (AbstractStream) ((AbstractStreamMetadataStore) store).getStream("Scope", partial, null);
+        AbstractStream streamObjSpied = spy(streamObj);
 
         doAnswer(x -> {
             CompletableFuture<StreamConfiguration> result = new CompletableFuture<>();
@@ -540,8 +540,8 @@ public abstract class StreamMetadataStoreTest {
         long scaleTs3 = System.currentTimeMillis();
 
         @SuppressWarnings("unchecked")
-        PersistentStreamBase streamObj = (PersistentStreamBase) ((AbstractStreamMetadataStore) store).getStream(scope, stream, null);
-        PersistentStreamBase streamObjSpied = spy(streamObj);
+        AbstractStream streamObj = (AbstractStream) ((AbstractStreamMetadataStore) store).getStream(scope, stream, null);
+        AbstractStream streamObjSpied = spy(streamObj);
 
         CompletableFuture<Void> latch = new CompletableFuture<>();
         CompletableFuture<Void> updateEpochTransitionCalled = new CompletableFuture<>();
@@ -592,9 +592,9 @@ public abstract class StreamMetadataStoreTest {
         long scaleTs = System.currentTimeMillis();
 
         @SuppressWarnings("unchecked")
-        PersistentStreamBase streamObj = (PersistentStreamBase) ((AbstractStreamMetadataStore) store)
+        AbstractStream streamObj = (AbstractStream) ((AbstractStreamMetadataStore) store)
                 .getStream(scope, stream, null);
-        PersistentStreamBase streamObjSpied = spy(streamObj);
+        AbstractStream streamObjSpied = spy(streamObj);
 
         CompletableFuture<Void> latch = new CompletableFuture<>();
         CompletableFuture<Void> updateEpochTransitionCalled = new CompletableFuture<>();
@@ -973,7 +973,7 @@ public abstract class StreamMetadataStoreTest {
         store.sealTransaction(scope, stream, tx01, false, Optional.empty(),
                 "", Long.MIN_VALUE, null, executor).get();
 
-        PersistentStreamBase streamObj = (PersistentStreamBase) ((AbstractStreamMetadataStore) store).getStream(scope, stream, null);
+        AbstractStream streamObj = (AbstractStream) ((AbstractStreamMetadataStore) store).getStream(scope, stream, null);
         // duplicate for tx00
         streamObj.addTxnToCommitOrder(tx00).join();
         // entry for aborting transaction tx01

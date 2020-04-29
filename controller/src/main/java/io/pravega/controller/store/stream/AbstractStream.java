@@ -73,13 +73,13 @@ import static io.pravega.shared.NameUtils.getSegmentNumber;
 import static java.util.stream.Collectors.groupingBy;
 
 @Slf4j
-public abstract class PersistentStreamBase implements Stream {
+public abstract class AbstractStream implements Stream {
     private final String scope;
     private final String name;
     private final AtomicInteger historyChunkSize;
     private final AtomicInteger shardSize;
 
-    PersistentStreamBase(final String scope, final String name, int historyChunkSize, int shardSize) {
+    AbstractStream(final String scope, final String name, int historyChunkSize, int shardSize) {
         this.scope = scope;
         this.name = name;
         this.historyChunkSize = new AtomicInteger(historyChunkSize);

@@ -23,7 +23,7 @@ import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.eventProcessor.requesthandlers.AbortRequestHandler;
 import io.pravega.controller.server.eventProcessor.requesthandlers.AutoScaleTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.CommitRequestHandler;
-import io.pravega.controller.server.eventProcessor.requesthandlers.ScaleOperationTask;
+import io.pravega.controller.server.eventProcessor.requesthandlers.ScaleStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.SealStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.StreamRequestHandler;
 import io.pravega.controller.server.rpc.auth.GrpcAuthHelper;
@@ -159,7 +159,7 @@ public abstract class ControllerEventProcessorTest {
 
     @Test(timeout = 60000)
     public void testCommitEventForSealingStream() {
-        ScaleOperationTask scaleTask = new ScaleOperationTask(streamMetadataTasks, streamStore, executor);
+        ScaleStreamTask scaleTask = new ScaleStreamTask(streamMetadataTasks, streamStore, executor);
         SealStreamTask sealStreamTask = new SealStreamTask(streamMetadataTasks, streamTransactionMetadataTasks, streamStore, executor);
 
         String stream = "commitWithSeal";
@@ -292,7 +292,7 @@ public abstract class ControllerEventProcessorTest {
         streamMetadataTasks.setRequestEventWriter(requestEventWriter);
         CommitRequestHandler commitEventProcessor = new CommitRequestHandler(streamStore, streamMetadataTasks, streamTransactionMetadataTasks, bucketStore, executor);
         StreamRequestHandler streamRequestHandler = new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamStore, executor),
-                new ScaleOperationTask(streamMetadataTasks, streamStore, executor),
+                new ScaleStreamTask(streamMetadataTasks, streamStore, executor),
                 null, null, null, null, streamStore, executor);
 
         // set some processor name so that the processing gets postponed

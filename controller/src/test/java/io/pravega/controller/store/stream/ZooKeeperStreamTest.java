@@ -50,7 +50,7 @@ public class ZooKeeperStreamTest extends StreamTestBase {
     }
 
     @Override
-    PersistentStreamBase getStream(String scope, String stream, int chunkSize, int shardSize) {
+    AbstractStream getStream(String scope, String stream, int chunkSize, int shardSize) {
         ZkOrderedStore orderer = new ZkOrderedStore("txn", storeHelper, executor);
         return new ZKStream(scope, stream, storeHelper, () -> 0, chunkSize, shardSize, executor, orderer);
     }

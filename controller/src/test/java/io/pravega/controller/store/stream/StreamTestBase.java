@@ -73,13 +73,13 @@ public abstract class StreamTestBase {
 
     abstract void createScope(String scope);
 
-    abstract PersistentStreamBase getStream(String scope, String stream, int chunkSize, int shardSize);
+    abstract AbstractStream getStream(String scope, String stream, int chunkSize, int shardSize);
 
-    private PersistentStreamBase createStream(String scope, String name, long time, int numOfSegments, int startingSegmentNumber,
-                                              int chunkSize, int shardSize) {
+    private AbstractStream createStream(String scope, String name, long time, int numOfSegments, int startingSegmentNumber,
+                                        int chunkSize, int shardSize) {
         createScope(scope);
 
-        PersistentStreamBase stream = getStream(scope, name, chunkSize, shardSize);
+        AbstractStream stream = getStream(scope, name, chunkSize, shardSize);
         StreamConfiguration config = StreamConfiguration.builder()
                                                         .scalingPolicy(ScalingPolicy.fixed(numOfSegments)).build();
         stream.create(config, time, startingSegmentNumber)
@@ -93,7 +93,7 @@ public abstract class StreamTestBase {
         return stream;
     }
     
-    private PersistentStreamBase createStream(String scope, String name, long time, int numOfSegments, int startingSegmentNumber) {
+    private AbstractStream createStream(String scope, String name, long time, int numOfSegments, int startingSegmentNumber) {
         return createStream(scope, name, time, numOfSegments, startingSegmentNumber, HistoryTimeSeries.HISTORY_CHUNK_SIZE, 
                 SealedSegmentsMapShard.SHARD_SIZE);
     }
@@ -133,7 +133,7 @@ public abstract class StreamTestBase {
 
     @Test(timeout = 30000L)
     public void testCreateStream() {
-        PersistentStreamBase stream = createStream("scope", "stream", System.currentTimeMillis(), 2, 0);
+        AbstractStream stream = createStream("scope", "stream", System.currentTimeMillis(), 2, 0);
 
         assertEquals(State.ACTIVE, stream.getState(true).join());
         EpochRecord activeEpoch = stream.getActiveEpoch(true).join();
@@ -425,7 +425,7 @@ public abstract class StreamTestBase {
     public void scaleInputValidityTest() {
         int startingSegmentNumber = new Random().nextInt(2000);
         String name = "stream" + startingSegmentNumber;
-        PersistentStreamBase stream = createStream("scope", name, System.currentTimeMillis(), 5, startingSegmentNumber);
+        AbstractStream stream = createStream("scope", name, System.currentTimeMillis(), 5, startingSegmentNumber);
 
         long timestamp = System.currentTimeMillis();
 
@@ -691,7 +691,7 @@ public abstract class StreamTestBase {
         int startingSegmentNumber = new Random().nextInt(2000);
         // epoch 0 --> 0, 1
         long timestamp = System.currentTimeMillis();
-        PersistentStreamBase stream = createStream("scope", "stream" + startingSegmentNumber, timestamp, 2, startingSegmentNumber);
+        AbstractStream stream = createStream("scope", "stream" + startingSegmentNumber, timestamp, 2, startingSegmentNumber);
         List<StreamSegmentRecord> activeSegments = stream.getActiveSegments().join();
 
         // epoch 1 --> 0, 2, 3
@@ -864,9 +864,9 @@ public abstract class StreamTestBase {
     }
 
     // region multiple chunks test
-    private PersistentStreamBase createScaleAndRollStreamForMultiChunkTests(String name, String scope, int startingSegmentNumber, Supplier<Long> time) {
+    private AbstractStream createScaleAndRollStreamForMultiChunkTests(String name, String scope, int startingSegmentNumber, Supplier<Long> time) {
         createScope(scope);
-        PersistentStreamBase stream = createStream(scope, name, time.get(), 5, startingSegmentNumber, 2, 2);
+        AbstractStream stream = createStream(scope, name, time.get(), 5, startingSegmentNumber, 2, 2);
         UUID txnId = createAndCommitTransaction(stream, 0, 0L);
         // scale the stream 5 times so that over all we have 6 epochs and hence 3 chunks.  
         for (int i = 0; i < 5; i++) {
@@ -922,7 +922,7 @@ public abstract class StreamTestBase {
     public void testFetchEpochs() {
         String scope = "fetchEpoch";
         String name = "fetchEpoch";
-        PersistentStreamBase stream = createScaleAndRollStreamForMultiChunkTests(name, scope, new Random().nextInt(2000), System::currentTimeMillis);
+        AbstractStream stream = createScaleAndRollStreamForMultiChunkTests(name, scope, new Random().nextInt(2000), System::currentTimeMillis);
 
         List<EpochRecord> epochs = stream.fetchEpochs(0, 12, true).join();
         assertEquals(13, epochs.size());
@@ -969,7 +969,7 @@ public abstract class StreamTestBase {
         String scope = "findEpochsAtTime";
         String name = "findEpochsAtTime";
         AtomicLong timeFunc = new AtomicLong(100L);
-        PersistentStreamBase stream = createScaleAndRollStreamForMultiChunkTests(name, scope, new Random().nextInt(2000), timeFunc::incrementAndGet);
+        AbstractStream stream = createScaleAndRollStreamForMultiChunkTests(name, scope, new Random().nextInt(2000), timeFunc::incrementAndGet);
         List<EpochRecord> epochs = stream.fetchEpochs(0, 12, true).join();
         int epoch = stream.findEpochAtTime(0L, true).join();
         assertEquals(0, epoch);
@@ -1026,7 +1026,7 @@ public abstract class StreamTestBase {
         String scope = "sealedSizeTest";
         String name = "sealedSizeTest";
         int startingSegmentNumber = new Random().nextInt(2000);
-        PersistentStreamBase stream = createScaleAndRollStreamForMultiChunkTests(name, scope, startingSegmentNumber, System::currentTimeMillis);
+        AbstractStream stream = createScaleAndRollStreamForMultiChunkTests(name, scope, startingSegmentNumber, System::currentTimeMillis);
         SealedSegmentsMapShard shard0 = stream.getSealedSegmentSizeMapShard(0).join();
         // 5 segments created in epoch 0 and 1 segment in epoch 1
         assertTrue(shard0.getSealedSegmentsSizeMap().keySet().stream().allMatch(x -> getEpoch(x) == 0 || getEpoch(x) == 1));
@@ -1111,7 +1111,7 @@ public abstract class StreamTestBase {
         String scope = "streamCutTest";
         String name = "streamCutTest";
         int startingSegmentNumber = new Random().nextInt(2000);
-        PersistentStreamBase stream = createScaleAndRollStreamForMultiChunkTests(name, scope, startingSegmentNumber, System::currentTimeMillis);
+        AbstractStream stream = createScaleAndRollStreamForMultiChunkTests(name, scope, startingSegmentNumber, System::currentTimeMillis);
 
         EpochRecord epoch0 = stream.getEpochRecord(0).join(); // 0, 1, 2, 3, 4
         EpochRecord epoch1 = stream.getEpochRecord(1).join(); // 5, 1, 2, 3, 4
@@ -1244,7 +1244,7 @@ public abstract class StreamTestBase {
         List<AbstractMap.SimpleEntry<Double, Double>> newRanges;
         long timestamp = System.currentTimeMillis();
 
-        PersistentStreamBase stream = createStream("scope", "stream" + startingSegmentNumber, timestamp, 3, startingSegmentNumber);
+        AbstractStream stream = createStream("scope", "stream" + startingSegmentNumber, timestamp, 3, startingSegmentNumber);
 
         List<StreamSegmentRecord> initialSegments = stream.getActiveSegments().join();
         StreamSegmentRecord zero = initialSegments.stream().filter(x -> x.segmentId() == computeSegmentId(startingSegmentNumber + 0, 0)).findAny().get();
@@ -1426,7 +1426,7 @@ public abstract class StreamTestBase {
 
     @Test(timeout = 30000L)
     public void testWriterMark() {
-        PersistentStreamBase stream = spy(createStream("writerMark", "writerMark", System.currentTimeMillis(), 3, 0));
+        AbstractStream stream = spy(createStream("writerMark", "writerMark", System.currentTimeMillis(), 3, 0));
 
         Map<String, WriterMark> marks = stream.getAllWriterMarks().join();
         assertTrue(marks.isEmpty());
@@ -1498,7 +1498,7 @@ public abstract class StreamTestBase {
 
     @Test(timeout = 30000L)
     public void testTransactionMark() {
-        PersistentStreamBase streamObj = createStream("txnMark", "txnMark", System.currentTimeMillis(), 3, 0);
+        AbstractStream streamObj = createStream("txnMark", "txnMark", System.currentTimeMillis(), 3, 0);
 
         UUID txnId = new UUID(0L, 0L);
         VersionedTransactionData tx01 = streamObj.createTransaction(txnId, 100, 100).join();
@@ -1531,7 +1531,7 @@ public abstract class StreamTestBase {
     
     @Test(timeout = 30000L)
     public void testTransactionMarkFromSingleWriter() {
-        PersistentStreamBase streamObj = spy(createStream("txnMark", "txnMark", System.currentTimeMillis(), 1, 0));
+        AbstractStream streamObj = spy(createStream("txnMark", "txnMark", System.currentTimeMillis(), 1, 0));
 
         String writer = "writer";
 
@@ -1571,7 +1571,7 @@ public abstract class StreamTestBase {
     
     @Test(timeout = 30000L)
     public void testgetTransactions() {
-        PersistentStreamBase streamObj = spy(createStream("txn", "txn", System.currentTimeMillis(), 1, 0));
+        AbstractStream streamObj = spy(createStream("txn", "txn", System.currentTimeMillis(), 1, 0));
         
         UUID txnId1 = new UUID(0L, 0L);
         UUID txnId2 = new UUID(0L, 1L);

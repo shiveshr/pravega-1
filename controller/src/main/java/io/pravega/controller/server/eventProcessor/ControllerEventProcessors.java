@@ -35,7 +35,7 @@ import io.pravega.controller.server.eventProcessor.requesthandlers.AbortRequestH
 import io.pravega.controller.server.eventProcessor.requesthandlers.AutoScaleTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.CommitRequestHandler;
 import io.pravega.controller.server.eventProcessor.requesthandlers.DeleteStreamTask;
-import io.pravega.controller.server.eventProcessor.requesthandlers.ScaleOperationTask;
+import io.pravega.controller.server.eventProcessor.requesthandlers.ScaleStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.SealStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.StreamRequestHandler;
 import io.pravega.controller.server.eventProcessor.requesthandlers.TruncateStreamTask;
@@ -128,7 +128,7 @@ public class ControllerEventProcessors extends AbstractIdleService implements Fa
         this.system = system == null ? new EventProcessorSystemImpl("Controller", host, config.getScopeName(), clientFactory,
                 new ReaderGroupManagerImpl(config.getScopeName(), controller, clientFactory, connectionFactory)) : system;
         this.streamRequestHandler = new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamMetadataStore, executor),
-                new ScaleOperationTask(streamMetadataTasks, streamMetadataStore, executor),
+                new ScaleStreamTask(streamMetadataTasks, streamMetadataStore, executor),
                 new UpdateStreamTask(streamMetadataTasks, streamMetadataStore, bucketStore, executor),
                 new SealStreamTask(streamMetadataTasks, streamTransactionMetadataTasks, streamMetadataStore, executor),
                 new DeleteStreamTask(streamMetadataTasks, streamMetadataStore, bucketStore, executor),

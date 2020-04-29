@@ -32,7 +32,7 @@ import io.pravega.controller.server.ControllerService;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.eventProcessor.requesthandlers.AutoScaleTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.DeleteStreamTask;
-import io.pravega.controller.server.eventProcessor.requesthandlers.ScaleOperationTask;
+import io.pravega.controller.server.eventProcessor.requesthandlers.ScaleStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.SealStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.StreamRequestHandler;
 import io.pravega.controller.server.eventProcessor.requesthandlers.TaskExceptions;
@@ -174,7 +174,7 @@ public abstract class StreamMetadataTasksTest {
                 new GrpcAuthHelper(authEnabled, "key", 300));
 
         this.streamRequestHandler = new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamStorePartialMock, executor),
-                new ScaleOperationTask(streamMetadataTasks, streamStorePartialMock, executor),
+                new ScaleStreamTask(streamMetadataTasks, streamStorePartialMock, executor),
                 new UpdateStreamTask(streamMetadataTasks, streamStorePartialMock, bucketStore, executor),
                 new SealStreamTask(streamMetadataTasks, streamTransactionMetadataTasks, streamStorePartialMock, executor),
                 new DeleteStreamTask(streamMetadataTasks, streamStorePartialMock, bucketStore, executor),
@@ -329,7 +329,7 @@ public abstract class StreamMetadataTasksTest {
                 newRanges, 30, null).get();
         assertTrue(scaleOpResult.getStatus().equals(ScaleStreamStatus.STARTED));
 
-        ScaleOperationTask scaleTask = new ScaleOperationTask(streamMetadataTasks, streamStorePartialMock, executor);
+        ScaleStreamTask scaleTask = new ScaleStreamTask(streamMetadataTasks, streamStorePartialMock, executor);
         assertTrue(Futures.await(scaleTask.execute((ScaleOpEvent) requestEventWriter.eventQueue.take())));
 
         // start truncation
@@ -1220,7 +1220,7 @@ public abstract class StreamMetadataTasksTest {
         AssertExtensions.assertThrows("", () -> streamStorePartialMock.startScale(SCOPE, "test", true,
                 response, versionedState, context, executor).get(), ex -> Exceptions.unwrap(ex) instanceof IllegalArgumentException);
 
-        ScaleOperationTask task = new ScaleOperationTask(streamMetadataTasks, streamStorePartialMock, executor);
+        ScaleStreamTask task = new ScaleStreamTask(streamMetadataTasks, streamStorePartialMock, executor);
         task.runScale((ScaleOpEvent) requestEventWriter.getEventQueue().take(), true, context, "").get();
         Map<Long, Map.Entry<Double, Double>> segments = response.getObject().getNewSegmentsWithRange();
         assertTrue(segments.entrySet().stream()

@@ -34,17 +34,17 @@ import org.slf4j.LoggerFactory;
 /**
  * Request handler for performing scale operations received from requeststream.
  */
-public class ScaleOperationTask implements StreamTask<ScaleOpEvent> {
+public class ScaleStreamTask implements StreamTask<ScaleOpEvent> {
 
-    private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(ScaleOperationTask.class));
+    private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(ScaleStreamTask.class));
 
     private final StreamMetadataTasks streamMetadataTasks;
     private final StreamMetadataStore streamMetadataStore;
     private final ScheduledExecutorService executor;
 
-    public ScaleOperationTask(final StreamMetadataTasks streamMetadataTasks,
-                              final StreamMetadataStore streamMetadataStore,
-                              final ScheduledExecutorService executor) {
+    public ScaleStreamTask(final StreamMetadataTasks streamMetadataTasks,
+                           final StreamMetadataStore streamMetadataStore,
+                           final ScheduledExecutorService executor) {
         Preconditions.checkNotNull(streamMetadataStore);
         Preconditions.checkNotNull(streamMetadataTasks);
         Preconditions.checkNotNull(executor);

@@ -96,7 +96,7 @@ public class StreamTest {
         testStream(stream);
     }
 
-    private void testStream(PersistentStreamBase stream) throws InterruptedException, ExecutionException {
+    private void testStream(AbstractStream stream) throws InterruptedException, ExecutionException {
         long creationTime1 = System.currentTimeMillis();
         long creationTime2 = creationTime1 + 1;
         final ScalingPolicy policy1 = ScalingPolicy.fixed(5);

@@ -14,15 +14,15 @@ import io.pravega.controller.store.stream.records.StateRecord;
 import java.util.Optional;
 
 public class StreamMetadataStoreTestHelper {
-    public static PersistentStreamBase getStream(StreamMetadataStore store, String scopeName, String streamName) {
-        return (PersistentStreamBase) ((AbstractStreamMetadataStore) store)
+    public static AbstractStream getStream(StreamMetadataStore store, String scopeName, String streamName) {
+        return (AbstractStream) ((AbstractStreamMetadataStore) store)
                 .newStream(scopeName, streamName);
     }
     
     public static void partiallyCreateStream(StreamMetadataStore store, String scopeName, String streamName, 
                                              Optional<Long> creationTime, boolean createState) {
         addStreamToScope(store, scopeName, streamName);
-        PersistentStreamBase stream = getStream(store, scopeName, streamName);
+        AbstractStream stream = getStream(store, scopeName, streamName);
         stream.createStreamMetadata().join();
         creationTime.map(x -> stream.storeCreationTimeIfAbsent(x).join());
         if (createState) {

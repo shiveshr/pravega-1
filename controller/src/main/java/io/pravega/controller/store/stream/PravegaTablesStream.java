@@ -68,7 +68,7 @@ import static io.pravega.shared.NameUtils.getQualifiedTableName;
  * Each stream table is protected against recreation of stream by attaching a unique id to the stream when it is created.
  */
 @Slf4j
-class PravegaTablesStream extends PersistentStreamBase {
+class PravegaTablesStream extends AbstractStream {
     private static final String METADATA_TABLE = "metadata" + SEPARATOR + "%s";
     private static final String EPOCHS_WITH_TRANSACTIONS_TABLE = "epochsWithTransactions" + SEPARATOR + "%s";
     private static final String WRITERS_POSITIONS_TABLE = "writersPositions" + SEPARATOR + "%s";

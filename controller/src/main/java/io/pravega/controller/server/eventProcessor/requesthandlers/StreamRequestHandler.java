@@ -28,14 +28,14 @@ import java.util.concurrent.ScheduledExecutorService;
 @Slf4j
 public class StreamRequestHandler extends AbstractRequestProcessor<ControllerEvent> {
     private final AutoScaleTask autoScaleTask;
-    private final ScaleOperationTask scaleOperationTask;
+    private final ScaleStreamTask scaleOperationTask;
     private final UpdateStreamTask updateStreamTask;
     private final SealStreamTask sealStreamTask;
     private final DeleteStreamTask deleteStreamTask;
     private final TruncateStreamTask truncateStreamTask;
 
     public StreamRequestHandler(AutoScaleTask autoScaleTask,
-                                ScaleOperationTask scaleOperationTask,
+                                ScaleStreamTask scaleOperationTask,
                                 UpdateStreamTask updateStreamTask,
                                 SealStreamTask sealStreamTask,
                                 DeleteStreamTask deleteStreamTask,

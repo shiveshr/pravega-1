@@ -39,7 +39,7 @@ import io.pravega.controller.server.ControllerService;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.eventProcessor.requesthandlers.AutoScaleTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.DeleteStreamTask;
-import io.pravega.controller.server.eventProcessor.requesthandlers.ScaleOperationTask;
+import io.pravega.controller.server.eventProcessor.requesthandlers.ScaleStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.SealStreamTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.StreamRequestHandler;
 import io.pravega.controller.server.eventProcessor.requesthandlers.TruncateStreamTask;
@@ -164,7 +164,7 @@ public class ControllerGrpcAuthFocusedTest {
                 EXECUTOR, "host", authHelper);
 
         StreamRequestHandler streamRequestHandler = new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamStore, EXECUTOR),
-                new ScaleOperationTask(streamMetadataTasks, streamStore, EXECUTOR),
+                new ScaleStreamTask(streamMetadataTasks, streamStore, EXECUTOR),
                 new UpdateStreamTask(streamMetadataTasks, streamStore, bucketStore, EXECUTOR),
                 new SealStreamTask(streamMetadataTasks, streamTransactionMetadataTasks, streamStore, EXECUTOR),
                 new DeleteStreamTask(streamMetadataTasks, streamStore, bucketStore, EXECUTOR),
