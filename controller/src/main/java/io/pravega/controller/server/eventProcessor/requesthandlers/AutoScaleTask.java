@@ -13,8 +13,10 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import io.pravega.client.stream.ScalingPolicy;
 import io.pravega.client.stream.StreamConfiguration;
+import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.tracing.TagLogger;
+import io.pravega.controller.store.stream.EpochTransitionOperationExceptions;
 import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.records.StreamSegmentRecord;
@@ -111,7 +113,7 @@ public class AutoScaleTask {
                     simpleEntries.add(new AbstractMap.SimpleEntry<>(segment.getKeyStart() + delta * (numOfSplits -1),
                             segment.getKeyEnd()));
 
-                    return postScaleRequest(request, Lists.newArrayList(request.getSegmentId()), simpleEntries, request.getRequestId());
+                    return postScaleRequest(request, Lists.newArrayList(request.getSegmentId()), simpleEntries, context, request.getRequestId());
                 }, executor);
     }
 
@@ -180,7 +182,7 @@ public class AutoScaleTask {
                         simpleEntries.add(new AbstractMap.SimpleEntry<>(min, max));
                         final ArrayList<Long> segments = new ArrayList<>();
                         toMerge.forEach(segment -> segments.add(segment.segmentId()));
-                        return postScaleRequest(request, segments, simpleEntries, request.getRequestId());
+                        return postScaleRequest(request, segments, simpleEntries, context, request.getRequestId());
                     } else {
                         return CompletableFuture.completedFuture(null);
                     }
@@ -196,7 +198,7 @@ public class AutoScaleTask {
      * @return CompletableFuture
      */
     private CompletableFuture<Void> postScaleRequest(final AutoScaleEvent request, final List<Long> segments,
-                                                     final List<Map.Entry<Double, Double>> newRanges,
+                                                     final List<Map.Entry<Double, Double>> newRanges, final OperationContext context,
                                                      final long requestId) {
         ScaleOpEvent event = new ScaleOpEvent(request.getScope(),
                 request.getStream(),
@@ -206,6 +208,8 @@ public class AutoScaleTask {
                 System.currentTimeMillis(),
                 requestId);
 
-        return streamMetadataTasks.writeEvent(event);
+        return Futures.exceptionallyComposeExpecting(Futures.toVoid(streamMetadataTasks.scale(event, context)), 
+                e -> Exceptions.unwrap(e) instanceof EpochTransitionOperationExceptions.ConflictException, 
+                () -> Futures.toVoid(streamMetadataTasks.writeEvent(request)));
     }
 }
