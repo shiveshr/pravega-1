@@ -8,6 +8,8 @@ import io.pravega.client.admin.impl.StreamManagerImpl;
 import io.pravega.client.segment.impl.Segment;
 import io.pravega.client.stream.EventRead;
 import io.pravega.client.stream.EventStreamReader;
+import io.pravega.client.stream.EventStreamWriter;
+import io.pravega.client.stream.EventWriterConfig;
 import io.pravega.client.stream.ReaderConfig;
 import io.pravega.client.stream.ReaderGroup;
 import io.pravega.client.stream.ReaderGroupConfig;
@@ -20,9 +22,9 @@ import io.pravega.client.stream.impl.JavaSerializer;
 import io.pravega.client.stream.impl.SegmentWithRange;
 import io.pravega.client.stream.impl.StreamCutImpl;
 import io.pravega.client.stream.impl.StreamImpl;
-import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 
+import java.io.Serializable;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -49,8 +51,13 @@ public class Sample {
         String stream = "stream";
         sm.createStream(scope, stream, StreamConfiguration.builder().scalingPolicy(ScalingPolicy.byEventRate(100, 2, 10)).build());
 
-        // start writer
+        EventStreamClientFactory clientFactory = EventStreamClientFactory.withScope(scope, clientConfig);
+        AtomicBoolean run = new AtomicBoolean(true);
 
+        // start writer
+        EventStreamWriter<Serializable> writer = clientFactory.createEventWriter(stream, new JavaSerializer<>(), EventWriterConfig.builder().build());
+        Futures.loop(run::get, () -> writer.writeEvent("event"), EXECUTOR);
+        
         // read pattern
         ReaderGroupManager rgm = ReaderGroupManager.withScope(scope, clientConfig);
         StreamImpl streamObj = new StreamImpl(scope, stream);
@@ -58,10 +65,9 @@ public class Sample {
         String rgName = "grpName";
         rgm.createReaderGroup(rgName, cfg);
         ReaderGroup rg = rgm.getReaderGroup(rgName);
-        AtomicBoolean run = new AtomicBoolean(true);
 
         periodicRolloverAndTruncation(controller, scope, stream, streamObj, rg, run);
-        processEvents(clientConfig, scope, rgName, run);
+        processEvents(clientFactory, rgName, run);
         
         Thread.sleep(10000000L);
         run.set(false);
@@ -72,22 +78,24 @@ public class Sample {
         truncationPoint.set(rolloverAndGetTruncationPoint(controller, scope, stream, streamObj, rg));
 
         Futures.loop (run::get, () -> Futures.delayedFuture(() -> {
-            boolean isAhead = rg.getStreamCuts().get(streamObj).asImpl()
-                                .getPositions().entrySet().stream().allMatch(x -> {
-                        Map<Segment, Long> positions = truncationPoint.get().asImpl().getPositions();
-                        if (positions.containsKey(x.getKey())) {
-                            return positions.get(x.getKey()) > x.getValue();
-                        } else {
-                            return positions.entrySet().stream().allMatch(y -> x.getKey().getSegmentId() > y.getKey().getSegmentId());
-                        }
-                    });
+            return rg.generateStreamCuts(EXECUTOR).thenCompose(streamCut -> {
+                boolean isAhead = streamCut.get(streamObj).asImpl()
+                                           .getPositions().entrySet().stream().allMatch(x -> {
+                            Map<Segment, Long> positions = truncationPoint.get().asImpl().getPositions();
+                            if (positions.containsKey(x.getKey())) {
+                                return positions.get(x.getKey()) > x.getValue();
+                            } else {
+                                return positions.entrySet().stream().allMatch(y -> x.getKey().getSegmentId() > y.getKey().getSegmentId());
+                            }
+                        });
 
-            if (isAhead) {
-                return controller.truncateStream(scope, stream, truncationPoint.get())
-                        .thenAccept(v -> truncationPoint.set(rolloverAndGetTruncationPoint(controller, scope, stream, streamObj, rg)));
-            } else {
-                return CompletableFuture.completedFuture(null);
-            }
+                if (isAhead) {
+                    return controller.truncateStream(scope, stream, truncationPoint.get())
+                                     .thenAccept(v -> truncationPoint.set(rolloverAndGetTruncationPoint(controller, scope, stream, streamObj, rg)));
+                } else {
+                    return CompletableFuture.<Void>completedFuture(null);
+                }
+            });
         }, Duration.ofSeconds(10).toMillis(), EXECUTOR), EXECUTOR);
     }
 
@@ -113,8 +121,7 @@ public class Sample {
         return new StreamCutImpl(streamObj, map);
     }
 
-    private static void processEvents(ClientConfig clientConfig, String scope, String rgName, AtomicBoolean continueReading) {
-        EventStreamClientFactory clientFactory = EventStreamClientFactory.withScope(scope, clientConfig);
+    private static void processEvents(EventStreamClientFactory clientFactory, String rgName, AtomicBoolean continueReading) {
         EventStreamReader<String> reader = clientFactory.createReader("reader", rgName, new JavaSerializer<>(),
                 ReaderConfig.builder().build());
 
