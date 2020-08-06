@@ -20,7 +20,6 @@ import io.pravega.client.stream.StreamCut;
 import io.pravega.client.stream.impl.ControllerImpl;
 import io.pravega.client.stream.impl.ControllerImplConfig;
 import io.pravega.client.stream.impl.JavaSerializer;
-import io.pravega.client.stream.impl.SegmentWithRange;
 import io.pravega.client.stream.impl.StreamCutImpl;
 import io.pravega.client.stream.impl.StreamImpl;
 import io.pravega.common.concurrent.Futures;
@@ -28,9 +27,7 @@ import io.pravega.common.concurrent.Futures;
 import java.io.Serializable;
 import java.net.URI;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -138,24 +135,12 @@ public class Sample {
         // this is a new method that i had to add to controller client because it returned an opaque StreamSegments object from 
         // getCurrentSegments which did not expose the segments with their ranges, which is required to create identical 
         // replacement ranges.
-        return controller.getCurrentSegmentsWithRange(scope, stream)
-                  .thenCompose(activeSegments -> {
-                      List<Long> segmentsToSeal = new ArrayList<>();
-                      Map<Double, Double> newRanges = new HashMap<>();
-                      activeSegments.forEach(x -> {
-                          segmentsToSeal.add(x.getSegment().getSegmentId());
-                          newRanges.put(x.getRange().getLow(), x.getRange().getHigh());
-                      });
-
-                      // this could fail if active segments were sealed by the time we attempted to scale them. 
-                      // TODO: it should be retried for scale precondition failures. 
-                      return controller.scaleStream(streamObj, segmentsToSeal, newRanges, EXECUTOR).getFuture()
-                              .thenApply(v -> {
+        return controller.rollOver(scope, stream, EXECUTOR)
+                              .thenApply(newSegments -> {
                                   // get the segments post scale and create a stream cut from them.
-                                  List<SegmentWithRange> newSegments = controller.getCurrentSegmentsWithRange(scope, stream).join();
-                                  Map<Segment, Long> map = newSegments.stream().collect(Collectors.toMap(SegmentWithRange::getSegment, x -> 0L));
+                                  Map<Segment, Long> map = newSegments.getSegments().stream().collect(
+                                          Collectors.toMap(x -> x, x -> 0L));
                                   return new StreamCutImpl(streamObj, map);                                  
                               });
-                  });
     }
 }
