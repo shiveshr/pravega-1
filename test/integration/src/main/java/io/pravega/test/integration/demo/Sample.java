@@ -82,6 +82,19 @@ public class Sample {
         Futures.loop(run::get, () -> writer.writeEvent("event"), EXECUTOR);
     }
 
+    private static void startReader(EventStreamClientFactory clientFactory, String rgName, AtomicBoolean continueReading) {
+        EventStreamReader<String> reader = clientFactory.createReader("reader", rgName, new JavaSerializer<>(),
+                ReaderConfig.builder().build());
+
+        Futures.loop(continueReading::get, () -> {
+            return CompletableFuture.runAsync(() -> {
+                EventRead<String> event = reader.readNextEvent(1000L);
+                // TODO: process event
+                // ...
+            }, EXECUTOR);
+        }, EXECUTOR);
+    }
+
     private static void startBackgroundRolloverAndTruncation(ControllerImpl controller, String scope, String stream, StreamImpl streamObj,
                                                              List<ReaderGroup> rg, AtomicBoolean run) {
         AtomicReference<StreamCut> nextTruncationPoint = new AtomicReference<>();
@@ -144,18 +157,5 @@ public class Sample {
                                   return new StreamCutImpl(streamObj, map);                                  
                               });
                   });
-    }
-
-    private static void startReader(EventStreamClientFactory clientFactory, String rgName, AtomicBoolean continueReading) {
-        EventStreamReader<String> reader = clientFactory.createReader("reader", rgName, new JavaSerializer<>(),
-                ReaderConfig.builder().build());
-
-        Futures.loop(continueReading::get, () -> {
-            return CompletableFuture.runAsync(() -> {
-                EventRead<String> event = reader.readNextEvent(1000L);
-                // TODO: process event
-                // ...
-            }, EXECUTOR);
-        }, EXECUTOR);
     }
 }
