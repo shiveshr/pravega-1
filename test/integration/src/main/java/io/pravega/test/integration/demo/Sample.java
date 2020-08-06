@@ -14,6 +14,7 @@ import io.pravega.client.stream.ReaderConfig;
 import io.pravega.client.stream.ReaderGroup;
 import io.pravega.client.stream.ReaderGroupConfig;
 import io.pravega.client.stream.ScalingPolicy;
+import io.pravega.client.stream.Stream;
 import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.StreamCut;
 import io.pravega.client.stream.impl.ControllerImpl;
@@ -54,11 +55,7 @@ public class Sample {
 
         EventStreamClientFactory clientFactory = EventStreamClientFactory.withScope(scope, clientConfig);
         AtomicBoolean run = new AtomicBoolean(true);
-
-        // start writer
-        EventStreamWriter<Serializable> writer = clientFactory.createEventWriter(stream, new JavaSerializer<>(), EventWriterConfig.builder().build());
-        Futures.loop(run::get, () -> writer.writeEvent("event"), EXECUTOR);
-
+        
         // read pattern
         ReaderGroupManager rgm = ReaderGroupManager.withScope(scope, clientConfig);
         StreamImpl streamObj = new StreamImpl(scope, stream);
@@ -68,41 +65,59 @@ public class Sample {
         ReaderGroup rg = rgm.getReaderGroup(rgName);
 
         startBackgroundRolloverAndTruncation(controller, scope, stream, streamObj, Collections.singletonList(rg), run);
-        backgroundProcessEvents(clientFactory, rgName, run);
 
-        Thread.sleep(10000000L);
+        // start writer
+        startWriter(stream, clientFactory, run);
+
+        // start reader
+        startReader(clientFactory, rgName, run);
+
+        // let traffic be generated for 20 minutes after which we terminate. 
+        Thread.sleep(Duration.ofMinutes(20).toMillis());
         run.set(false);
+    }
+
+    private static void startWriter(String stream, EventStreamClientFactory clientFactory, AtomicBoolean run) {
+        EventStreamWriter<Serializable> writer = clientFactory.createEventWriter(stream, new JavaSerializer<>(), EventWriterConfig.builder().build());
+        Futures.loop(run::get, () -> writer.writeEvent("event"), EXECUTOR);
     }
 
     private static void startBackgroundRolloverAndTruncation(ControllerImpl controller, String scope, String stream, StreamImpl streamObj,
                                                              List<ReaderGroup> rg, AtomicBoolean run) {
-        AtomicReference<StreamCut> truncationPoint = new AtomicReference<>();
+        AtomicReference<StreamCut> nextTruncationPoint = new AtomicReference<>();
         rolloverAndGetTruncationPoint(controller, scope, stream, streamObj)
                 .thenCompose(tp -> {
-                    truncationPoint.set(tp);
+                    nextTruncationPoint.set(tp);
+                    // every 10 seconds, we check whether all readergroups are ahead of next truncation point.  
                     return Futures.loop(run::get, () -> Futures.delayedFuture(() -> {
                         return Futures.allOfWithResults(rg.stream().map(m -> m.generateStreamCuts(EXECUTOR).thenApply(streamCut -> {
-                            return streamCut.get(streamObj).asImpl()
-                                            .getPositions().entrySet().stream().allMatch(x -> {
-                                        Map<Segment, Long> positions = truncationPoint.get().asImpl().getPositions();
-                                        if (positions.containsKey(x.getKey())) {
-                                            return positions.get(x.getKey()) > x.getValue();
-                                        } else {
-                                            return positions.entrySet().stream().allMatch(y -> x.getKey().getSegmentId() > y.getKey().getSegmentId());
-                                        }
-                                    });
+                            return isRGAheadOfTruncationPoint(streamObj, nextTruncationPoint, streamCut);
                         })).collect(Collectors.toList()))
                                       .thenCompose(list -> {
+                                          // if all readergroups are ahead of truncation point, then we can truncate at the truncation point. 
                                           boolean allAhead = list.stream().reduce(true, (a, b) -> a && b);
                                           if (allAhead) {
-                                              return controller.truncateStream(scope, stream, truncationPoint.get())
+                                              return controller.truncateStream(scope, stream, nextTruncationPoint.get())
+                                                               // after truncating, we will rollover again and choose the next truncation point
                                                                .thenCompose(v -> rolloverAndGetTruncationPoint(controller, scope, stream, streamObj))
-                                                               .thenAccept(truncationPoint::set);
+                                                               .thenAccept(nextTruncationPoint::set);
                                           } else {
                                               return CompletableFuture.<Void>completedFuture(null);
                                           }
                                       });
                     }, Duration.ofSeconds(10).toMillis(), EXECUTOR), EXECUTOR);
+                });
+    }
+
+    private static boolean isRGAheadOfTruncationPoint(StreamImpl streamObj, AtomicReference<StreamCut> truncationPoint, Map<Stream, StreamCut> streamCut) {
+        return streamCut.get(streamObj).asImpl()
+                        .getPositions().entrySet().stream().allMatch(x -> {
+                    Map<Segment, Long> positions = truncationPoint.get().asImpl().getPositions();
+                    if (positions.containsKey(x.getKey())) {
+                        return positions.get(x.getKey()) > x.getValue();
+                    } else {
+                        return positions.entrySet().stream().allMatch(y -> x.getKey().getSegmentId() > y.getKey().getSegmentId());
+                    }
                 });
     }
 
@@ -131,7 +146,7 @@ public class Sample {
                   });
     }
 
-    private static void backgroundProcessEvents(EventStreamClientFactory clientFactory, String rgName, AtomicBoolean continueReading) {
+    private static void startReader(EventStreamClientFactory clientFactory, String rgName, AtomicBoolean continueReading) {
         EventStreamReader<String> reader = clientFactory.createReader("reader", rgName, new JavaSerializer<>(),
                 ReaderConfig.builder().build());
 
