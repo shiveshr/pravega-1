@@ -28,6 +28,7 @@ import io.pravega.common.tracing.TagLogger;
 import io.pravega.common.util.RetriesExhaustedException;
 import io.pravega.controller.metrics.StreamMetrics;
 import io.pravega.controller.metrics.TransactionMetrics;
+import io.pravega.controller.retryable.RetryableException;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.eventProcessor.ControllerEventProcessors;
 import io.pravega.controller.server.eventProcessor.requesthandlers.TaskExceptions;
@@ -72,8 +73,10 @@ import io.pravega.shared.controller.event.UpdateStreamEvent;
 import io.pravega.shared.protocol.netty.WireCommands;
 import java.io.Serializable;
 import java.time.Duration;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -293,7 +296,7 @@ public class StreamMetadataTasks extends TaskBase {
                 .thenCompose(retentionSet -> {
                     StreamCutReferenceRecord latestCut = retentionSet.getLatest();
                     
-                    return generateStreamCutIfRequired(scope, stream, latestCut, recordingTime, context, delegationToken)
+                    return generateStreamCutIfRequired(scope, stream, latestCut, recordingTime, context, delegationToken, requestId)
                             .thenCompose(newRecord -> truncate(scope, stream, policy, context, retentionSet, newRecord, recordingTime, requestId));
                 })
                 .thenAccept(x -> StreamMetrics.reportRetentionEvent(scope, stream));
@@ -302,13 +305,13 @@ public class StreamMetadataTasks extends TaskBase {
 
     private CompletableFuture<StreamCutRecord> generateStreamCutIfRequired(String scope, String stream,
                                                                            StreamCutReferenceRecord previous, long recordingTime,
-                                                                           OperationContext context, String delegationToken) {
+                                                                           OperationContext context, String delegationToken, long requestId) {
         if (previous == null || recordingTime - previous.getRecordingTime() > RETENTION_FREQUENCY_IN_MINUTES) {
             return Futures.exceptionallyComposeExpecting(
                     previous == null ? CompletableFuture.completedFuture(null) :
                             streamMetadataStore.getStreamCutRecord(scope, stream, previous, context, executor),
                     e -> e instanceof StoreException.DataNotFoundException, () -> null)
-                          .thenCompose(previousRecord -> generateStreamCut(scope, stream, previousRecord, context, delegationToken)
+                          .thenCompose(previousRecord -> generateStreamCut(scope, stream, previousRecord, context, delegationToken, requestId)
                                   .thenCompose(newRecord -> streamMetadataStore.addStreamCutToRetentionSet(scope, stream, newRecord, context, executor)
                                                                                .thenApply(x -> {
                                                                                    log.debug("New streamCut generated for stream {}/{}", scope, stream);
@@ -371,10 +374,11 @@ public class StreamMetadataTasks extends TaskBase {
      * @param contextOpt optional context
      * @param delegationToken token to be sent to segmentstore.
      * @param previous previous stream cut record
+     * @param requestId request id
      * @return streamCut.
      */
     public CompletableFuture<StreamCutRecord> generateStreamCut(final String scope, final String stream, final StreamCutRecord previous,
-                                                                final OperationContext contextOpt, String delegationToken) {
+                                                                final OperationContext contextOpt, String delegationToken, long requestId) {
         final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
 
         return streamMetadataStore.getActiveSegments(scope, stream, context, executor)
@@ -383,13 +387,84 @@ public class StreamMetadataTasks extends TaskBase {
                         .parallel()
                         .collect(Collectors.toMap(x -> x, x -> getSegmentOffset(scope, stream, x.segmentId(), delegationToken)))))
                 .thenCompose(map -> {
-                    final long generationTime = System.currentTimeMillis();
-                    ImmutableMap.Builder<Long, Long> builder = ImmutableMap.builder();
-                    map.forEach((key, value) -> builder.put(key.segmentId(), value));
-                    ImmutableMap<Long, Long> streamCutMap = builder.build();
-                    return streamMetadataStore.getSizeTillStreamCut(scope, stream, streamCutMap, Optional.ofNullable(previous), context, executor)
-                                              .thenApply(sizeTill -> new StreamCutRecord(generationTime, sizeTill, streamCutMap));
-                });
+                    if (Config.RETENTION_PERIODIC_STREAM_ROLLOVER) {
+                        return rollover(scope, stream, context, map, requestId);
+                    } else {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                }).thenCompose(map -> {
+                                    final long generationTime = System.currentTimeMillis();
+                                    ImmutableMap.Builder<Long, Long> builder = ImmutableMap.builder();
+                                    map.forEach((key, value) -> builder.put(key.segmentId(), value));
+                                    ImmutableMap<Long, Long> streamCutMap = builder.build();
+                                    return streamMetadataStore.getSizeTillStreamCut(scope, stream, streamCutMap, Optional.ofNullable(previous), context, executor)
+                                                              .thenApply(sizeTill -> new StreamCutRecord(generationTime, sizeTill, streamCutMap));
+                                });
+    }
+
+    private CompletableFuture<Map<StreamSegmentRecord, Long>> rollover(String scope, String stream, OperationContext context, 
+                                             Map<StreamSegmentRecord, Long> map, long requestId) {
+        long rolloverTime = System.currentTimeMillis();
+    
+        // Identify segments from the latest streamcut which can be rolled over. Rollover effectively is a scale operation
+        // where a subset of active segments are sealed and replaced with identical segments with same range.
+        // The chief motivation for rolling over segments is to ensure that the number of segment chunks in tier-2 could 
+        // not grow unbounded. By sealing and creating replacement segments, we ensure that the segment, with all its 
+        // metadata and chunks stay within a specific size bound. 
+        // However, by sealing a segment, we effectively reset the traffic related metrics for the key range owned by the 
+        // segment. This is because the traffic metrics are not carried over to new replacement segments.  
+        // To ensure that rollover does not prematurely seal a segment which could have otherwise potentially scaled up 
+        // or down, we will rely on a minimum roll over time (which should be configured to be higher than 
+        // segmentstore.autoscale.cooldown period on segment store).
+        // 
+        // So a segment will be included for rollover if following criteria are met:
+        // 1. it is part of active segment.
+        // 2. was created at least Config.RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_TIME_MILLIS before
+        // 3. has more data than a minimum threshold to justify a rollover.  
+        return RetryHelper.withRetriesAsync(
+                () -> streamMetadataStore.getActiveSegments(scope, stream, context, executor).thenCompose(segments -> {
+                    List<Long> segmentsToSeal = new ArrayList<>();
+                    List<Map.Entry<Double, Double>> newRanges = new ArrayList<>();
+                    HashSet<StreamSegmentRecord> segmentSet = new HashSet<>(segments);
+                    map.forEach((key, value) -> {
+                        if (isRolloverCandidate(rolloverTime, segmentSet, key, value)) {
+                            segmentsToSeal.add(key.segmentId());
+                            newRanges.add(new AbstractMap.SimpleEntry<>(key.getKeyStart(), key.getKeyEnd()));
+                        }
+                    });
+                    if (!segmentsToSeal.isEmpty()) {
+                        return scale(scope, stream, context, requestId, rolloverTime, segmentsToSeal, newRanges)
+                                .thenApply(v -> null);
+                    } else {
+                        // all candidate segments are already scaled, nothing to do.  
+                        return CompletableFuture.completedFuture(null);
+                    }
+                }), e -> {
+                    // precondition failure means some segments being attempted to be scaled are already sealed. Retry. 
+                    Throwable unwrap = Exceptions.unwrap(e);
+                    return unwrap instanceof RetryableException || 
+                            unwrap instanceof EpochTransitionOperationExceptions.PreConditionFailureException ||
+                            unwrap instanceof EpochTransitionOperationExceptions.ConflictException;
+                }, 5, executor); 
+    }
+
+    private boolean isRolloverCandidate(long rolloverTime, Set<StreamSegmentRecord> segments, StreamSegmentRecord key, Long value) {
+        return segments.contains(key) && (
+                rolloverTime - key.getCreationTime() > Config.RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_TIME_MILLIS ||
+                value > Config.RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_SIZE_BYTES);
+    }
+
+    private CompletableFuture<VersionedMetadata<EpochTransitionRecord>> scale(
+            String scope, String stream, OperationContext context, long requestId, long rolloverTime, 
+            List<Long> segmentsToSeal, List<Map.Entry<Double, Double>> newRanges) {
+        ScaleOpEvent event = new ScaleOpEvent(scope, stream, segmentsToSeal, newRanges, true,
+                rolloverTime, requestId);
+        return addIndexAndSubmitTask(event, () -> streamMetadataStore.submitScale(scope, stream, segmentsToSeal, new ArrayList<>(newRanges),
+                        rolloverTime, null, context, executor))
+                .thenCompose(epochTransition -> checkDone(() -> 
+                        checkScale(scope, stream, epochTransition.getObject().getActiveEpoch(), context)
+                                .thenApply(response -> response.getStatus().equals(ScaleStatusResponse.ScaleStatus.SUCCESS)))
+                        .thenApply(v -> epochTransition));
     }
 
     /**

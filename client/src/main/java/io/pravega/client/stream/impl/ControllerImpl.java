@@ -844,6 +844,29 @@ public class ControllerImpl implements Controller {
                          LoggerHelpers.traceLeave(log, "getCurrentSegments", traceId);
                      });
     }
+    
+    public CompletableFuture<List<SegmentWithRange>> getCurrentSegmentsWithRange(final String scope, final String stream) {
+        Exceptions.checkNotClosed(closed.get(), this);
+        Exceptions.checkNotNullOrEmpty(scope, "scope");
+        Exceptions.checkNotNullOrEmpty(stream, "stream");
+        long traceId = LoggerHelpers.traceEnter(log, "getCurrentSegments", scope, stream);
+
+        final CompletableFuture<SegmentRanges> result = this.retryConfig.runAsync(() -> {
+            RPCAsyncCallback<SegmentRanges> callback = new RPCAsyncCallback<>(traceId, "getCurrentSegments", scope, stream);
+            client.withDeadlineAfter(timeoutMillis, TimeUnit.MILLISECONDS)
+                  .getCurrentSegments(ModelHelper.createStreamInfo(scope, stream), callback);
+            return callback.getFuture();
+        }, this.executor);
+        return result.thenApply(ranges -> ranges.getSegmentRangesList().stream()
+                                                .map(r -> new SegmentWithRange(ModelHelper.encode(r.getSegmentId()), r.getMinKey(), r.getMaxKey()))
+                                                .collect(Collectors.toList()))
+                     .whenComplete((x, e) -> {
+                         if (e != null) {
+                             log.warn("getCurrentSegments for {}/{} failed: ", scope, stream, e);
+                         }
+                         LoggerHelpers.traceLeave(log, "getCurrentSegments", traceId);
+                     });
+    }
 
     @Override
     public CompletableFuture<PravegaNodeUri> getEndpointForSegment(final String qualifiedSegmentName) {

@@ -19,6 +19,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.net.URL;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Properties;
 import lombok.SneakyThrows;
@@ -107,6 +108,9 @@ public final class Config {
     public static final int MINIMUM_RETENTION_FREQUENCY_IN_MINUTES;
     public static final int RETENTION_BUCKET_COUNT;
     public static final int RETENTION_THREAD_POOL_SIZE;
+    public static final boolean RETENTION_PERIODIC_STREAM_ROLLOVER;
+    public static final long RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_SIZE_BYTES;
+    public static final long RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_TIME_MILLIS;
 
     // Watermarking Configuration
     public static final int MINIMUM_WATERMARKING_FREQUENCY_IN_SECONDS;
@@ -126,8 +130,7 @@ public final class Config {
     public static final GRPCServerConfig GRPC_SERVER_CONFIG;
 
     private static final String METRICS_PATH = "controller.metrics.";
-
-
+    
     //endregion
 
     //region Property Definitions
@@ -173,6 +176,9 @@ public final class Config {
     private static final Property<Integer> PROPERTY_RETENTION_FREQUENCY_MINUTES = Property.named("retention.frequencyMinutes", 30);
     private static final Property<Integer> PROPERTY_RETENTION_BUCKET_COUNT = Property.named("retention.bucketCount", 1);
     private static final Property<Integer> PROPERTY_RETENTION_THREAD_COUNT = Property.named("retention.threadCount", 1);
+    private static final Property<Boolean> PROPERTY_RETENTION_PERIODIC_STREAM_ROLLOVER = Property.named("retention.streamRollover", false);
+    private static final Property<Long> PROPERTY_RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_SIZE_BYTES = Property.named("retention.streamRollover.segmentMinSize", 100 * 1024 * 1024L);
+    private static final Property<Long> PROPERTY_RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_TIME_MILLIS = Property.named("retention.streamRollover.segmentMinSize", Duration.ofMinutes(10).toMillis());
     
     private static final Property<Integer> PROPERTY_TXN_MIN_LEASE = Property.named("transaction.minLeaseValue", 10000);
     private static final Property<Integer> PROPERTY_TXN_MAX_LEASE = Property.named("transaction.maxLeaseValue", 120000);
@@ -236,6 +242,9 @@ public final class Config {
         MAX_LEASE_VALUE = p.getInt(PROPERTY_TXN_MAX_LEASE);
         COMPLETED_TRANSACTION_TTL_IN_HOURS = p.getInt(PROPERTY_TXN_TTL_HOURS);
         MINIMUM_RETENTION_FREQUENCY_IN_MINUTES = p.getInt(PROPERTY_RETENTION_FREQUENCY_MINUTES);
+        RETENTION_PERIODIC_STREAM_ROLLOVER = p.getBoolean(PROPERTY_RETENTION_PERIODIC_STREAM_ROLLOVER);
+        RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_SIZE_BYTES = p.getLong(PROPERTY_RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_SIZE_BYTES);
+        RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_TIME_MILLIS = p.getLong(PROPERTY_RETENTION_STREAM_ROLLOVER_SEGMENT_MIN_TIME_MILLIS);
         RETENTION_BUCKET_COUNT = p.getInt(PROPERTY_RETENTION_BUCKET_COUNT);
         RETENTION_THREAD_POOL_SIZE = p.getInt(PROPERTY_RETENTION_THREAD_COUNT);
         MINIMUM_WATERMARKING_FREQUENCY_IN_SECONDS = p.getInt(PROPERTY_WATERMARKING_FREQUENCY_SECONDS);
