@@ -28,6 +28,7 @@ import java.io.Serializable;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,7 +58,7 @@ public class Sample {
         // start writer
         EventStreamWriter<Serializable> writer = clientFactory.createEventWriter(stream, new JavaSerializer<>(), EventWriterConfig.builder().build());
         Futures.loop(run::get, () -> writer.writeEvent("event"), EXECUTOR);
-        
+
         // read pattern
         ReaderGroupManager rgm = ReaderGroupManager.withScope(scope, clientConfig);
         StreamImpl streamObj = new StreamImpl(scope, stream);
@@ -66,21 +67,22 @@ public class Sample {
         rgm.createReaderGroup(rgName, cfg);
         ReaderGroup rg = rgm.getReaderGroup(rgName);
 
-        periodicRolloverAndTruncation(controller, scope, stream, streamObj, rg, run);
+        periodicRolloverAndTruncation(controller, scope, stream, streamObj, Collections.singletonList(rg), run);
         processEvents(clientFactory, rgName, run);
-        
+
         Thread.sleep(10000000L);
         run.set(false);
     }
 
-    private static void periodicRolloverAndTruncation(ControllerImpl controller, String scope, String stream, StreamImpl streamObj, ReaderGroup rg, AtomicBoolean run) throws InterruptedException {
+    private static void periodicRolloverAndTruncation(ControllerImpl controller, String scope, String stream, StreamImpl streamObj,
+                                                      List<ReaderGroup> rg, AtomicBoolean run) throws InterruptedException {
         AtomicReference<StreamCut> truncationPoint = new AtomicReference<>();
-        truncationPoint.set(rolloverAndGetTruncationPoint(controller, scope, stream, streamObj, rg));
+        truncationPoint.set(rolloverAndGetTruncationPoint(controller, scope, stream, streamObj));
 
-        Futures.loop (run::get, () -> Futures.delayedFuture(() -> {
-            return rg.generateStreamCuts(EXECUTOR).thenCompose(streamCut -> {
-                boolean isAhead = streamCut.get(streamObj).asImpl()
-                                           .getPositions().entrySet().stream().allMatch(x -> {
+        Futures.loop(run::get, () -> Futures.delayedFuture(() -> {
+            return Futures.allOfWithResults(rg.stream().map(m -> m.generateStreamCuts(EXECUTOR).thenApply(streamCut -> {
+                return streamCut.get(streamObj).asImpl()
+                                .getPositions().entrySet().stream().allMatch(x -> {
                             Map<Segment, Long> positions = truncationPoint.get().asImpl().getPositions();
                             if (positions.containsKey(x.getKey())) {
                                 return positions.get(x.getKey()) > x.getValue();
@@ -88,18 +90,21 @@ public class Sample {
                                 return positions.entrySet().stream().allMatch(y -> x.getKey().getSegmentId() > y.getKey().getSegmentId());
                             }
                         });
+            })).collect(Collectors.toList()))
+                          .thenCompose(list -> {
+                              boolean allAhead = list.stream().reduce(true, (a, b) -> a && b);
 
-                if (isAhead) {
-                    return controller.truncateStream(scope, stream, truncationPoint.get())
-                                     .thenAccept(v -> truncationPoint.set(rolloverAndGetTruncationPoint(controller, scope, stream, streamObj, rg)));
-                } else {
-                    return CompletableFuture.<Void>completedFuture(null);
-                }
-            });
+                              if (allAhead) {
+                                  return controller.truncateStream(scope, stream, truncationPoint.get())
+                                                   .thenAccept(v -> truncationPoint.set(rolloverAndGetTruncationPoint(controller, scope, stream, streamObj)));
+                              } else {
+                                  return CompletableFuture.<Void>completedFuture(null);
+                              }
+                          });
         }, Duration.ofSeconds(10).toMillis(), EXECUTOR), EXECUTOR);
     }
 
-    private static StreamCut rolloverAndGetTruncationPoint(ControllerImpl controller, String scope, String stream, StreamImpl streamObj, ReaderGroup rg) {
+    private static StreamCut rolloverAndGetTruncationPoint(ControllerImpl controller, String scope, String stream, StreamImpl streamObj) {
         // this is a new method that i had to add to controller client because it returned an opaque StreamSegments object from 
         // getCurrentSegments which did not expose the segments with their ranges, which is required to create identical 
         // replacement ranges.
