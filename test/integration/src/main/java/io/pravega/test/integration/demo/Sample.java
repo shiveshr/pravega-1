@@ -132,15 +132,17 @@ public class Sample {
     }
 
     private static CompletableFuture<StreamCut> rolloverAndGetTruncationPoint(ControllerImpl controller, String scope, String stream, StreamImpl streamObj) {
-        // this is a new method that i had to add to controller client because it returned an opaque StreamSegments object from 
-        // getCurrentSegments which did not expose the segments with their ranges, which is required to create identical 
-        // replacement ranges.
-        return controller.rollOver(scope, stream, EXECUTOR)
-                              .thenApply(newSegments -> {
-                                  // get the segments post scale and create a stream cut from them.
-                                  Map<Segment, Long> map = newSegments.getSegments().stream().collect(
-                                          Collectors.toMap(x -> x, x -> 0L));
-                                  return new StreamCutImpl(streamObj, map);                                  
-                              });
+        AtomicBoolean tryRollover = new AtomicBoolean(true);
+        return Futures.loop(tryRollover::get, 
+                () -> controller.rollOver(scope, stream, EXECUTOR).thenAccept(rolledOver -> tryRollover.set(!rolledOver)), EXECUTOR)
+                      .thenCompose(rolledOver -> {
+                          return controller.getCurrentSegments(scope, stream)
+                                    .thenApply(segments -> {
+                                        // get the segments post scale and create a stream cut from them.
+                                        Map<Segment, Long> map = segments.getSegments().stream().collect(
+                                                Collectors.toMap(x -> x, x -> 0L));
+                                        return new StreamCutImpl(streamObj, map);
+                                    });
+                      });
     }
 }
