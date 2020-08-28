@@ -31,6 +31,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import static io.pravega.shared.NameUtils.computeSegmentId;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -288,6 +289,8 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
      */
     private CompletableFuture<Void> commitTransactions(String scope, String stream, List<Long> segments,
                                                        List<UUID> transactionsToCommit, OperationContext context, Timer timer) {
+        Duration elapsed = timer.getElapsed();
+        TransactionMetrics.getInstance().commitTransactionIdentification(timer.getElapsed().minus(elapsed));
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
@@ -306,7 +309,7 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                     .thenCompose(v -> streamMetadataTasks.notifyTxnCommit(scope, stream, segments, txnId))
                     .thenCompose(v -> streamMetadataTasks.getCurrentSegmentSizes(scope, stream, segments))
                     .thenCompose(map -> streamMetadataStore.recordCommitOffsets(scope, stream, txnId, map, context, executor))
-                    .thenRun(() -> TransactionMetrics.getInstance().commitTransaction(scope, stream, timer.getElapsed()));
+                    .thenRun(() -> TransactionMetrics.getInstance().commitTransaction(scope, stream, timer.getElapsed().minus(elapsed)));
         }
         
         return future
