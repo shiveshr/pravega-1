@@ -199,7 +199,11 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                     return commitFuture
                             .thenCompose(versionedMetadata -> streamMetadataStore.completeCommitTransactions(scope, stream, versionedMetadata, context, executor)
                             .thenCompose(v -> resetStateConditionally(scope, stream, stateRecord.get(), context))
-                            .thenApply(v -> versionedMetadata.getObject().getEpoch()));
+                            .thenApply(v -> {
+                                TransactionMetrics.getInstance().commitEventProcessingTime(timer.getElapsed());
+
+                                return versionedMetadata.getObject().getEpoch();
+                            }));
                 }, executor);
     }
 
@@ -289,8 +293,8 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
      */
     private CompletableFuture<Void> commitTransactions(String scope, String stream, List<Long> segments,
                                                        List<UUID> transactionsToCommit, OperationContext context, Timer timer) {
-        Duration elapsed = timer.getElapsed();
-        TransactionMetrics.getInstance().commitTransactionIdentification(timer.getElapsed().minus(elapsed));
+        AtomicReference<Duration> elapsed = new AtomicReference<>(timer.getElapsed());
+        TransactionMetrics.getInstance().commitTransactionIdentification(elapsed.get());
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
@@ -309,7 +313,11 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                     .thenCompose(v -> streamMetadataTasks.notifyTxnCommit(scope, stream, segments, txnId))
                     .thenCompose(v -> streamMetadataTasks.getCurrentSegmentSizes(scope, stream, segments))
                     .thenCompose(map -> streamMetadataStore.recordCommitOffsets(scope, stream, txnId, map, context, executor))
-                    .thenRun(() -> TransactionMetrics.getInstance().commitTransaction(scope, stream, timer.getElapsed().minus(elapsed)));
+                    .thenRun(() -> {
+                        Duration t = timer.getElapsed();
+                        TransactionMetrics.getInstance().commitTransaction(scope, stream, t.minus(elapsed.get()));
+                        elapsed.set(t);
+                    });
         }
         
         return future

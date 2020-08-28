@@ -32,6 +32,7 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
     private final OpStatsLogger commitTransactionMetadataUpdateLatency;
     private final OpStatsLogger commitTransactionWriteEventLatency;
     private final OpStatsLogger identifyTransactionsToCommitLatency;
+    private final OpStatsLogger commitEventProcessingLatency;
     private final OpStatsLogger commitTransactionLatency;
     private final OpStatsLogger commitTransactionSegmentsLatency;
     private final OpStatsLogger committingTransactionLatency;
@@ -52,6 +53,7 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
         commitTransactionMetadataUpdateLatency = STATS_LOGGER.createStats(COMMIT_TRANSACTION_METADATA_LATENCY);
         commitTransactionWriteEventLatency = STATS_LOGGER.createStats(COMMIT_TRANSACTION_WRITE_EVENT_LATENCY);
         identifyTransactionsToCommitLatency = STATS_LOGGER.createStats(IDENTIFY_TRANSACTION_TO_COMMIT_LATENCY);
+        commitEventProcessingLatency = STATS_LOGGER.createStats(COMMIT_EVENT_PROCESSING_LATENCY);
     }
 
     /**
@@ -222,7 +224,7 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
         createTransactionMetadataLatency.reportSuccessValue(latency.toMillis());
     }
 
-    public void markTransactionAsCommitted(Duration latency) {
+    public void markTransactionAsCommitting(Duration latency) {
         commitTransactionMetadataUpdateLatency.reportSuccessValue(latency.toMillis());
     }
 
@@ -232,6 +234,10 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
 
     public void commitTransactionIdentification(Duration latency) {
         identifyTransactionsToCommitLatency.reportSuccessValue(latency.toMillis());
+    }
+
+    public void commitEventProcessingTime(Duration latency) {
+        commitEventProcessingLatency.reportSuccessValue(latency.toMillis());
     }
 
     public static synchronized void reset() {

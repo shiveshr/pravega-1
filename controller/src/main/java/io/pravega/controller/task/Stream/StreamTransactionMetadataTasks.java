@@ -638,7 +638,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         return sealFuture.thenComposeAsync(pair -> {
             Duration elapsed = timer.getElapsed();
             previousElapsed.set(elapsed);
-            TransactionMetrics.getInstance().markTransactionAsCommitted(elapsed);
+            TransactionMetrics.getInstance().markTransactionAsCommitting(elapsed);
 
             TxnStatus status = pair.getKey();
             switch (status) {

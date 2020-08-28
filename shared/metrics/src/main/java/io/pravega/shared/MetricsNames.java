@@ -224,6 +224,7 @@ public final class MetricsNames {
     public static final String COMMIT_TRANSACTION_METADATA_LATENCY = PREFIX + "controller.transactions.commitMetadata_latency_ms";             // Histogram
     public static final String COMMIT_TRANSACTION_WRITE_EVENT_LATENCY = PREFIX + "controller.transactions.commitMetadata_latency_ms";             // Histogram
     public static final String IDENTIFY_TRANSACTION_TO_COMMIT_LATENCY = PREFIX + "controller.transactions.queryTransactionsToCommit_latency_ms";  // Histogram
+    public static final String COMMIT_EVENT_PROCESSING_LATENCY = PREFIX + "controller.transactions.commitEventProcessing_latency_ms";   // Histogram
     public static final String COMMIT_TRANSACTION_FAILED = PREFIX + "controller.transactions.commit_failed";                            // Counter, Per-stream Counter, Per-transaction Counter
     public static final String ABORTING_TRANSACTION_LATENCY = PREFIX + "controller.transactions.aborting_latency_ms";                   // Histogram
     public static final String ABORT_TRANSACTION = PREFIX + "controller.transactions.aborted";                                          // Counter and Per-stream Counter
