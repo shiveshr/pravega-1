@@ -145,7 +145,7 @@ public class SegmentStatsRecorderTest extends ThreadPooledTestSuite {
         verify(context.dynamicLogger).freezeCounter(MetricsNames.SEGMENT_WRITE_EVENTS, SEGMENT_TAGS);
 
         // Merge metrics.
-        context.statsRecorder.merge(STREAM_SEGMENT_NAME, 123L, 2, 234L);
+        context.statsRecorder.merge(STREAM_SEGMENT_NAME, 123L, 2, 234L, Duration.ofMillis(0));
         verify(context.dynamicLogger, times(2)).incCounterValue(MetricsNames.SEGMENT_WRITE_BYTES, 123L, SEGMENT_TAGS);
         verify(context.dynamicLogger, times(2)).incCounterValue(MetricsNames.SEGMENT_WRITE_EVENTS, 2, SEGMENT_TAGS);
 

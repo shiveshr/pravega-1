@@ -71,6 +71,8 @@ public final class MetricsNames {
     // Metrics in Segment Store Service
     // Segment-related stats
     public static final String SEGMENT_CREATE_LATENCY = PREFIX + "segmentstore.segment.create_latency_ms";              // Histogram
+    public static final String SEGMENT_MERGE_LATENCY = PREFIX + "segmentstore.segment.merge_latency_ms";              // Histogram
+    public static final String SEGMENT_INFO_LATENCY = PREFIX + "segmentstore.segment.info_latency_ms";              // Histogram
     public static final String SEGMENT_DELETE_LATENCY = PREFIX + "segmentstore.segment.delete_latency_ms";              // Histogram
     public static final String SEGMENT_READ_LATENCY = PREFIX + "segmentstore.segment.read_latency_ms";                  // Histogram
     public static final String SEGMENT_WRITE_LATENCY = PREFIX + "segmentstore.segment.write_latency_ms";                // Histogram
