@@ -36,6 +36,7 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
     private final OpStatsLogger commitTransactionLatency;
     private final OpStatsLogger commitTransactionSegmentsLatency;
     private final OpStatsLogger committingTransactionLatency;
+    private final OpStatsLogger commitOffsetTransactionLatency;
     private final OpStatsLogger abortTransactionLatency;
     private final OpStatsLogger abortTransactionSegmentsLatency;
     private final OpStatsLogger abortingTransactionLatency;
@@ -54,6 +55,7 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
         commitTransactionWriteEventLatency = STATS_LOGGER.createStats(COMMIT_TRANSACTION_WRITE_EVENT_LATENCY);
         identifyTransactionsToCommitLatency = STATS_LOGGER.createStats(IDENTIFY_TRANSACTION_TO_COMMIT_LATENCY);
         commitEventProcessingLatency = STATS_LOGGER.createStats(COMMIT_EVENT_PROCESSING_LATENCY);
+        commitOffsetTransactionLatency = STATS_LOGGER.createStats(COMMIT_OFFSET_TRANSACTION_LATENCY);
     }
 
     /**
@@ -194,6 +196,15 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
      */
     public void abortTransactionSegments(Duration latency) {
         abortTransactionSegmentsLatency.reportSuccessValue(latency.toMillis());
+    }
+
+    /**
+     * This method reports the latency of managing segments for a getting txn commit offset. 
+     *
+     * @param latency      Time elapsed to delete the segments related to the aborted transaction.
+     */
+    public void postTxnCommitSegmentSizes(Duration latency) {
+        commitOffsetTransactionLatency.reportSuccessValue(latency.toMillis());
     }
 
     /**
