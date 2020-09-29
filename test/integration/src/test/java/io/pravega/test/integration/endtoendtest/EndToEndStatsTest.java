@@ -163,6 +163,11 @@ public class EndToEndStatsTest {
         }
 
         @Override
+        public void getSegmentInfo(Duration elapsed) {
+            
+        }
+
+        @Override
         public void policyUpdate(String streamSegmentName, byte type, int targetRate) {
 
         }
@@ -180,7 +185,7 @@ public class EndToEndStatsTest {
         }
 
         @Override
-        public void merge(String streamSegmentName, long dataLength, int numOfEvents, long txnCreationTime) {
+        public void merge(String streamSegmentName, long dataLength, int numOfEvents, long txnCreationTime, Duration elapsed) {
             Counter eventCounter = registry.counter(SEGMENT_WRITE_EVENTS, segmentTags(streamSegmentName));
             Counter byteCounter = registry.counter(SEGMENT_WRITE_BYTES, segmentTags(streamSegmentName));
             references.add(eventCounter);
