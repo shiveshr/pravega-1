@@ -724,22 +724,22 @@ public class InMemoryStream extends PersistentStreamBase {
     }
 
     @Override
-    CompletableFuture<List<Map.Entry<UUID, ActiveTxnRecord>>> getOrderedCommittingTxnInLowestEpoch(int limit) {
+    public CompletableFuture<List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>>> getOrderedCommittingTxnInLowestEpoch(int limit) {
         List<Long> toPurge = new ArrayList<>();
-        Map<UUID, ActiveTxnRecord> committing = new HashMap<>();
+        Map<UUID, VersionedMetadata<ActiveTxnRecord>> committing = new HashMap<>();
         AtomicInteger smallestEpoch = new AtomicInteger(Integer.MAX_VALUE);
         // take smallest epoch and collect transactions from smallest epoch.
         transactionCommitOrder
                 .forEach((order, txId) -> {
                     int epoch = RecordHelper.getTransactionEpoch(txId);
-                    ActiveTxnRecord record;
+                    VersionedMetadata<ActiveTxnRecord> record;
                     synchronized (txnsLock) {
-                        record = activeTxns.containsKey(txId) ? activeTxns.get(txId).getObject() :
-                                ActiveTxnRecord.EMPTY;
+                        record = activeTxns.containsKey(txId) ? activeTxns.get(txId) :
+                                new VersionedMetadata<>(ActiveTxnRecord.EMPTY, null);
                     }
-                    switch (record.getTxnStatus()) {
+                    switch (record.getObject().getTxnStatus()) {
                         case COMMITTING:
-                            if (record.getCommitOrder() == order) {
+                            if (record.getObject().getCommitOrder() == order) {
                                 // if entry matches record's position then include it
                                 committing.put(txId, record);
                                 if (smallestEpoch.get() > epoch) {
@@ -765,8 +765,8 @@ public class InMemoryStream extends PersistentStreamBase {
 
         // take smallest epoch from committing transactions. order transactions in this epoch by 
         // ordered position
-        List<Map.Entry<UUID, ActiveTxnRecord>> list = committing.entrySet().stream().filter(x -> RecordHelper.getTransactionEpoch(x.getKey()) == smallestEpoch.get())
-                                                                .sorted(Comparator.comparing(x -> x.getValue().getCommitOrder()))
+        List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>> list = committing.entrySet().stream().filter(x -> RecordHelper.getTransactionEpoch(x.getKey()) == smallestEpoch.get())
+                                                                .sorted(Comparator.comparing(x -> x.getValue().getObject().getCommitOrder()))
                                                                 .limit(limit)
                                                                 .collect(Collectors.toList());
 

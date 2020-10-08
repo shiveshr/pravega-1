@@ -1074,7 +1074,8 @@ public class ControllerImpl implements Controller {
     }
 
     @Override
-    public CompletableFuture<Void> commitTransaction(final Stream stream, final String writerId, final Long timestamp, final UUID txId) {
+    public CompletableFuture<Void> commitTransaction(final Stream stream, final String writerId, final Long timestamp, 
+                                                     final UUID txId, final List<Long> segments) {
         Exceptions.checkNotClosed(closed.get(), this);
         Preconditions.checkNotNull(stream, "stream");
         Preconditions.checkNotNull(txId, "txId");
@@ -1086,6 +1087,7 @@ public class ControllerImpl implements Controller {
                                                       .setStreamInfo(ModelHelper.createStreamInfo(stream.getScope(),
                                                                                                   stream.getStreamName()))
                                                       .setWriterId(writerId)
+                                                      .addAllSegments(segments)
                                                       .setTxnId(ModelHelper.decode(txId));
             if (timestamp != null) {
                 txnRequest.setTimestamp(timestamp);

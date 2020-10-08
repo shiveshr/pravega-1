@@ -157,26 +157,24 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> startTruncation(final Map<Long, Long> streamCut) {
-        return getTruncationRecord()
-                .thenCompose(existing -> {
-                    Preconditions.checkNotNull(existing);
-                    Preconditions.checkArgument(!existing.getObject().isUpdating());
-                    return isStreamCutValid(streamCut)
-                        .thenCompose(isValid -> {
-                            Exceptions.checkArgument(isValid, "streamCut", "invalid stream cut");
-                            return computeStreamCutSpan(streamCut)
-                                    .thenCompose(span -> {
-                                        StreamTruncationRecord previous = existing.getObject();
-                                        // check greater than
-                                        Exceptions.checkArgument(greaterThan(streamCut, span, previous.getStreamCut(), previous.getSpan()),
-                                                "StreamCut", "Supplied streamcut is behind previous truncation point");
+    public CompletableFuture<VersionedMetadata<StreamTruncationRecord>> startTruncation(final Map<Long, Long> streamCut, final VersionedMetadata<StreamTruncationRecord> existing) {
+        Preconditions.checkNotNull(existing);
+        Preconditions.checkArgument(!existing.getObject().isUpdating());
+        return isStreamCutValid(streamCut)
+                .thenCompose(isValid -> {
+                    Exceptions.checkArgument(isValid, "streamCut", "invalid stream cut");
+                    return computeStreamCutSpan(streamCut)
+                            .thenCompose(span -> {
+                                StreamTruncationRecord previous = existing.getObject();
+                                // check greater than
+                                Exceptions.checkArgument(greaterThan(streamCut, span, previous.getStreamCut(), previous.getSpan()),
+                                        "StreamCut", "Supplied streamcut is behind previous truncation point");
 
-                                        return computeTruncationRecord(previous, streamCut, span)
-                                                .thenCompose(prop ->
-                                                        Futures.toVoid(setTruncationData(new VersionedMetadata<>(prop, existing.getVersion()))));
-                                    });
-                        });
+                                return computeTruncationRecord(previous, streamCut, span)
+                                        .thenCompose(prop ->
+                                                setTruncationData(new VersionedMetadata<>(prop, existing.getVersion()))
+                                                        .thenApply(ver -> new VersionedMetadata<>(prop, ver)));
+                            });
                 });
     }
 
@@ -217,17 +215,18 @@ public abstract class PersistentStreamBase implements Stream {
     }
     
     @Override
-    public CompletableFuture<Void> completeTruncation(VersionedMetadata<StreamTruncationRecord> record) {
+    public CompletableFuture<VersionedMetadata<StreamTruncationRecord>> completeTruncation(VersionedMetadata<StreamTruncationRecord> record) {
         Preconditions.checkNotNull(record);
         Preconditions.checkArgument(record.getObject().isUpdating());
         StreamTruncationRecord current = record.getObject();
         if (current.isUpdating()) {
             StreamTruncationRecord completedProp = StreamTruncationRecord.complete(current);
 
-            return Futures.toVoid(setTruncationData(new VersionedMetadata<>(completedProp, record.getVersion())));
+            return setTruncationData(new VersionedMetadata<>(completedProp, record.getVersion()))
+                    .thenApply(ver -> new VersionedMetadata<>(completedProp, ver));
         } else {
             // idempotent
-            return CompletableFuture.completedFuture(null);
+            return CompletableFuture.completedFuture(record);
         }
     }
 
@@ -247,13 +246,12 @@ public abstract class PersistentStreamBase implements Stream {
      * @return future of operation.
      */
     @Override
-    public CompletableFuture<Void> startUpdateConfiguration(final StreamConfiguration newConfiguration) {
-        return getVersionedConfigurationRecord()
-                .thenCompose(configRecord -> {
-                    Preconditions.checkArgument(!configRecord.getObject().isUpdating());
-                    StreamConfigurationRecord update = StreamConfigurationRecord.update(scope, name, newConfiguration);
-                    return Futures.toVoid(setConfigurationData(new VersionedMetadata<>(update, configRecord.getVersion())));
-                });
+    public CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> startUpdateConfiguration(
+            VersionedMetadata<StreamConfigurationRecord> configRecord, final StreamConfiguration newConfiguration) {
+        Preconditions.checkArgument(!configRecord.getObject().isUpdating());
+        StreamConfigurationRecord update = StreamConfigurationRecord.update(scope, name, newConfiguration);
+        return setConfigurationData(new VersionedMetadata<>(update, configRecord.getVersion()))
+                .thenApply(ver -> new VersionedMetadata<>(update, ver));
     }
 
     /**
@@ -262,16 +260,17 @@ public abstract class PersistentStreamBase implements Stream {
      * @return future of operation
      */
     @Override
-    public CompletableFuture<Void> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing) {
+    public CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing) {
         StreamConfigurationRecord current = existing.getObject();
         Preconditions.checkNotNull(current);
         if (current.isUpdating()) {
             StreamConfigurationRecord newProperty = StreamConfigurationRecord.complete(scope, name, current.getStreamConfiguration());
             log.debug("Completing update configuration for stream {}/{}", scope, name);
-            return Futures.toVoid(setConfigurationData(new VersionedMetadata<>(newProperty, existing.getVersion())));
+            return setConfigurationData(new VersionedMetadata<>(newProperty, existing.getVersion()))
+                    .thenApply(ver -> new VersionedMetadata<>(newProperty, ver));
         } else {
             // idempotent
-            return CompletableFuture.completedFuture(null);
+            return CompletableFuture.completedFuture(existing);
         }
     }
 
@@ -280,8 +279,7 @@ public abstract class PersistentStreamBase implements Stream {
      *
      * @return Future of stream configuration
      */
-    @Override
-    public CompletableFuture<StreamConfiguration> getConfiguration() {
+    CompletableFuture<StreamConfiguration> getConfiguration() {
         return getConfigurationData(false).thenApply(x -> x.getObject().getStreamConfiguration());
     }
 
@@ -292,12 +290,8 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> updateState(final State state) {
-        return getStateData(true)
-                .thenCompose(currState -> {
-                    VersionedMetadata<State> currentState = new VersionedMetadata<State>(currState.getObject().getState(), currState.getVersion());
-                    return Futures.toVoid(updateVersionedState(currentState, state));
-                });
+    public CompletableFuture<VersionedMetadata<State>> updateState(final VersionedMetadata<State> currState, final State state) {
+        return updateVersionedState(currState, state);
     }
 
     @Override
@@ -319,8 +313,7 @@ public abstract class PersistentStreamBase implements Stream {
         }
     }
 
-    @Override
-    public CompletableFuture<State> getState(boolean ignoreCached) {
+    CompletableFuture<State> getState(boolean ignoreCached) {
         return getStateData(ignoreCached)
                 .thenApply(x -> x.getObject().getState());
     }
@@ -482,25 +475,7 @@ public abstract class PersistentStreamBase implements Stream {
         return verifyLegalState()
                 .thenCompose(v -> getActiveEpochRecord(true).thenApply(epochRecord -> epochRecord.getSegments()));
     }
-
-    @Override
-    public CompletableFuture<Map<StreamSegmentRecord, Long>> getSegmentsAtHead() {
-        // read current epoch record
-        return getTruncationRecord()
-                .thenCompose(truncationRecord -> {
-                    if (truncationRecord.getObject().equals(StreamTruncationRecord.EMPTY)) {
-                        return getSegmentsInEpoch(0)
-                                .thenApply(segments -> segments.stream().collect(Collectors.toMap(x -> x, x ->  0L)));
-                    } else {
-                        return CompletableFuture.completedFuture(truncationRecord.getObject().getStreamCut().entrySet()
-                                                                                 .stream().collect(Collectors.toMap(x ->
-                                                truncationRecord.getObject().getSpan().keySet().stream()
-                                                                          .filter(y -> y.segmentId() == x.getKey()).findFirst().get(),
-                                        Map.Entry::getValue)));
-                    }
-                });
-    }
-
+    
     @Override
     public CompletableFuture<List<StreamSegmentRecord>> getSegmentsInEpoch(final int epoch) {
         return getEpochRecord(epoch)
@@ -901,10 +876,11 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> completeScale(VersionedMetadata<EpochTransitionRecord> record) {
+    public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> completeScale(VersionedMetadata<EpochTransitionRecord> record) {
         Preconditions.checkNotNull(record);
         Preconditions.checkArgument(!record.getObject().equals(EpochTransitionRecord.EMPTY));
-        return Futures.toVoid(updateEpochTransitionNode(new VersionedMetadata<>(EpochTransitionRecord.EMPTY, record.getVersion())));
+        return updateEpochTransitionNode(new VersionedMetadata<>(EpochTransitionRecord.EMPTY, record.getVersion()))
+                .thenApply(v -> new VersionedMetadata<>(EpochTransitionRecord.EMPTY, v));
     }
     
     @Override
@@ -1048,16 +1024,9 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<VersionedTransactionData> getTransactionData(UUID txId) {
+    public CompletableFuture<VersionedMetadata<ActiveTxnRecord>> getActiveTransaction(UUID txId) {
         int epoch = RecordHelper.getTransactionEpoch(txId);
-        return getActiveTx(epoch, txId)
-                .thenApply(data -> {
-                    ActiveTxnRecord activeTxnRecord = data.getObject();
-                    return new VersionedTransactionData(epoch, txId, data.getVersion(),
-                            activeTxnRecord.getTxnStatus(), activeTxnRecord.getTxCreationTimestamp(),
-                            activeTxnRecord.getMaxExecutionExpiryTime(), activeTxnRecord.getWriterId(), 
-                            activeTxnRecord.getCommitTime(), activeTxnRecord.getCommitOrder(), activeTxnRecord.getCommitOffsets());
-                });
+        return getActiveTx(epoch, txId);
     }
 
     @Override
@@ -1091,11 +1060,30 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
+    public CompletableFuture<SimpleEntry<TxnStatus, Integer>> sealTransaction(final UUID txId,
+                                                                       final boolean commit,
+                                                                       final Optional<Version> version,
+                                                                       final String writerId,
+                                                                       final long timestamp,
+                                                                       final List<Long> segments) {
+        int epoch = RecordHelper.getTransactionEpoch(txId);
+        return sealActiveTxn(epoch, txId, commit, version, writerId, timestamp, segments)
+                .exceptionally(ex -> new SimpleEntry<>(handleDataNotFoundException(ex), null))
+                .thenCompose(pair -> {
+                    if (pair.getKey() == TxnStatus.UNKNOWN) {
+                        return validateCompletedTxn(txId, commit).thenApply(status -> new SimpleEntry<>(status, null));
+                    } else {
+                        return CompletableFuture.completedFuture(pair);
+                    }
+                });
+    }
+
+    @Override
     public CompletableFuture<SimpleEntry<TxnStatus, Integer>> sealTransaction(final UUID txId, final boolean commit,
                                                                               final Optional<Version> version,                                                                               
                                                                               final String writerId, final long timestamp) {
         int epoch = RecordHelper.getTransactionEpoch(txId);
-        return sealActiveTxn(epoch, txId, commit, version, writerId, timestamp)
+        return sealActiveTxn(epoch, txId, commit, version, writerId, timestamp, Collections.emptyList())
                 .exceptionally(ex -> new SimpleEntry<>(handleDataNotFoundException(ex), null))
                 .thenCompose(pair -> {
                     if (pair.getKey() == TxnStatus.UNKNOWN) {
@@ -1116,20 +1104,22 @@ public abstract class PersistentStreamBase implements Stream {
      * @param version optional expected version of transaction node to validate before updating it.
      * @param writerId writer Id
      * @param timestamp commit timestamp supplied by writer
+     * @param segments
      * @return        a pair containing transaction status and its epoch.
      */
     private CompletableFuture<SimpleEntry<TxnStatus, Integer>> sealActiveTxn(final int epoch,
                                                                              final UUID txId,
                                                                              final boolean commit,
-                                                                             final Optional<Version> version, 
-                                                                             final String writerId, final long timestamp) {
+                                                                             final Optional<Version> version,
+                                                                             final String writerId, final long timestamp, 
+                                                                             List<Long> segments) {
         return getActiveTx(epoch, txId).thenCompose(data -> {
             ActiveTxnRecord txnRecord = data.getObject();
             Version dataVersion = version.orElseGet(data::getVersion);
             TxnStatus status = txnRecord.getTxnStatus();
             switch (status) {
                 case OPEN:
-                    return sealActiveTx(epoch, txId, commit, txnRecord, dataVersion, writerId, timestamp).thenApply(y ->
+                    return sealActiveTx(epoch, txId, commit, txnRecord, dataVersion, writerId, timestamp, segments).thenApply(y ->
                             new SimpleEntry<>(commit ? TxnStatus.COMMITTING : TxnStatus.ABORTING, epoch));
                 case COMMITTING:
                 case COMMITTED:
@@ -1158,7 +1148,7 @@ public abstract class PersistentStreamBase implements Stream {
 
     private CompletableFuture<Version> sealActiveTx(final int epoch, final UUID txId, final boolean commit,
                                                     final ActiveTxnRecord previous,
-                                                    final Version version, final String writerId, final long timestamp) {
+                                                    final Version version, final String writerId, final long timestamp, List<Long> segments) {
         CompletableFuture<ActiveTxnRecord> future;
         if (commit) {
             // if request is for commit --> add a new entry to orderer. 
@@ -1166,13 +1156,16 @@ public abstract class PersistentStreamBase implements Stream {
             if (!previous.getTxnStatus().equals(TxnStatus.COMMITTING)) {
                 future = addTxnToCommitOrder(txId)
                         .thenApply(position -> {
+                            ImmutableMap.Builder<Long, Long> map = ImmutableMap.<Long, Long>builder();
+                            map.putAll(segments.stream().collect(Collectors.toMap(n -> n, n -> 0L)));
                             return new ActiveTxnRecord(previous.getTxCreationTimestamp(),
                                     previous.getLeaseExpiryTime(),
                                     previous.getMaxExecutionExpiryTime(),
                                     TxnStatus.COMMITTING,
                                     writerId,
                                     timestamp,
-                                    position);
+                                    position, 
+                                    map.build());
                         });
             } else {
                 future = CompletableFuture.completedFuture(previous);
@@ -1190,30 +1183,29 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> recordCommitOffsets(final UUID txnId, final Map<Long, Long> commitOffsets) {
+    public CompletableFuture<VersionedMetadata<ActiveTxnRecord>> recordCommitOffsets(
+            final UUID txnId, final VersionedMetadata<ActiveTxnRecord> txnRecord, final Map<Long, Long> commitOffsets) {
         // The transaction may already have been committed and its record removed and this could be an idempotent run. 
         // So this method will ignore any data not found exceptions that are thrown while trying to retrieve active 
         // transaction record. 
         // This method updates the commit offsets if they are empty. Otherwise it ignores them. 
         int epoch = RecordHelper.getTransactionEpoch(txnId);
-        return Futures.exceptionallyExpecting(getActiveTx(epoch, txnId)
-                .thenCompose(txnRecord -> {
-                    ActiveTxnRecord activeTxnRecord = txnRecord.getObject();
-                    Preconditions.checkArgument(activeTxnRecord.getTxnStatus().equals(TxnStatus.COMMITTING));
-                    if (activeTxnRecord.getCommitOffsets().isEmpty()) {
-                        ActiveTxnRecord updated = new ActiveTxnRecord(activeTxnRecord.getTxCreationTimestamp(),
-                                activeTxnRecord.getLeaseExpiryTime(),
-                                activeTxnRecord.getMaxExecutionExpiryTime(),
-                                TxnStatus.COMMITTING,
-                                activeTxnRecord.getWriterId(),
-                                activeTxnRecord.getCommitTime(),
-                                activeTxnRecord.getCommitOrder(),
-                                ImmutableMap.copyOf(commitOffsets));
-                        return Futures.toVoid(updateActiveTx(epoch, txnId, new VersionedMetadata<>(updated, txnRecord.getVersion())));
-                    } else {
-                        return CompletableFuture.completedFuture(null);
-                    }
-                }), DATA_NOT_FOUND_PREDICATE, null);
+        ActiveTxnRecord activeTxnRecord = txnRecord.getObject();
+        Preconditions.checkArgument(activeTxnRecord.getTxnStatus().equals(TxnStatus.COMMITTING));
+        if (!activeTxnRecord.getCommitOffsets().isEmpty()) {
+            ActiveTxnRecord updated = new ActiveTxnRecord(activeTxnRecord.getTxCreationTimestamp(),
+                    activeTxnRecord.getLeaseExpiryTime(),
+                    activeTxnRecord.getMaxExecutionExpiryTime(),
+                    TxnStatus.COMMITTING,
+                    activeTxnRecord.getWriterId(),
+                    activeTxnRecord.getCommitTime(),
+                    activeTxnRecord.getCommitOrder(),
+                    ImmutableMap.copyOf(commitOffsets));
+            return updateActiveTx(epoch, txnId, new VersionedMetadata<>(updated, txnRecord.getVersion()))
+                    .thenApply(v -> new VersionedMetadata<>(updated, v));
+        } else {
+            return CompletableFuture.completedFuture(txnRecord);
+        }
     }
 
     /**
@@ -1422,33 +1414,19 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(int limit) {
-        return getVersionedCommitTransactionsRecord()
-                .thenCompose(versioned -> {
-                    if (versioned.getObject().equals(CommittingTransactionsRecord.EMPTY)) {
-                        return getOrderedCommittingTxnInLowestEpoch(limit)
-                                .thenCompose(list -> {
-                                    if (list.isEmpty()) {
-                                        return CompletableFuture.completedFuture(versioned);
-                                    } else {
-                                        Map.Entry<UUID, ActiveTxnRecord> firstEntry = list.get(0);
-                                        ImmutableList.Builder<UUID> txIdList = ImmutableList.builder(); 
-                                        list.forEach(x -> txIdList.add(x.getKey()));
-                                        List<Long> positions = list.stream().map(x -> x.getValue().getCommitOrder()).collect(Collectors.toList());
-                                        int epoch = RecordHelper.getTransactionEpoch(firstEntry.getKey());
-                                        CommittingTransactionsRecord record =
-                                                new CommittingTransactionsRecord(epoch, txIdList.build());
-                                        return updateCommittingTxnRecord(new VersionedMetadata<>(record, versioned.getVersion()))
-                                                // now that we have included transactions from positions for commit, we
-                                                // can safely remove the position references in orderer. 
-                                                .thenCompose(version -> removeTxnsFromCommitOrder(positions)
-                                                        .thenApply(v -> new VersionedMetadata<>(record, version)));
-                                    }
-                                });
-                    } else {
-                        return CompletableFuture.completedFuture(versioned);
-                    }
-                });
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> versioned,
+                                                                                                          List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>> list) {
+        Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>> firstEntry = list.get(0);
+        ImmutableList.Builder<UUID> txIdList = ImmutableList.builder();
+        list.forEach(x -> txIdList.add(x.getKey()));
+        List<Long> positions = list.stream().map(x -> x.getValue().getObject().getCommitOrder()).collect(Collectors.toList());
+        int epoch = RecordHelper.getTransactionEpoch(firstEntry.getKey());
+        CommittingTransactionsRecord record = new CommittingTransactionsRecord(epoch, txIdList.build());
+        return updateCommittingTxnRecord(new VersionedMetadata<>(record, versioned.getVersion()))
+                // now that we have included transactions from positions for commit, we
+                // can safely remove the position references in orderer. 
+                .thenCompose(version -> removeTxnsFromCommitOrder(positions)
+                        .thenApply(v -> new VersionedMetadata<>(record, version)));
     }
 
     @Override
@@ -1458,7 +1436,7 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record) {
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record) {
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = generateMarksForTransactions(record.getObject());
@@ -1475,8 +1453,9 @@ public abstract class PersistentStreamBase implements Stream {
         return future
                 .thenCompose(x -> getNumberOfOngoingTransactions().thenAccept(count ->
                                 TransactionMetrics.reportOpenTransactions(getScope(), getName(), count)))
-                .thenCompose(x -> Futures.toVoid(updateCommittingTxnRecord(new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY,
-                        record.getVersion()))));
+                .thenCompose(x -> updateCommittingTxnRecord(new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY,
+                        record.getVersion())))
+                .thenApply(v -> new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY, v));
     }
 
     @Override
@@ -1621,7 +1600,7 @@ public abstract class PersistentStreamBase implements Stream {
         return getWriterMarkRecord(writer).thenApply(VersionedMetadata::getObject);
     }
     
-    protected CompletableFuture<List<Map.Entry<UUID, ActiveTxnRecord>>> getOrderedCommittingTxnInLowestEpochHelper(
+    CompletableFuture<List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>>> getOrderedCommittingTxnInLowestEpochHelper(
             ZkOrderedStore txnCommitOrderer, int limit, Executor executor) {
         // get all transactions that have been added to commit orderer.
         return Futures.exceptionallyExpecting(txnCommitOrderer.getEntitiesWithPosition(getScope(), getName()),
@@ -1640,7 +1619,7 @@ public abstract class PersistentStreamBase implements Stream {
                           // We will opportunistically identify ordered positions that are stale (either transaction is no longer active)
                           // or its a duplicate entry or transaction is aborting. 
                           ConcurrentSkipListSet<Long> toPurge = new ConcurrentSkipListSet<>();
-                          ConcurrentHashMap<UUID, ActiveTxnRecord> transactionsMap = new ConcurrentHashMap<>();
+                          ConcurrentHashMap<UUID, VersionedMetadata<ActiveTxnRecord>> transactionsMap = new ConcurrentHashMap<>();
 
                           // Collect transactions that are in committing state from smallest available epoch 
                           // smallest epoch has transactions in committing state, we should break, else continue.
@@ -1650,21 +1629,21 @@ public abstract class PersistentStreamBase implements Stream {
                           }, executor).thenCompose(v -> txnCommitOrderer.removeEntities(getScope(), getName(), toPurge))
                                         .thenApply(v ->
                                                 transactionsMap.entrySet().stream().sorted(
-                                                        Comparator.comparing(x -> x.getValue().getCommitOrder()))
+                                                        Comparator.comparing(x -> x.getValue().getObject().getCommitOrder()))
                                                                .collect(Collectors.toList()));
                       });
     }
 
     protected CompletableFuture<Map<Long, UUID>> getAllOrderedCommittingTxnsHelper(ZkOrderedStore txnCommitOrderer) {
         return Futures.exceptionallyExpecting(txnCommitOrderer.getEntitiesWithPosition(getScope(), getName()),
-                ZKStreamMetadataStore.DATA_NOT_FOUND_PREDICATE, Collections.emptyMap())
+                DATA_NOT_FOUND_PREDICATE, Collections.emptyMap())
                       .thenApply(map -> map.entrySet().stream()
                                            .collect(Collectors.toMap(Map.Entry::getKey, x -> UUID.fromString(x.getValue()))));
     }
 
     private CompletableFuture<Void> processTransactionsInEpoch(Map.Entry<Integer, List<Map.Entry<Long, String>>> nextEpoch,
                                                              ConcurrentSkipListSet<Long> toPurge,
-                                                             ConcurrentHashMap<UUID, ActiveTxnRecord> transactionsMap,
+                                                             ConcurrentHashMap<UUID, VersionedMetadata<ActiveTxnRecord>> transactionsMap,
                                                              int limit,
                                                              Executor executor) {
         int epoch = nextEpoch.getKey();
@@ -1680,14 +1659,14 @@ public abstract class PersistentStreamBase implements Stream {
         return Futures.loop(() -> from.get() < txnIds.size() && transactionsMap.size() < limit, 
                 () -> getTransactionRecords(epoch, txnIds.subList(from.get(), till.get())).thenAccept(txns -> {
             for (int i = 0; i < txns.size(); i++) {
-                ActiveTxnRecord txnRecord = txns.get(i);
+                ActiveTxnRecord txnRecord = txns.get(i).getObject();
                 UUID txnId = UUID.fromString(txnIds.get(i));
                 long order = orders.get(i);
                 switch (txnRecord.getTxnStatus()) {
                     case COMMITTING:
                         if (txnRecord.getCommitOrder() == order) {
                             // if entry matches record's position then include it
-                            transactionsMap.put(txnId, txnRecord);
+                            transactionsMap.put(txnId, txns.get(i));
                             if (transactionsMap.size() >= limit) {
                                 break;
                             }
@@ -1716,11 +1695,11 @@ public abstract class PersistentStreamBase implements Stream {
         }), executor);
     }
 
-    CompletableFuture<List<ActiveTxnRecord>> getTransactionRecords(int epoch, List<String> txnIds) {
+    CompletableFuture<List<VersionedMetadata<ActiveTxnRecord>>> getTransactionRecords(int epoch, List<String> txnIds) {
         return Futures.allOfWithResults(txnIds.stream().map(txnIdStr -> {
             UUID txnId = UUID.fromString(txnIdStr);
-            return Futures.exceptionallyExpecting(getActiveTx(epoch, txnId).thenApply(VersionedMetadata::getObject),
-                    ZKStreamMetadataStore.DATA_NOT_FOUND_PREDICATE, ActiveTxnRecord.EMPTY);
+            return Futures.exceptionallyExpecting(getActiveTx(epoch, txnId),
+                    DATA_NOT_FOUND_PREDICATE, new VersionedMetadata<>(ActiveTxnRecord.EMPTY, null));
         }).collect(Collectors.toList()));
     }
 
@@ -2057,14 +2036,6 @@ public abstract class PersistentStreamBase implements Stream {
     abstract CompletableFuture<Void> createCompletedTxEntry(final UUID txId, CompletedTxnRecord data);
 
     abstract CompletableFuture<Map<UUID, ActiveTxnRecord>> getTxnInEpoch(int epoch);
-
-    /**
-     * This method finds transactions to commit in lowest epoch and returns a sorted list of transaction ids, 
-     * sorted by their order of commits. 
-     * @param limit number of txns to fetch.
-     * @return CompletableFuture which when completed will return ordered list of transaction ids and records.
-     */
-    abstract CompletableFuture<List<Map.Entry<UUID, ActiveTxnRecord>>> getOrderedCommittingTxnInLowestEpoch(int limit);
     
     @VisibleForTesting
     abstract CompletableFuture<Map<Long, UUID>> getAllOrderedCommittingTxns();

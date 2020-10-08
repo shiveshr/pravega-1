@@ -227,9 +227,12 @@ public class ControllerServiceTest {
         doThrow(StoreException.create(StoreException.Type.WRITE_CONFLICT, "Write conflict"))
                 .when(streamStore).sealTransaction(eq(SCOPE), eq(stream1), eq(txnId), anyBoolean(), any(), anyString(), anyLong(),
                 any(), any());
+        doThrow(StoreException.create(StoreException.Type.WRITE_CONFLICT, "Write conflict"))
+                .when(streamStore).sealTransaction(eq(SCOPE), eq(stream1), eq(txnId), anyBoolean(), any(), anyString(), anyLong(),
+                any(), any(), any());
 
         AssertExtensions.assertFutureThrows("Write conflict should have been thrown",
-                consumer.commitTransaction(SCOPE, stream1, txnId, "", 0L),
+                consumer.commitTransaction(SCOPE, stream1, txnId, "", 0L, Collections.emptyList()),
                 e -> Exceptions.unwrap(e) instanceof StoreException.WriteConflictException);
 
         AssertExtensions.assertFutureThrows("Write conflict should have been thrown",
@@ -239,9 +242,12 @@ public class ControllerServiceTest {
         doThrow(StoreException.create(StoreException.Type.CONNECTION_ERROR, "Connection failed"))
                 .when(streamStore).sealTransaction(eq(SCOPE), eq(stream1), eq(txnId), anyBoolean(), any(), anyString(), anyLong(),
                 any(), any());
+        doThrow(StoreException.create(StoreException.Type.CONNECTION_ERROR, "Connection failed"))
+                .when(streamStore).sealTransaction(eq(SCOPE), eq(stream1), eq(txnId), anyBoolean(), any(), anyString(), anyLong(),
+                any(), any(), any());
 
         AssertExtensions.assertFutureThrows("Store connection exception should have been thrown",
-                consumer.commitTransaction(SCOPE, stream1, txnId, "", 0L),
+                consumer.commitTransaction(SCOPE, stream1, txnId, "", 0L, Collections.emptyList()),
                 e -> Exceptions.unwrap(e) instanceof StoreException.StoreConnectionException);
 
         AssertExtensions.assertFutureThrows("Store connection exception should have been thrown",
@@ -251,8 +257,11 @@ public class ControllerServiceTest {
         doThrow(StoreException.create(StoreException.Type.UNKNOWN, "Connection failed"))
                 .when(streamStore).sealTransaction(eq(SCOPE), eq(stream1), eq(txnId), anyBoolean(), any(), anyString(), anyLong(),
                 any(), any());
+        doThrow(StoreException.create(StoreException.Type.UNKNOWN, "Connection failed"))
+                .when(streamStore).sealTransaction(eq(SCOPE), eq(stream1), eq(txnId), anyBoolean(), any(), anyString(), anyLong(),
+                any(), any(), any());
 
-        Controller.TxnStatus status = consumer.commitTransaction(SCOPE, stream1, txnId, "", 0L).join();
+        Controller.TxnStatus status = consumer.commitTransaction(SCOPE, stream1, txnId, "", 0L, Collections.emptyList()).join();
         assertEquals(status.getStatus(), Controller.TxnStatus.Status.FAILURE);
 
         status = consumer.abortTransaction(SCOPE, stream1, txnId).join();

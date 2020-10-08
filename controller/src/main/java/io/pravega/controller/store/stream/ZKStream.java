@@ -490,7 +490,7 @@ class ZKStream extends PersistentStreamBase {
     }
 
     @Override
-    public CompletableFuture<List<Map.Entry<UUID, ActiveTxnRecord>>> getOrderedCommittingTxnInLowestEpoch(int limit) {
+    public CompletableFuture<List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>>> getOrderedCommittingTxnInLowestEpoch(int limit) {
         return super.getOrderedCommittingTxnInLowestEpochHelper(txnCommitOrderer, limit, executor);
     }
 

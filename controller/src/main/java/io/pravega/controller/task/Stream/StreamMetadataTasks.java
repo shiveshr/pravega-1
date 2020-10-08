@@ -258,7 +258,7 @@ public class StreamMetadataTasks extends TaskBase {
     CompletableFuture<Boolean> isUpdated(String scope, String stream, StreamConfiguration newConfig, OperationContext context) {
         CompletableFuture<State> stateFuture = streamMetadataStore.getState(scope, stream, true, context, executor);
         CompletableFuture<StreamConfigurationRecord> configPropertyFuture
-                = streamMetadataStore.getConfigurationRecord(scope, stream, context, executor).thenApply(VersionedMetadata::getObject);
+                = streamMetadataStore.getConfigurationRecordRefetch(scope, stream, context, executor).thenApply(VersionedMetadata::getObject);
         return CompletableFuture.allOf(stateFuture, configPropertyFuture)
                                 .thenApply(v -> {
                                     State state = stateFuture.join();
@@ -460,7 +460,7 @@ public class StreamMetadataTasks extends TaskBase {
     CompletableFuture<Boolean> isTruncated(String scope, String stream, Map<Long, Long> streamCut, OperationContext context) {
         CompletableFuture<State> stateFuture = streamMetadataStore.getState(scope, stream, true, context, executor);
         CompletableFuture<StreamTruncationRecord> configPropertyFuture
-                = streamMetadataStore.getTruncationRecord(scope, stream, context, executor).thenApply(VersionedMetadata::getObject);
+                = streamMetadataStore.getTruncationRecordRefetch(scope, stream, context, executor).thenApply(VersionedMetadata::getObject);
         return CompletableFuture.allOf(stateFuture, configPropertyFuture)
                                 .thenApply(v -> {
                                     State state = stateFuture.join();
@@ -955,17 +955,15 @@ public class StreamMetadataTasks extends TaskBase {
         }
     }
 
-    public CompletableFuture<Void> notifyTxnCommit(final String scope, final String stream,
+    public CompletableFuture<Map<Long, Long>> notifyTxnCommit(final String scope, final String stream,
                                                    final List<Long> segments, final UUID txnId) {
         Timer timer = new Timer();
-        return Futures.allOf(segments.stream()
-                .parallel()
-                .map(segment -> notifyTxnCommit(scope, stream, segment, txnId))
-                .collect(Collectors.toList()))
-                .thenRun(() -> TransactionMetrics.getInstance().commitTransactionSegments(timer.getElapsed()));
+        return Futures.allOfWithResults(segments.stream()
+                .collect(Collectors.toMap(x -> x, x -> notifyTxnCommit(scope, stream, x, txnId))))
+                .whenComplete((r, e) -> TransactionMetrics.getInstance().commitTransactionSegments(timer.getElapsed()));
     }
 
-    private CompletableFuture<Controller.TxnStatus> notifyTxnCommit(final String scope, final String stream,
+    private CompletableFuture<Long> notifyTxnCommit(final String scope, final String stream,
                                                                     final long segmentNumber, final UUID txnId) {
         return TaskStepsRetryHelper.withRetries(() -> segmentHelper.commitTransaction(scope,
                 stream,

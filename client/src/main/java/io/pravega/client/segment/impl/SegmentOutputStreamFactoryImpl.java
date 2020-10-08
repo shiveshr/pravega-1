@@ -18,6 +18,7 @@ import io.pravega.client.connection.impl.ConnectionPool;
 import io.pravega.client.security.auth.DelegationTokenProvider;
 import io.pravega.client.stream.EventWriterConfig;
 import io.pravega.client.control.impl.Controller;
+import io.pravega.common.concurrent.Futures;
 import io.pravega.common.function.Callbacks;
 import io.pravega.common.util.RetriesExhaustedException;
 import io.pravega.common.util.Retry;
@@ -38,9 +39,13 @@ public class SegmentOutputStreamFactoryImpl implements SegmentOutputStreamFactor
     @Override
     public SegmentOutputStream createOutputStreamForTransaction(Segment segment, UUID txId, EventWriterConfig config,
                                                                 DelegationTokenProvider tokenProvider) {
-        return new SegmentOutputStreamImpl(NameUtils.getTransactionNameFromId(segment.getScopedName(), txId),
-                                           config.isEnableConnectionPooling(), controller, cp, UUID.randomUUID(), nopSegmentSealedCallback,
-                                           getRetryFromConfig(config), tokenProvider);
+        // first create segment then create segment outputstream
+        SegmentOutputStreamImpl segmentOutputStream = new SegmentOutputStreamImpl(NameUtils.getTransactionNameFromId(segment.getScopedName(), txId),
+                config.isEnableConnectionPooling(), controller, cp, UUID.randomUUID(), nopSegmentSealedCallback,
+                getRetryFromConfig(config), tokenProvider);
+        Futures.getThrowingException(segmentOutputStream.create());
+
+        return segmentOutputStream;
     }
 
     @Override

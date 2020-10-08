@@ -1491,26 +1491,26 @@ public class ControllerImplTest {
     @Test
     public void testCommitTransaction() throws Exception {
         CompletableFuture<Void> transaction;
-        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream1"), "writer", null, UUID.randomUUID());
+        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream1"), "writer", null, UUID.randomUUID(), Collections.emptyList());
         assertTrue(transaction.get() == null);
         assertTrue(lastRequest.get() instanceof TxnRequest);
         assertEquals(((TxnRequest) (lastRequest.get())).getTimestamp(), Long.MIN_VALUE);
         
-        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream1"), "writer", 100L, UUID.randomUUID());
+        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream1"), "writer", 100L, UUID.randomUUID(), Collections.emptyList());
         assertTrue(transaction.get() == null);
         assertTrue(lastRequest.get() instanceof TxnRequest);
         assertEquals(((TxnRequest) (lastRequest.get())).getTimestamp(), 100L);
 
-        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream2"), "writer", null, UUID.randomUUID());
+        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream2"), "writer", null, UUID.randomUUID(), Collections.emptyList());
         AssertExtensions.assertFutureThrows("Should throw Exception", transaction, throwable -> throwable instanceof TxnFailedException);
 
-        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream3"), "writer", null, UUID.randomUUID());
+        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream3"), "writer", null, UUID.randomUUID(), Collections.emptyList());
         AssertExtensions.assertFutureThrows("Should throw Exception", transaction, throwable -> throwable instanceof InvalidStreamException);
 
-        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream4"), "writer", null, UUID.randomUUID());
+        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream4"), "writer", null, UUID.randomUUID(), Collections.emptyList());
         AssertExtensions.assertFutureThrows("Should throw Exception", transaction, throwable -> true);
 
-        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream5"), "writer", null, UUID.randomUUID());
+        transaction = controllerClient.commitTransaction(new StreamImpl("scope1", "stream5"), "writer", null, UUID.randomUUID(), Collections.emptyList());
         AssertExtensions.assertFutureThrows("Should throw Exception", transaction, throwable -> true);
            
     }
@@ -1851,7 +1851,7 @@ public class ControllerImplTest {
         CompletableFuture<Void> abortFuture = controller.abortTransaction(stream, UUID.randomUUID());
         AssertExtensions.assertFutureThrows("", abortFuture, deadlinePredicate);
 
-        CompletableFuture<Void> commitFuture = controller.commitTransaction(stream, "", 0L, UUID.randomUUID());
+        CompletableFuture<Void> commitFuture = controller.commitTransaction(stream, "", 0L, UUID.randomUUID(), Collections.emptyList());
         AssertExtensions.assertFutureThrows("", commitFuture, deadlinePredicate);
 
         CompletableFuture<Transaction.Status> txnStatusFuture = controller.checkTransactionStatus(stream, UUID.randomUUID());

@@ -84,7 +84,8 @@ interface Stream {
      * @param configuration new stream configuration.
      * @return future of new StreamConfigWithVersion.
      */
-    CompletableFuture<Void> startUpdateConfiguration(final StreamConfiguration configuration);
+    CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> startUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing,
+                                                     final StreamConfiguration configuration);
 
     /**
      * Completes an ongoing updates configuration of an existing stream.
@@ -92,15 +93,8 @@ interface Stream {
      * @return future of new StreamConfigWithVersion.
      * @param existing
      */
-    CompletableFuture<Void> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing);
-
-    /**
-     * Fetches the current stream configuration.
-     *
-     * @return current stream configuration.
-     */
-    CompletableFuture<StreamConfiguration> getConfiguration();
-
+    CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing);
+    
     /**
      * Fetches the current stream configuration.
      *
@@ -114,7 +108,7 @@ interface Stream {
      * @param streamCut new stream cut.
      * @return future of new StreamProperty.
      */
-    CompletableFuture<Void> startTruncation(final Map<Long, Long> streamCut);
+    CompletableFuture<VersionedMetadata<StreamTruncationRecord>> startTruncation(final Map<Long, Long> streamCut, VersionedMetadata<StreamTruncationRecord> existing);
 
     /**
      * Completes an ongoing stream truncation.
@@ -122,7 +116,7 @@ interface Stream {
      * @return future of operation.
      * @param record
      */
-    CompletableFuture<Void> completeTruncation(VersionedMetadata<StreamTruncationRecord> record);
+    CompletableFuture<VersionedMetadata<StreamTruncationRecord>> completeTruncation(VersionedMetadata<StreamTruncationRecord> record);
 
     /**
      * Fetches the current stream cut.
@@ -130,7 +124,7 @@ interface Stream {
      * @return current stream cut.
      */
     CompletableFuture<VersionedMetadata<StreamTruncationRecord>> getTruncationRecord();
-
+    
     /**
      * Api to get the current state with its current version.
      *
@@ -143,7 +137,7 @@ interface Stream {
      *
      * @return boolean indicating whether the state of stream is updated.
      */
-    CompletableFuture<Void> updateState(final State state);
+    CompletableFuture<VersionedMetadata<State>> updateState(VersionedMetadata<State> currState, State state);
 
     /**
      * Api to update versioned state as a CAS operation.
@@ -153,14 +147,6 @@ interface Stream {
      */
     CompletableFuture<VersionedMetadata<State>> updateVersionedState(final VersionedMetadata<State> state, final State newState);
     
-    /**
-     * Get the state of the stream.
-     *
-     * @return state othe given stream.
-     * @param ignoreCached ignore cached value and fetch from store
-     */
-    CompletableFuture<State> getState(boolean ignoreCached);
-
     /**
      * Fetches details of specified segment.
      *
@@ -215,13 +201,6 @@ interface Stream {
      * @return Future which when completed will contain currently active segments
      */
     CompletableFuture<List<StreamSegmentRecord>> getActiveSegments();
-    
-    /**
-     * Method to get segments at the head of the stream.
-     * 
-     * @return Future which when completed will contain segments at head of stream with offsets
-     */
-    CompletableFuture<Map<StreamSegmentRecord, Long>> getSegmentsAtHead();
     
     /**
      * Returns the active segments in the specified epoch.
@@ -306,7 +285,7 @@ interface Stream {
      * @param record  existing versioned record.
      * @return A future which when completed indicates the completion current scale workflow.                 
      */
-    CompletableFuture<Void> completeScale(VersionedMetadata<EpochTransitionRecord> record);
+    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> completeScale(VersionedMetadata<EpochTransitionRecord> record);
 
     /**
      * Api to indicate to store to start rolling transaction. 
@@ -399,14 +378,14 @@ interface Stream {
      * @return Transaction metadata along with its version.
      */
     CompletableFuture<VersionedTransactionData> pingTransaction(final VersionedTransactionData txnData, final long lease);
-
+    
     /**
      * Fetch transaction metadata along with its version.
      *
      * @param txId transaction id.
      * @return transaction metadata along with its version.
      */
-    CompletableFuture<VersionedTransactionData> getTransactionData(UUID txId);
+    CompletableFuture<VersionedMetadata<ActiveTxnRecord>> getActiveTransaction(UUID txId);
 
     /**
      * Seal a given transaction.
@@ -421,6 +400,21 @@ interface Stream {
                                                                        final Optional<Version> version,
                                                                        final String writerId,
                                                                        final long timestamp);
+
+    /**
+     * Seal a given transaction.
+     *
+     * @param txId    transaction identifier.
+     * @param commit  whether to commit or abort the specified transaction.
+     * @param version optional expected version of transaction data node to validate before updating it.
+     * @return        a pair containing transaction status and its epoch.
+     */
+    CompletableFuture<SimpleEntry<TxnStatus, Integer>> sealTransaction(final UUID txId,
+                                                                       final boolean commit,
+                                                                       final Optional<Version> version,
+                                                                       final String writerId,
+                                                                       final long timestamp,
+                                                                       final List<Long> segments);
 
     /**
      * Returns transaction's status
@@ -515,10 +509,10 @@ interface Stream {
      * Method to fetch committing transaction record from the store for a given stream.
      * Note: this will not throw data not found exception if the committing transaction node is not found. Instead
      * it returns null.
-     * @param limit maximum number of transactions to include in a commit batch 
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
-    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(int limit);
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> versioned,
+                                                                                                   List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>> list);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.
@@ -530,6 +524,14 @@ interface Stream {
     CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getVersionedCommitTransactionsRecord();
 
     /**
+     * This method finds transactions to commit in lowest epoch and returns a sorted list of transaction ids, 
+     * sorted by their order of commits. 
+     * @param limit number of txns to fetch.
+     * @return CompletableFuture which when completed will return ordered list of transaction ids and records.
+     */
+    CompletableFuture<List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>>> getOrderedCommittingTxnInLowestEpoch(int limit);
+
+    /**
      * Method to reset committing transaction record from the store for a given stream.
      * This method is also responsible for marking all involved transactions as committed. 
      * It also generates marks for writers if applicable before marking the said transactions 
@@ -538,7 +540,7 @@ interface Stream {
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
      * @param record existing versioned record.
      */
-    CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record);
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record);
 
     /**
      * Method to record commit offset for a transaction. This method stores the commit offset in ActiveTransaction record. 
@@ -547,7 +549,7 @@ interface Stream {
      * @param commitOffsets segment to offset position where transaction was committed
      * @return A completableFuture which, when completed, will have transaction commit offset recorded successfully.
      */
-    CompletableFuture<Void> recordCommitOffsets(UUID txnId, Map<Long, Long> commitOffsets);
+    CompletableFuture<VersionedMetadata<ActiveTxnRecord>> recordCommitOffsets(UUID txnId, VersionedMetadata<ActiveTxnRecord> txn, Map<Long, Long> commitOffsets);
     
     /**
      * This method attempts to create a new Waiting Request node and set the processor's name in the node.

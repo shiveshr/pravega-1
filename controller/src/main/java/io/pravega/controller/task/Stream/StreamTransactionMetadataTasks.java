@@ -42,6 +42,7 @@ import io.pravega.shared.controller.event.AbortEvent;
 import io.pravega.shared.controller.event.CommitEvent;
 import java.time.Duration;
 import java.util.AbstractMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -267,7 +268,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final OperationContext contextOpt) {
         final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
-        return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, "", Long.MIN_VALUE, context),
+        return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, "", Long.MIN_VALUE, context, Collections.emptyList()),
                 RETRYABLE_PREDICATE, 3, executor);
     }
 
@@ -280,13 +281,14 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      * @param writerId   writer id
      * @param timestamp  commit time as recorded by writer
      * @param contextOpt optional context
+     * @param segmentsList seglist
      * @return true/false.
      */
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final String writerId, final long timestamp,
-                                                  final OperationContext contextOpt) {
+                                                  final OperationContext contextOpt, List<Long> segmentsList) {
         final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
-        return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, writerId, timestamp, context),
+        return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, writerId, timestamp, context, segmentsList),
                 RETRYABLE_PREDICATE, 3, executor);
     }
 
@@ -561,7 +563,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                              final UUID txnId,
                                              final Version version,
                                              final OperationContext ctx) {
-        return sealTxnBody(host, scope, stream, commit, txnId, version, "", Long.MIN_VALUE, ctx);
+        return sealTxnBody(host, scope, stream, commit, txnId, version, "", Long.MIN_VALUE, ctx, Collections.emptyList());
     }
     
     /**
@@ -595,7 +597,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                              final Version version,
                                              final String writerId,
                                              final long timestamp,
-                                             final OperationContext ctx) {
+                                             final OperationContext ctx, 
+                                             final List<Long> segments) {
         TxnResource resource = new TxnResource(scope, stream, txnId);
         Optional<Version> versionOpt = Optional.ofNullable(version);
 
@@ -616,7 +619,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
 
         // Step 2. Seal txn
         CompletableFuture<AbstractMap.SimpleEntry<TxnStatus, Integer>> sealFuture = addIndex.thenComposeAsync(x ->
-                streamMetadataStore.sealTransaction(scope, stream, txnId, commit, versionOpt, writerId, timestamp, ctx, executor), executor)
+                streamMetadataStore.sealTransaction(scope, stream, txnId, commit, versionOpt, writerId, timestamp, 
+                        ctx, executor, segments), executor)
                 .whenComplete((v, e) -> {
                     if (e != null) {
                         log.debug("Txn={}, failed sealing txn", txnId);

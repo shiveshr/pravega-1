@@ -1022,7 +1022,7 @@ public abstract class StreamMetadataStoreTest {
         assertEquals(positions.get(3L), tx02);
         
         // verify that when we retrieve transactions from lowest epoch we get tx00
-        List<Map.Entry<UUID, ActiveTxnRecord>> orderedRecords = streamObj.getOrderedCommittingTxnInLowestEpoch(100).join();
+        List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>> orderedRecords = streamObj.getOrderedCommittingTxnInLowestEpoch(100).join();
         List<UUID> ordered = orderedRecords.stream().map(Map.Entry::getKey).collect(Collectors.toList());
         assertEquals(1, ordered.size());
         assertEquals(tx00, ordered.get(0));
@@ -1060,7 +1060,7 @@ public abstract class StreamMetadataStoreTest {
         ordered = orderedRecords.stream().map(Map.Entry::getKey).collect(Collectors.toList());
         assertEquals(1, ordered.size());
         assertEquals(tx00, ordered.get(0));
-        assertEquals(0L, orderedRecords.get(0).getValue().getCommitOrder());
+        assertEquals(0L, orderedRecords.get(0).getValue().getObject().getCommitOrder());
 
         // verify that positions has 3 new entries added though
         positions = streamObj.getAllOrderedCommittingTxns().join();
@@ -1182,7 +1182,7 @@ public abstract class StreamMetadataStoreTest {
         PersistentStreamBase streamObj = (PersistentStreamBase) ((AbstractStreamMetadataStore) store).getStream(scope, stream, null);
         
         // verify that when we retrieve transactions from lowest epoch we get tx00, tx01
-        List<Map.Entry<UUID, ActiveTxnRecord>> orderedRecords = streamObj.getOrderedCommittingTxnInLowestEpoch(2).join();
+        List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>> orderedRecords = streamObj.getOrderedCommittingTxnInLowestEpoch(2).join();
         List<UUID> ordered = orderedRecords.stream().map(Map.Entry::getKey).collect(Collectors.toList());
         assertEquals(2, ordered.size());
         assertEquals(tx00, ordered.get(0));
@@ -1640,10 +1640,14 @@ public abstract class StreamMetadataStoreTest {
 
         String writer1 = "writer1";
         long time = 1L;
+        System.out.println("shivesh::" + store.getTransaction(scope, stream, txnId, null, executor).join());
+
         store.sealTransaction(scope, stream, txnId, true, Optional.of(tx01.getVersion()), writer1, time, null, executor).join();
         VersionedMetadata<CommittingTransactionsRecord> record = store.startCommitTransactions(scope, stream, 100, null, executor).join();
         store.recordCommitOffsets(scope, stream, txnId, Collections.singletonMap(0L, 1L), null, executor).join();
         store.completeCommitTransactions(scope, stream, record, null, executor).join();
+
+        System.out.println("shivesh::" + store.getTransaction(scope, stream, txnId, null, executor).join());
 
         // verify that writer mark is created in the store
         WriterMark mark = store.getWriterMark(scope, stream, writer1, null, executor).join();

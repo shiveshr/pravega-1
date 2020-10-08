@@ -403,12 +403,12 @@ public class ControllerService {
     }
 
     public CompletableFuture<TxnStatus> commitTransaction(final String scope, final String stream, final UUID txId,
-                                                          final String writerId, final long timestamp) {
+                                                          final String writerId, final long timestamp, List<Long> segmentsList) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Preconditions.checkNotNull(txId, "txnId");
         Timer timer = new Timer();
-        return streamTransactionMetadataTasks.commitTxn(scope, stream, txId, writerId, timestamp, null)
+        return streamTransactionMetadataTasks.commitTxn(scope, stream, txId, writerId, timestamp, null, segmentsList)
                 .handle((ok, ex) -> {
                     if (ex != null) {
                         log.warn("Transaction commit failed", ex);

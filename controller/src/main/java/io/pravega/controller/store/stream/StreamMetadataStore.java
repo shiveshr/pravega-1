@@ -274,6 +274,11 @@ public interface StreamMetadataStore extends AutoCloseable {
                                                             final OperationContext context,
                                                             final Executor executor);
 
+    CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> getConfigurationRecordRefetch(String scope,
+                                                                                                  String name,
+                                                                                                  OperationContext context,
+                                                                                                  Executor executor);
+
     /**
      * Fetches the current stream configuration.
      *
@@ -318,6 +323,11 @@ public interface StreamMetadataStore extends AutoCloseable {
                                                final VersionedMetadata<StreamTruncationRecord> record,
                                                final OperationContext context,
                                                final Executor executor);
+
+    CompletableFuture<VersionedMetadata<StreamTruncationRecord>> getTruncationRecordRefetch(String scope,
+                                                                                            String name,
+                                                                                            OperationContext context,
+                                                                                            Executor executor);
 
     /**
      * Fetches the current stream cut.
@@ -703,6 +713,12 @@ public interface StreamMetadataStore extends AutoCloseable {
                                                                    final OperationContext context,
                                                                    final Executor executor);
 
+    CompletableFuture<VersionedMetadata<ActiveTxnRecord>> getTransaction(String scopeName,
+                                                                         String streamName,
+                                                                         UUID txId,
+                                                                         OperationContext context,
+                                                                         Executor executor);
+
     /**
      * Get transaction status from the stream store.
      *
@@ -736,6 +752,30 @@ public interface StreamMetadataStore extends AutoCloseable {
                                                                        final long timestamp,
                                                                        final OperationContext context,
                                                                        final Executor executor);
+    
+    /**
+     * Update stream store to mark transaction as sealed.
+     *
+     * @param scope    scope
+     * @param stream   stream
+     * @param txId     transaction id
+     * @param commit   Boolean indicating whether to change txn state to committing or aborting.
+     * @param version  Expected version of the transaction record in the store.
+     * @param writerId writer id. Used only if commit is set to true. 
+     * @param timestamp commit timestamp. Valid only when commit flag is true.
+     * @param context  operation context
+     * @param executor callers executor
+     * @param segments segments
+     * @return         Pair containing the transaction status after sealing and transaction epoch.
+     */
+    CompletableFuture<SimpleEntry<TxnStatus, Integer>> sealTransaction(final String scope, final String stream,
+                                                                       final UUID txId, final boolean commit,
+                                                                       final Optional<Version> version,
+                                                                       final String writerId,
+                                                                       final long timestamp,
+                                                                       final OperationContext context,
+                                                                       final Executor executor,
+                                                                       final List<Long> segments);
 
     /**
      * Update stream store to mark the transaction as aborted.

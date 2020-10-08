@@ -184,7 +184,8 @@ public class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
                 return Futures.
                         failedFuture(StoreException.create(StoreException.Type.DATA_NOT_FOUND, scopeStreamName));
             }
-            return streams.get(scopeStreamName).startUpdateConfiguration(configuration);
+            return Futures.toVoid(streams.get(scopeStreamName).getConfigurationData(false)
+            .thenCompose(existing -> streams.get(scopeStreamName).startUpdateConfiguration(existing, configuration)));
         } else {
             return Futures.
                     failedFuture(StoreException.create(StoreException.Type.DATA_NOT_FOUND, scopeName));

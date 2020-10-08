@@ -188,7 +188,7 @@ public class TransactionalEventStreamWriterTest extends ThreadPooledTestSuite {
         FakeSegmentOutputStream bad = new FakeSegmentOutputStream(segment);
         Mockito.when(controller.createTransaction(eq(stream), anyLong()))
                .thenReturn(CompletableFuture.completedFuture(new TxnSegments(getSegments(segment), txid)));
-        Mockito.when(controller.commitTransaction(eq(stream), anyString(), isNull(), eq(txid))).thenReturn(CompletableFuture.completedFuture(null));
+        Mockito.when(controller.commitTransaction(eq(stream), anyString(), isNull(), eq(txid), any())).thenReturn(CompletableFuture.completedFuture(null));
         Mockito.when(controller.pingTransaction(eq(stream), eq(txid), anyLong())).thenReturn(CompletableFuture.completedFuture(Transaction.PingStatus.OPEN));
         Mockito.when(controller.checkTransactionStatus(eq(stream), eq(txid))).thenReturn(CompletableFuture.completedFuture(Transaction.Status.OPEN));
         Mockito.when(streamFactory.createOutputStreamForTransaction(eq(segment), eq(txid), any(), any()))
@@ -211,7 +211,7 @@ public class TransactionalEventStreamWriterTest extends ThreadPooledTestSuite {
         txn.commit();
         // verify if segments are flushed and closed.
         Mockito.verify(outputStream, Mockito.times(1)).close();
-        Mockito.verify(controller, Mockito.times(1)).commitTransaction(eq(stream), anyString(), isNull(), eq(txid));
+        Mockito.verify(controller, Mockito.times(1)).commitTransaction(eq(stream), anyString(), isNull(), eq(txid), any());
         assertTrue(bad.unacked.isEmpty());
         assertTrue(outputStream.unacked.isEmpty());
     }
@@ -314,7 +314,7 @@ public class TransactionalEventStreamWriterTest extends ThreadPooledTestSuite {
         // Simulate a Controller client throwing a Deadline Exceeded exception.
         CompletableFuture<Void> failedCommit = new CompletableFuture<>();
         failedCommit.completeExceptionally(new RetriesExhaustedException(new StatusRuntimeException(Status.DEADLINE_EXCEEDED)));
-        Mockito.when(controller.commitTransaction(eq(stream), anyString(), isNull(), eq(txid)))
+        Mockito.when(controller.commitTransaction(eq(stream), anyString(), isNull(), eq(txid), any()))
                .thenReturn(failedCommit) // simulate a failure
                .thenReturn(CompletableFuture.completedFuture(null)); // a success.
 
@@ -338,7 +338,7 @@ public class TransactionalEventStreamWriterTest extends ThreadPooledTestSuite {
 
         // verify if segments are flushed and closed.
         Mockito.verify(outputStream, Mockito.times(1)).close();
-        Mockito.verify(controller, Mockito.times(2)).commitTransaction(eq(stream), anyString(), isNull(), eq(txid));
+        Mockito.verify(controller, Mockito.times(2)).commitTransaction(eq(stream), anyString(), isNull(), eq(txid), any());
         assertTrue(bad.unacked.isEmpty());
         assertTrue(outputStream.unacked.isEmpty());
     }

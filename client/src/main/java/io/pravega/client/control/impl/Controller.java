@@ -238,7 +238,8 @@ public interface Controller extends AutoCloseable {
      * @param txId Transaction id
      * @return Void or TxnFailedException
      */
-    CompletableFuture<Void> commitTransaction(final Stream stream, final String writerId, final Long timestamp, final UUID txId);
+    CompletableFuture<Void> commitTransaction(final Stream stream, final String writerId, final Long timestamp, 
+                                              final UUID txId, final List<Long> segments);
 
     /**
      * Aborts a transaction. No events written to it may be read, and no further events may be

@@ -182,7 +182,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     // region overrides
 
     @Override
-    public CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record) {
+    public CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record) {
         // create all transaction entries in committing txn list.
         // remove all entries from active txn in epoch.
         // reset CommittingTxnRecord
@@ -202,8 +202,9 @@ class PravegaTablesStream extends PersistentStreamBase {
                     .thenCompose(x -> tryRemoveOlderTransactionsInEpochTables(epoch -> epoch < record.getObject().getEpoch()));
         }
         return future
-                .thenCompose(x -> Futures.toVoid(updateCommittingTxnRecord(new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY,
-                        record.getVersion()))));
+                .thenCompose(x -> updateCommittingTxnRecord(new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY,
+                        record.getVersion())))
+                .thenApply(ver -> new VersionedMetadata<>(CommittingTransactionsRecord.EMPTY, record.getVersion()));
     }
 
     @Override
@@ -607,7 +608,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     }
 
     @Override
-    public CompletableFuture<List<Map.Entry<UUID, ActiveTxnRecord>>> getOrderedCommittingTxnInLowestEpoch(int limit) {
+    public CompletableFuture<List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>>> getOrderedCommittingTxnInLowestEpoch(int limit) {
         return super.getOrderedCommittingTxnInLowestEpochHelper(txnCommitOrderer, limit, executor);
     }
 
@@ -618,11 +619,10 @@ class PravegaTablesStream extends PersistentStreamBase {
     }
 
     @Override
-    CompletableFuture<List<ActiveTxnRecord>> getTransactionRecords(int epoch, List<String> txnIds) {
+    CompletableFuture<List<VersionedMetadata<ActiveTxnRecord>>> getTransactionRecords(int epoch, List<String> txnIds) {
         return getTransactionsInEpochTable(epoch)
                 .thenCompose(epochTxnTable -> storeHelper.getEntries(epochTxnTable, txnIds, 
-                        ActiveTxnRecord::fromBytes, NON_EXISTENT_TXN))
-        .thenApply(res -> res.stream().map(VersionedMetadata::getObject).collect(Collectors.toList()));
+                        ActiveTxnRecord::fromBytes, NON_EXISTENT_TXN));
     }
 
     @Override

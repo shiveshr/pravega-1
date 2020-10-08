@@ -85,10 +85,11 @@ public abstract class StreamTestBase {
         StreamConfiguration config = StreamConfiguration.builder()
                                                         .scalingPolicy(ScalingPolicy.fixed(numOfSegments)).build();
         stream.create(config, time, startingSegmentNumber)
-              .thenCompose(x -> stream.updateState(State.ACTIVE)).join();
+              .thenCompose(x -> stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.ACTIVE))).join();
 
         // set minimum number of segments to 1 so that we can also test scale downs
-        stream.startUpdateConfiguration(StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build()).join();
+        stream.getVersionedConfigurationRecord().thenCompose(y ->
+                stream.startUpdateConfiguration(y, StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build())).join();
         VersionedMetadata<StreamConfigurationRecord> configRecord = stream.getVersionedConfigurationRecord().join();
         stream.completeUpdateConfiguration(configRecord).join();
 
@@ -110,7 +111,7 @@ public abstract class StreamTestBase {
                        .thenCompose(startedEtr -> stream.scaleCreateNewEpoch(startedEtr)
                             .thenCompose(x -> stream.scaleOldSegmentsSealed(sealedSegmentSizesMap, startedEtr))
                             .thenCompose(x -> stream.completeScale(startedEtr)))))
-              .thenCompose(x -> stream.updateState(State.ACTIVE)).join();
+              .thenCompose(x -> stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.ACTIVE))).join();
     }
 
     private UUID createAndCommitTransaction(Stream stream, int msb, long lsb) {
@@ -121,7 +122,10 @@ public abstract class StreamTestBase {
     }
 
     private void rollTransactions(Stream stream, long time, int epoch, int activeEpoch, Map<Long, Long> txnSizeMap, Map<Long, Long> activeSizeMap) {
-        stream.startCommittingTransactions(100)
+        stream.getVersionedCommitTransactionsRecord().thenCompose(y ->
+                stream.getOrderedCommittingTxnInLowestEpoch(100)
+                .thenCompose(z -> 
+                stream.startCommittingTransactions(y, z)
                                         .thenCompose(ctr ->
                                                 stream.getVersionedState()
                                                       .thenCompose(state -> stream.updateVersionedState(state, State.COMMITTING_TXN))
@@ -129,8 +133,8 @@ public abstract class StreamTestBase {
                                                         .thenCompose(ctr2 -> stream.rollingTxnCreateDuplicateEpochs(txnSizeMap, time, ctr2)
                                                         .thenCompose(v -> stream.completeRollingTxn(activeSizeMap, ctr2))
                                                                 .thenCompose(v -> stream.completeCommittingTransactions(ctr2))
-                                        )))
-              .thenCompose(x -> stream.updateState(State.ACTIVE)).join();
+                                        )))))
+              .thenCompose(x -> stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.ACTIVE))).join();
     }
 
     @Test(timeout = 30000L)
@@ -604,8 +608,9 @@ public abstract class StreamTestBase {
                                     .map(StreamSegmentRecord::segmentId).collect(Collectors.toList());
 
         // set minimum number of segments to segments.size. 
-        stream.startUpdateConfiguration(
-                StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(segments.size())).build()).join();
+        stream.getVersionedConfigurationRecord().thenCompose(y ->
+                stream.startUpdateConfiguration(y, 
+                StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(segments.size())).build())).join();
         VersionedMetadata<StreamConfigurationRecord> configRecord = stream.getVersionedConfigurationRecord().join();
         stream.completeUpdateConfiguration(configRecord).join();
 
@@ -621,7 +626,7 @@ public abstract class StreamTestBase {
     
     private VersionedMetadata<EpochTransitionRecord> resetScale(VersionedMetadata<EpochTransitionRecord> etr, Stream stream) {
         stream.completeScale(etr).join();
-        stream.updateState(State.ACTIVE).join();
+        stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.ACTIVE)).join();
         return stream.getEpochTransition().join();
     }
 
@@ -651,7 +656,9 @@ public abstract class StreamTestBase {
         List<StreamSegmentRecord> activeSegmentsBefore = stream.getActiveSegments().join();
 
         // start commit transactions
-        VersionedMetadata<CommittingTransactionsRecord> ctr = stream.startCommittingTransactions(100).join();
+        VersionedMetadata<CommittingTransactionsRecord> ctr =
+                stream.getVersionedCommitTransactionsRecord().thenCompose(y -> 
+                        stream.getOrderedCommittingTxnInLowestEpoch(100).thenCompose(z -> stream.startCommittingTransactions(y, z))).join();
         stream.getVersionedState().thenCompose(s -> stream.updateVersionedState(s, State.COMMITTING_TXN)).join();
 
         // start rolling transaction
@@ -746,7 +753,8 @@ public abstract class StreamTestBase {
         Map<Long, Long> streamCut1 = new HashMap<>();
         streamCut1.put(startingSegmentNumber + 0L, 1L);
         streamCut1.put(startingSegmentNumber + 1L, 1L);
-        stream.startTruncation(streamCut1).join();
+        stream.getTruncationRecord().thenCompose(y ->
+                stream.startTruncation(streamCut1, y)).join();
         VersionedMetadata<StreamTruncationRecord> versionedTruncationRecord = stream.getTruncationRecord().join();
         StreamTruncationRecord truncationRecord = versionedTruncationRecord.getObject();
         assertTrue(truncationRecord.getToDelete().isEmpty());
@@ -760,8 +768,7 @@ public abstract class StreamTestBase {
         Map<Long, Long> activeSegmentsWithOffset;
         // 1. truncationRecord = 0/1, 1/1
         // expected active segments with offset = 0/1, 1/1
-        activeSegmentsWithOffset = stream.getSegmentsAtHead().join().entrySet().stream()
-                                         .collect(Collectors.toMap(x -> x.getKey().segmentId(), x -> x.getValue()));
+        activeSegmentsWithOffset = stream.getTruncationRecord().join().getObject().getStreamCut();
         assertTrue(activeSegmentsWithOffset.size() == 2 &&
                 activeSegmentsWithOffset.containsKey(startingSegmentNumber + 0L) &&
                 activeSegmentsWithOffset.containsKey(startingSegmentNumber + 1L) &&
@@ -774,7 +781,8 @@ public abstract class StreamTestBase {
         streamCut2.put(twoSegmentId, 1L);
         streamCut2.put(fourSegmentId, 1L);
         streamCut2.put(fiveSegmentId, 1L);
-        stream.startTruncation(streamCut2).join();
+        stream.getTruncationRecord().thenCompose(y ->
+                stream.startTruncation(streamCut2, y)).join();
         versionedTruncationRecord = stream.getTruncationRecord().join();
         truncationRecord = versionedTruncationRecord.getObject();
         assertEquals(truncationRecord.getStreamCut(), streamCut2);
@@ -791,8 +799,7 @@ public abstract class StreamTestBase {
 
         // 2. truncationRecord = 0/1, 2/1, 4/1, 5/1.
         // expected active segments = 0/1, 2/1, 4/1, 5/1
-        activeSegmentsWithOffset = stream.getSegmentsAtHead().join().entrySet().stream()
-                                         .collect(Collectors.toMap(x -> x.getKey().segmentId(), x -> x.getValue()));
+        activeSegmentsWithOffset = stream.getTruncationRecord().join().getObject().getStreamCut();
         assertTrue(activeSegmentsWithOffset.size() == 4 &&
                 activeSegmentsWithOffset.containsKey(startingSegmentNumber + 0L) &&
                 activeSegmentsWithOffset.containsKey(twoSegmentId) &&
@@ -810,7 +817,7 @@ public abstract class StreamTestBase {
         streamCut3.put(fiveSegmentId, 10L);
         streamCut3.put(eightSegmentId, 10L);
         streamCut3.put(nineSegmentId, 10L);
-        stream.startTruncation(streamCut3).join();
+        stream.getTruncationRecord().thenCompose(y -> stream.startTruncation(streamCut3, y)).join();
         versionedTruncationRecord = stream.getTruncationRecord().join();
         truncationRecord = versionedTruncationRecord.getObject();
         assertEquals(truncationRecord.getStreamCut(), streamCut3);
@@ -828,8 +835,7 @@ public abstract class StreamTestBase {
         // 3. truncation record 2/10, 4/10, 5/10, 8/10, 9/10
         // getActiveSegments wrt first truncation record which spans epoch 2 to 4
         // expected active segments = 2/10, 4/10, 5/10, 8/10, 9/10
-        activeSegmentsWithOffset = stream.getSegmentsAtHead().join().entrySet().stream()
-                                         .collect(Collectors.toMap(x -> x.getKey().segmentId(), x -> x.getValue()));
+        activeSegmentsWithOffset = stream.getTruncationRecord().join().getObject().getStreamCut();
         assertTrue(activeSegmentsWithOffset.size() == 5 &&
                 activeSegmentsWithOffset.containsKey(twoSegmentId) &&
                 activeSegmentsWithOffset.containsKey(fourSegmentId) &&
@@ -850,7 +856,7 @@ public abstract class StreamTestBase {
         streamCut4.put(eightSegmentId, 1L);
         streamCut4.put(nineSegmentId, 1L);
         AssertExtensions.assertSuppliedFutureThrows("",
-                () -> stream.startTruncation(streamCut4), e -> e instanceof IllegalArgumentException);
+                () -> stream.getTruncationRecord().thenCompose(y -> stream.startTruncation(streamCut4, y)), e -> e instanceof IllegalArgumentException);
 
         Map<Long, Long> streamCut5 = new HashMap<>();
         streamCut3.put(twoSegmentId, 10L);
@@ -858,7 +864,7 @@ public abstract class StreamTestBase {
         streamCut3.put(fiveSegmentId, 10L);
         streamCut3.put(startingSegmentNumber + 0L, 10L);
         AssertExtensions.assertSuppliedFutureThrows("",
-                () -> stream.startTruncation(streamCut5), e -> e instanceof IllegalArgumentException);
+                () -> stream.getTruncationRecord().thenCompose(y -> stream.startTruncation(streamCut5, y)), e -> e instanceof IllegalArgumentException);
     }
 
     private Map<Long, Integer> transform(Map<StreamSegmentRecord, Integer> span) {
@@ -1508,8 +1514,10 @@ public abstract class StreamTestBase {
         String writer1 = "writer1";
         long time = 1L;
         streamObj.sealTransaction(txnId, true, Optional.of(tx01.getVersion()), writer1, time).join();
-        VersionedMetadata<CommittingTransactionsRecord> record = streamObj.startCommittingTransactions(100).join();
-        streamObj.recordCommitOffsets(txnId, Collections.singletonMap(0L, 1L)).join();
+        VersionedMetadata<CommittingTransactionsRecord> record = streamObj.getVersionedCommitTransactionsRecord()
+        .thenCompose(y -> streamObj.getOrderedCommittingTxnInLowestEpoch(100)
+        .thenCompose(z -> streamObj.startCommittingTransactions(y, z))).join();
+        streamObj.getActiveTransaction(txnId).thenCompose(y -> streamObj.recordCommitOffsets(txnId, y, Collections.singletonMap(0L, 1L))).join();
         streamObj.generateMarksForTransactions(record.getObject()).join();
 
         // verify that writer mark is created in the store
@@ -1556,11 +1564,13 @@ public abstract class StreamTestBase {
         VersionedTransactionData tx04 = streamObj.createTransaction(txnId4, 100, 100).join();
         streamObj.sealTransaction(txnId4, true, Optional.of(tx04.getVersion()), writer, time + 4L).join();
 
-        VersionedMetadata<CommittingTransactionsRecord> record = streamObj.startCommittingTransactions(100).join();
-        streamObj.recordCommitOffsets(txnId1, Collections.singletonMap(0L, 1L)).join();
-        streamObj.recordCommitOffsets(txnId2, Collections.singletonMap(0L, 2L)).join();
-        streamObj.recordCommitOffsets(txnId3, Collections.singletonMap(0L, 3L)).join();
-        streamObj.recordCommitOffsets(txnId4, Collections.singletonMap(0L, 4L)).join();
+        VersionedMetadata<CommittingTransactionsRecord> record =
+                streamObj.getVersionedCommitTransactionsRecord().thenCompose(y -> 
+                        streamObj.getOrderedCommittingTxnInLowestEpoch(100).thenCompose(z -> streamObj.startCommittingTransactions(y, z))).join();
+        streamObj.getActiveTransaction(txnId1).thenCompose(y -> streamObj.recordCommitOffsets(txnId1, y, Collections.singletonMap(0L, 1L))).join();
+        streamObj.getActiveTransaction(txnId2).thenCompose(y -> streamObj.recordCommitOffsets(txnId2, y, Collections.singletonMap(0L, 2L))).join();
+        streamObj.getActiveTransaction(txnId3).thenCompose(y -> streamObj.recordCommitOffsets(txnId3, y, Collections.singletonMap(0L, 3L))).join();
+        streamObj.getActiveTransaction(txnId4).thenCompose(y -> streamObj.recordCommitOffsets(txnId4, y, Collections.singletonMap(0L, 4L))).join();
         streamObj.generateMarksForTransactions(record.getObject()).join();
 
         // verify that writer mark is created in the store
@@ -1586,12 +1596,12 @@ public abstract class StreamTestBase {
         streamObj.sealTransaction(txnId2, true, Optional.empty(), "w", 1000L).join();
         streamObj.createTransaction(txnId4, 1000L, 1000L).join();
         streamObj.sealTransaction(txnId4, false, Optional.empty(), "w", 1000L).join();
-        List<ActiveTxnRecord> transactions = 
+        List<VersionedMetadata<ActiveTxnRecord>> transactions = 
                 streamObj.getTransactionRecords(0, txns.stream().map(UUID::toString).collect(Collectors.toList())).join();
         assertEquals(4, transactions.size());
-        assertEquals(transactions.get(0).getTxnStatus(), TxnStatus.OPEN);
-        assertEquals(transactions.get(1).getTxnStatus(), TxnStatus.COMMITTING);
-        assertEquals(transactions.get(2), ActiveTxnRecord.EMPTY);
-        assertEquals(transactions.get(3).getTxnStatus(), TxnStatus.ABORTING);
+        assertEquals(transactions.get(0).getObject().getTxnStatus(), TxnStatus.OPEN);
+        assertEquals(transactions.get(1).getObject().getTxnStatus(), TxnStatus.COMMITTING);
+        assertEquals(transactions.get(2).getObject(), ActiveTxnRecord.EMPTY);
+        assertEquals(transactions.get(3).getObject().getTxnStatus(), TxnStatus.ABORTING);
     }
 }

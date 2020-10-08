@@ -358,10 +358,10 @@ public class LocalController implements Controller {
     }
 
     @Override
-    public CompletableFuture<Void> commitTransaction(Stream stream, final String writerId, final Long timestamp, UUID txnId) {
+    public CompletableFuture<Void> commitTransaction(Stream stream, final String writerId, final Long timestamp, UUID txnId, List<Long> segments) {
         long time = Optional.ofNullable(timestamp).orElse(Long.MIN_VALUE);
         return controller
-                .commitTransaction(stream.getScope(), stream.getStreamName(), txnId, writerId, time)
+                .commitTransaction(stream.getScope(), stream.getStreamName(), txnId, writerId, time, segments)
                 .thenApply(x -> null);
     }
 
