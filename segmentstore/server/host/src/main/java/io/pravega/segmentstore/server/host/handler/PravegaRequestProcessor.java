@@ -398,6 +398,7 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
     public void getStreamSegmentInfo(GetStreamSegmentInfo getStreamSegmentInfo) {
         String segmentName = getStreamSegmentInfo.getSegmentName();
         final String operation = "getStreamSegmentInfo";
+        Timer timer = new Timer();
 
         if (!verifyToken(segmentName, getStreamSegmentInfo.getRequestId(), getStreamSegmentInfo.getDelegationToken(), operation)) {
             return;
@@ -451,6 +452,7 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
     @Override
     public void mergeSegments(MergeSegments mergeSegments) {
         final String operation = "mergeSegments";
+        Timer timer = new Timer();
 
         if (!verifyToken(mergeSegments.getSource(), mergeSegments.getRequestId(), mergeSegments.getDelegationToken(), operation)) {
             return;
@@ -459,7 +461,7 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
         log.info(mergeSegments.getRequestId(), "Merging Segments {} ", mergeSegments);
         segmentStore.mergeStreamSegment(mergeSegments.getTarget(), mergeSegments.getSource(), TIMEOUT)
                     .thenAccept(mergeResult -> {
-                        recordStatForTransaction(mergeResult, mergeSegments.getTarget());
+                        recordStatForTransaction(mergeResult, mergeSegments.getTarget(), timer.getElapsed());
                         connection.send(new WireCommands.SegmentsMerged(mergeSegments.getRequestId(),
                                                                         mergeSegments.getTarget(),
                                                                         mergeSegments.getSource(),
@@ -1001,7 +1003,7 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
         }
     }
 
-    private void recordStatForTransaction(MergeStreamSegmentResult mergeResult, String targetSegmentName) {
+    private void recordStatForTransaction(MergeStreamSegmentResult mergeResult, String targetSegmentName, Duration elapsed) {
         try {
             if (mergeResult != null &&
                     mergeResult.getAttributes().containsKey(Attributes.CREATION_TIME) &&
@@ -1009,7 +1011,7 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
                 long creationTime = mergeResult.getAttributes().get(Attributes.CREATION_TIME);
                 int numOfEvents = mergeResult.getAttributes().get(Attributes.EVENT_COUNT).intValue();
                 long len = mergeResult.getMergedDataLength();
-                statsRecorder.merge(targetSegmentName, len, numOfEvents, creationTime);
+                statsRecorder.merge(targetSegmentName, len, numOfEvents, creationTime, elapsed);
             }
         } catch (Exception ex) {
             // gobble up any errors from stat recording so we do not affect rest of the flow.

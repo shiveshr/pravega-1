@@ -51,6 +51,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import lombok.Getter;
 import lombok.Synchronized;
@@ -337,40 +338,46 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         // - DataNotFoundException because it will only happen in rare case
         // when we generate the transactionid against latest epoch (if there is ongoing scale then this is new epoch)
         // and then epoch node is deleted as scale starts and completes.
-        return validate.thenCompose(validated -> RetryHelper.withRetriesAsync(() ->
-                streamMetadataStore.generateTransactionId(scope, stream, ctx, executor)
-                .thenCompose(txnId -> {
-                    CompletableFuture<Void> addIndex = addTxnToIndex(scope, stream, txnId);
+        return validate.thenCompose(validated -> RetryHelper.withRetriesAsync(() -> {
+            Timer timer = new Timer();
 
-                    // Step 3. Create txn node in the store.
-                    CompletableFuture<VersionedTransactionData> txnFuture = createTxnInStore(scope, stream, lease,
-                            ctx, maxExecutionPeriod, txnId, addIndex);
+            return streamMetadataStore.generateTransactionId(scope, stream, ctx, executor)
+                               .thenCompose(txnId -> {
 
-                    // Step 4. Notify segment stores about new txn.
-                    CompletableFuture<List<StreamSegmentRecord>> segmentsFuture = txnFuture.thenComposeAsync(txnData ->
-                            streamMetadataStore.getSegmentsInEpoch(scope, stream, txnData.getEpoch(), ctx, executor), executor);
+                                   CompletableFuture<Void> addIndex = addTxnToIndex(scope, stream, txnId);
 
-                    CompletableFuture<Void> notify = segmentsFuture.thenComposeAsync(activeSegments ->
-                            notifyTxnCreation(scope, stream, activeSegments, txnId), executor).whenComplete((v, e) ->
-                            // Method notifyTxnCreation ensures that notification completes
-                            // even in the presence of n/w or segment store failures.
-                            log.trace("Txn={}, notified segments stores", txnId));
+                                   // Step 3. Create txn node in the store.
+                                   CompletableFuture<VersionedTransactionData> txnFuture = createTxnInStore(scope, stream, lease,
+                                           ctx, maxExecutionPeriod, txnId, addIndex);
+                                   Duration elapsed = timer.getElapsed();
+                                   TransactionMetrics.getInstance().createTransactionInStore(elapsed);
 
-                    // Step 5. Start tracking txn in timeout service
-                    return notify.whenCompleteAsync((result, ex) -> {
-                        addTxnToTimeoutService(scope, stream, lease, maxExecutionPeriod, txnId, txnFuture);
-                    }, executor).thenApplyAsync(v -> {
-                        List<StreamSegmentRecord> segments = segmentsFuture.join().stream().map(x -> {
-                            long generalizedSegmentId = RecordHelper.generalizedSegmentId(x.segmentId(), txnId);
-                            int epoch = NameUtils.getEpoch(generalizedSegmentId);
-                            int segmentNumber = NameUtils.getSegmentNumber(generalizedSegmentId);
-                            return StreamSegmentRecord.builder().creationEpoch(epoch).segmentNumber(segmentNumber)
-                                    .creationTime(x.getCreationTime()).keyStart(x.getKeyStart()).keyEnd(x.getKeyEnd()).build();
-                        }).collect(Collectors.toList());
+                                   // Step 4. Notify segment stores about new txn.
+                                   CompletableFuture<List<StreamSegmentRecord>> segmentsFuture = txnFuture.thenComposeAsync(txnData ->
+                                           streamMetadataStore.getSegmentsInEpoch(scope, stream, txnData.getEpoch(), ctx, executor), executor);
 
-                        return new ImmutablePair<>(txnFuture.join(), segments);
-                    }, executor);
-                }), e -> {
+                                   CompletableFuture<Void> notify = segmentsFuture.thenComposeAsync(activeSegments ->
+                                           notifyTxnCreation(scope, stream, activeSegments, txnId), executor).whenComplete((v, e) ->
+                                           // Method notifyTxnCreation ensures that notification completes
+                                           // even in the presence of n/w or segment store failures.
+                                           log.trace("Txn={}, notified segments stores", txnId));
+
+                                   // Step 5. Start tracking txn in timeout service
+                                   return notify.whenCompleteAsync((result, ex) -> {
+                                       addTxnToTimeoutService(scope, stream, lease, maxExecutionPeriod, txnId, txnFuture);
+                                   }, executor).thenApplyAsync(v -> {
+                                       List<StreamSegmentRecord> segments = segmentsFuture.join().stream().map(x -> {
+                                           long generalizedSegmentId = RecordHelper.generalizedSegmentId(x.segmentId(), txnId);
+                                           int epoch = NameUtils.getEpoch(generalizedSegmentId);
+                                           int segmentNumber = NameUtils.getSegmentNumber(generalizedSegmentId);
+                                           return StreamSegmentRecord.builder().creationEpoch(epoch).segmentNumber(segmentNumber)
+                                                                     .creationTime(x.getCreationTime()).keyStart(x.getKeyStart()).keyEnd(x.getKeyEnd()).build();
+                                       }).collect(Collectors.toList());
+
+                                       return new ImmutablePair<>(txnFuture.join(), segments);
+                                   }, executor);
+                               });
+        }, e -> {
             Throwable unwrap = Exceptions.unwrap(e);
             return unwrap instanceof StoreException.WriteConflictException || unwrap instanceof StoreException.DataNotFoundException;
         }, 5, executor));
@@ -601,7 +608,9 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                              final List<Long> segments) {
         TxnResource resource = new TxnResource(scope, stream, txnId);
         Optional<Version> versionOpt = Optional.ofNullable(version);
+        Timer timer = new Timer();
 
+        AtomicReference<Duration> previousElapsed = new AtomicReference<>();
         // Step 1. Add txn to current host's index, if it is not already present
         CompletableFuture<Void> addIndex = host.equals(hostId) && !timeoutService.containsTxn(scope, stream, txnId) ?
                 // PS: txn version in index does not matter, because if update is successful,
@@ -631,6 +640,10 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
 
         // Step 3. write event to corresponding stream.
         return sealFuture.thenComposeAsync(pair -> {
+            Duration elapsed = timer.getElapsed();
+            previousElapsed.set(elapsed);
+            TransactionMetrics.getInstance().markTransactionAsCommitting(elapsed);
+
             TxnStatus status = pair.getKey();
             switch (status) {
                 case COMMITTING:
@@ -648,6 +661,12 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                     return CompletableFuture.completedFuture(status);
             }
         }, executor).thenComposeAsync(status -> {
+            
+            Duration elapsed = timer.getElapsed();
+
+            TransactionMetrics.getInstance().writeCommitEvent(elapsed.minus(previousElapsed.get()));
+            previousElapsed.set(elapsed);
+
             // Step 4. Remove txn from timeoutService, and from the index.
             timeoutService.removeTxn(scope, stream, txnId);
             log.debug("Txn={}, removed from timeout service", txnId);

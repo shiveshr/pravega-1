@@ -993,8 +993,10 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     public CompletableFuture<Map<Long, Long>> getCurrentSegmentSizes(String scope, String stream, List<Long> segments) {
+        Timer timer = new Timer();
         return Futures.allOfWithResults(segments.stream().collect(
-                Collectors.toMap(x -> x, x -> getSegmentOffset(scope, stream, x, this.retrieveDelegationToken()))));
+                Collectors.toMap(x -> x, x -> getSegmentOffset(scope, stream, x, this.retrieveDelegationToken()))))
+                      .whenComplete((r, e) -> TransactionMetrics.getInstance().postTxnCommitSegmentSizes(timer.getElapsed()));
     }
 
     @Override

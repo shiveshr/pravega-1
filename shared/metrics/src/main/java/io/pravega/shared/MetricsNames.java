@@ -71,6 +71,8 @@ public final class MetricsNames {
     // Metrics in Segment Store Service
     // Segment-related stats
     public static final String SEGMENT_CREATE_LATENCY = PREFIX + "segmentstore.segment.create_latency_ms";              // Histogram
+    public static final String SEGMENT_MERGE_LATENCY = PREFIX + "segmentstore.segment.merge_latency_ms";              // Histogram
+    public static final String SEGMENT_INFO_LATENCY = PREFIX + "segmentstore.segment.info_latency_ms";              // Histogram
     public static final String SEGMENT_DELETE_LATENCY = PREFIX + "segmentstore.segment.delete_latency_ms";              // Histogram
     public static final String SEGMENT_READ_LATENCY = PREFIX + "segmentstore.segment.read_latency_ms";                  // Histogram
     public static final String SEGMENT_WRITE_LATENCY = PREFIX + "segmentstore.segment.write_latency_ms";                // Histogram
@@ -220,6 +222,12 @@ public final class MetricsNames {
     public static final String COMMIT_TRANSACTION = PREFIX + "controller.transactions.committed";                                       // Counter and Per-stream Counter
     public static final String COMMIT_TRANSACTION_LATENCY = PREFIX + "controller.transactions.committed_latency_ms";                    // Histogram
     public static final String COMMIT_TRANSACTION_SEGMENTS_LATENCY = PREFIX + "controller.transactions.committed_segments_latency_ms";  // Histogram
+    public static final String CREATE_TRANSACTION_METADATA_LATENCY = PREFIX + "controller.transactions.createMetadata_latency_ms";             // Histogram
+    public static final String COMMIT_TRANSACTION_METADATA_LATENCY = PREFIX + "controller.transactions.commitMetadata_latency_ms";             // Histogram
+    public static final String COMMIT_TRANSACTION_WRITE_EVENT_LATENCY = PREFIX + "controller.transactions.writeEventLatency_ms";             // Histogram
+    public static final String IDENTIFY_TRANSACTION_TO_COMMIT_LATENCY = PREFIX + "controller.transactions.queryTransactionsToCommit_latency_ms";  // Histogram
+    public static final String COMMIT_EVENT_PROCESSING_LATENCY = PREFIX + "controller.transactions.commitEventProcessing_latency_ms";   // Histogram
+    public static final String COMMIT_OFFSET_TRANSACTION_LATENCY = PREFIX + "controller.transactions.commitTxnOffset_latency_ms";   // Histogram
     public static final String COMMIT_TRANSACTION_FAILED = PREFIX + "controller.transactions.commit_failed";                            // Counter, Per-stream Counter, Per-transaction Counter
     public static final String ABORTING_TRANSACTION_LATENCY = PREFIX + "controller.transactions.aborting_latency_ms";                   // Histogram
     public static final String ABORT_TRANSACTION = PREFIX + "controller.transactions.aborted";                                          // Counter and Per-stream Counter

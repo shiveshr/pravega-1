@@ -38,6 +38,13 @@ public interface SegmentStatsRecorder extends AutoCloseable {
     void sealSegment(String streamSegmentName);
 
     /**
+     * get segment info. 
+     * 
+     * @param elapsed elapsed.
+     */
+    void getSegmentInfo(Duration elapsed);
+
+    /**
      * Method to notify segment policy events.
      *
      * @param streamSegmentName segment.
@@ -63,8 +70,9 @@ public interface SegmentStatsRecorder extends AutoCloseable {
      * @param dataLength        data in transactional segment.
      * @param numOfEvents       events in transactional segment.
      * @param txnCreationTime   transaction creation time.
+     * @param elapsed  elapsed
      */
-    void merge(String streamSegmentName, long dataLength, int numOfEvents, long txnCreationTime);
+    void merge(String streamSegmentName, long dataLength, int numOfEvents, long txnCreationTime, Duration elapsed);
 
     /**
      * Method to notify a read operation completed.
@@ -104,6 +112,11 @@ public interface SegmentStatsRecorder extends AutoCloseable {
             }
 
             @Override
+            public void getSegmentInfo(Duration elapsed) {
+                
+            }
+
+            @Override
             public void policyUpdate(String streamSegmentName, byte type, int targetRate) {
             }
 
@@ -112,7 +125,7 @@ public interface SegmentStatsRecorder extends AutoCloseable {
             }
 
             @Override
-            public void merge(String streamSegmentName, long dataLength, int numOfEvents, long txnCreationTime) {
+            public void merge(String streamSegmentName, long dataLength, int numOfEvents, long txnCreationTime, Duration elapsed) {
             }
 
             @Override

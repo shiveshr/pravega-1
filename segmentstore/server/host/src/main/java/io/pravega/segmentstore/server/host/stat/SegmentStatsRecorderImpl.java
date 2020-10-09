@@ -33,15 +33,7 @@ import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
-import static io.pravega.shared.MetricsNames.SEGMENT_APPEND_SIZE;
-import static io.pravega.shared.MetricsNames.SEGMENT_CREATE_LATENCY;
-import static io.pravega.shared.MetricsNames.SEGMENT_READ_BYTES;
-import static io.pravega.shared.MetricsNames.SEGMENT_READ_LATENCY;
-import static io.pravega.shared.MetricsNames.SEGMENT_READ_SIZE;
-import static io.pravega.shared.MetricsNames.SEGMENT_WRITE_BYTES;
-import static io.pravega.shared.MetricsNames.SEGMENT_WRITE_EVENTS;
-import static io.pravega.shared.MetricsNames.SEGMENT_WRITE_LATENCY;
-import static io.pravega.shared.MetricsNames.globalMetricName;
+import static io.pravega.shared.MetricsNames.*;
 import static io.pravega.shared.MetricsTags.segmentTags;
 
 @Slf4j
@@ -65,6 +57,8 @@ class SegmentStatsRecorderImpl implements SegmentStatsRecorder {
     @Getter(AccessLevel.PROTECTED)
     private final OpStatsLogger readStreamSegment = STATS_LOGGER.createStats(SEGMENT_READ_LATENCY);
     @Getter(AccessLevel.PROTECTED)
+    private final OpStatsLogger streamSegmentInfo = STATS_LOGGER.createStats(SEGMENT_INFO_LATENCY);
+    @Getter(AccessLevel.PROTECTED)
     private final OpStatsLogger writeStreamSegment = STATS_LOGGER.createStats(SEGMENT_WRITE_LATENCY);
     @Getter(AccessLevel.PROTECTED)
     private final OpStatsLogger appendSizeDistribution = STATS_LOGGER.createStats(SEGMENT_APPEND_SIZE);
@@ -72,6 +66,8 @@ class SegmentStatsRecorderImpl implements SegmentStatsRecorder {
     private final OpStatsLogger readSizeDistribution = STATS_LOGGER.createStats(SEGMENT_READ_SIZE);
     @Getter(AccessLevel.PROTECTED)
     private final DynamicLogger dynamicLogger = MetricsProvider.getDynamicLogger();
+    @Getter(AccessLevel.PROTECTED)
+    private final OpStatsLogger mergeStreamSegment = STATS_LOGGER.createStats(SEGMENT_MERGE_LATENCY);
 
     private final Set<String> pendingCacheLoads;
     private final Cache<String, SegmentAggregates> cache;
@@ -107,6 +103,7 @@ class SegmentStatsRecorderImpl implements SegmentStatsRecorder {
     public void close() {
         this.cacheCleanup.cancel(true);
         this.createStreamSegment.close();
+        this.mergeStreamSegment.close();
         this.readStreamSegment.close();
         this.writeStreamSegment.close();
         this.appendSizeDistribution.close();
@@ -179,6 +176,11 @@ class SegmentStatsRecorderImpl implements SegmentStatsRecorder {
     }
 
     @Override
+    public void getSegmentInfo(Duration elapsed) {
+        getStreamSegmentInfo().reportSuccessEvent(elapsed);
+    }
+
+    @Override
     public void policyUpdate(String streamSegmentName, byte type, int targetRate) {
         SegmentAggregates aggregates = getSegmentAggregate(streamSegmentName);
         if (aggregates != null) {
@@ -236,11 +238,13 @@ class SegmentStatsRecorderImpl implements SegmentStatsRecorder {
      * @param dataLength        length of data written in txn
      * @param numOfEvents       number of events written in txn
      * @param txnCreationTime   time when txn was created
+     * @param elapsed elapsed
      */
     @Override
-    public void merge(String streamSegmentName, long dataLength, int numOfEvents, long txnCreationTime) {
+    public void merge(String streamSegmentName, long dataLength, int numOfEvents, long txnCreationTime, Duration elapsed) {
         getDynamicLogger().incCounterValue(SEGMENT_WRITE_BYTES, dataLength, segmentTags(streamSegmentName));
         getDynamicLogger().incCounterValue(SEGMENT_WRITE_EVENTS, numOfEvents, segmentTags(streamSegmentName));
+        getMergeStreamSegment().reportSuccessEvent(elapsed);
 
         SegmentAggregates aggregates = getSegmentAggregate(streamSegmentName);
         if (aggregates != null && aggregates.updateTx(dataLength, numOfEvents, txnCreationTime)) {

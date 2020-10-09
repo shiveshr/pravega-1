@@ -15,22 +15,7 @@ import io.pravega.shared.metrics.OpStatsLogger;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static io.pravega.shared.MetricsNames.ABORTING_TRANSACTION_LATENCY;
-import static io.pravega.shared.MetricsNames.ABORT_TRANSACTION;
-import static io.pravega.shared.MetricsNames.ABORT_TRANSACTION_FAILED;
-import static io.pravega.shared.MetricsNames.ABORT_TRANSACTION_LATENCY;
-import static io.pravega.shared.MetricsNames.ABORT_TRANSACTION_SEGMENTS_LATENCY;
-import static io.pravega.shared.MetricsNames.COMMITTING_TRANSACTION_LATENCY;
-import static io.pravega.shared.MetricsNames.COMMIT_TRANSACTION;
-import static io.pravega.shared.MetricsNames.COMMIT_TRANSACTION_FAILED;
-import static io.pravega.shared.MetricsNames.COMMIT_TRANSACTION_LATENCY;
-import static io.pravega.shared.MetricsNames.COMMIT_TRANSACTION_SEGMENTS_LATENCY;
-import static io.pravega.shared.MetricsNames.CREATE_TRANSACTION;
-import static io.pravega.shared.MetricsNames.CREATE_TRANSACTION_FAILED;
-import static io.pravega.shared.MetricsNames.CREATE_TRANSACTION_LATENCY;
-import static io.pravega.shared.MetricsNames.CREATE_TRANSACTION_SEGMENTS_LATENCY;
-import static io.pravega.shared.MetricsNames.OPEN_TRANSACTIONS;
-import static io.pravega.shared.MetricsNames.globalMetricName;
+import static io.pravega.shared.MetricsNames.*;
 import static io.pravega.shared.MetricsTags.streamTags;
 import static io.pravega.shared.MetricsTags.transactionTags;
 
@@ -43,9 +28,15 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
 
     private final OpStatsLogger createTransactionLatency;
     private final OpStatsLogger createTransactionSegmentsLatency;
+    private final OpStatsLogger createTransactionMetadataLatency;
+    private final OpStatsLogger commitTransactionMetadataUpdateLatency;
+    private final OpStatsLogger commitTransactionWriteEventLatency;
+    private final OpStatsLogger identifyTransactionsToCommitLatency;
+    private final OpStatsLogger commitEventProcessingLatency;
     private final OpStatsLogger commitTransactionLatency;
     private final OpStatsLogger commitTransactionSegmentsLatency;
     private final OpStatsLogger committingTransactionLatency;
+    private final OpStatsLogger commitOffsetTransactionLatency;
     private final OpStatsLogger abortTransactionLatency;
     private final OpStatsLogger abortTransactionSegmentsLatency;
     private final OpStatsLogger abortingTransactionLatency;
@@ -59,6 +50,12 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
         abortTransactionLatency = STATS_LOGGER.createStats(ABORT_TRANSACTION_LATENCY);
         abortTransactionSegmentsLatency = STATS_LOGGER.createStats(ABORT_TRANSACTION_SEGMENTS_LATENCY);
         abortingTransactionLatency = STATS_LOGGER.createStats(ABORTING_TRANSACTION_LATENCY);
+        createTransactionMetadataLatency = STATS_LOGGER.createStats(CREATE_TRANSACTION_METADATA_LATENCY);
+        commitTransactionMetadataUpdateLatency = STATS_LOGGER.createStats(COMMIT_TRANSACTION_METADATA_LATENCY);
+        commitTransactionWriteEventLatency = STATS_LOGGER.createStats(COMMIT_TRANSACTION_WRITE_EVENT_LATENCY);
+        identifyTransactionsToCommitLatency = STATS_LOGGER.createStats(IDENTIFY_TRANSACTION_TO_COMMIT_LATENCY);
+        commitEventProcessingLatency = STATS_LOGGER.createStats(COMMIT_EVENT_PROCESSING_LATENCY);
+        commitOffsetTransactionLatency = STATS_LOGGER.createStats(COMMIT_OFFSET_TRANSACTION_LATENCY);
     }
 
     /**
@@ -202,6 +199,15 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
     }
 
     /**
+     * This method reports the latency of managing segments for a getting txn commit offset. 
+     *
+     * @param latency      Time elapsed to delete the segments related to the aborted transaction.
+     */
+    public void postTxnCommitSegmentSizes(Duration latency) {
+        commitOffsetTransactionLatency.reportSuccessValue(latency.toMillis());
+    }
+
+    /**
      * This method increments the global, Stream-related and Transaction-related counters of failed abort operations.
      *
      * @param scope      Scope.
@@ -223,6 +229,26 @@ public final class TransactionMetrics extends AbstractControllerMetrics {
      */
     public static void reportOpenTransactions(String scope, String streamName, int ongoingTransactions) {
         DYNAMIC_LOGGER.reportGaugeValue(OPEN_TRANSACTIONS, ongoingTransactions, streamTags(scope, streamName));
+    }
+
+    public void createTransactionInStore(Duration latency) {
+        createTransactionMetadataLatency.reportSuccessValue(latency.toMillis());
+    }
+
+    public void markTransactionAsCommitting(Duration latency) {
+        commitTransactionMetadataUpdateLatency.reportSuccessValue(latency.toMillis());
+    }
+
+    public void writeCommitEvent(Duration latency) {
+        commitTransactionWriteEventLatency.reportSuccessValue(latency.toMillis());
+    }
+
+    public void commitTransactionIdentification(Duration latency) {
+        identifyTransactionsToCommitLatency.reportSuccessValue(latency.toMillis());
+    }
+
+    public void commitEventProcessingTime(Duration latency) {
+        commitEventProcessingLatency.reportSuccessValue(latency.toMillis());
     }
 
     public static synchronized void reset() {

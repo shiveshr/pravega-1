@@ -32,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import static io.pravega.shared.NameUtils.computeSegmentId;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -202,7 +203,11 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                     return commitFuture
                             .thenCompose(versionedMetadata -> streamMetadataStore.completeCommitTransactions(scope, stream, versionedMetadata, context, executor)
                             .thenCompose(v -> resetStateConditionally(scope, stream, stateRecord.get(), context))
-                            .thenApply(v -> versionedMetadata.getObject().getEpoch()));
+                            .thenApply(v -> {
+                                TransactionMetrics.getInstance().commitEventProcessingTime(timer.getElapsed());
+
+                                return versionedMetadata.getObject().getEpoch();
+                            }));
                 }, executor);
     }
 
@@ -292,6 +297,8 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
      */
     private CompletableFuture<Void> commitTransactions(String scope, String stream, List<Long> segments,
                                                        List<UUID> transactionsToCommit, OperationContext context, Timer timer) {
+        AtomicReference<Duration> elapsed = new AtomicReference<>(timer.getElapsed());
+        TransactionMetrics.getInstance().commitTransactionIdentification(elapsed.get());
         // Chain all transaction commit futures one after the other. This will ensure that order of commit
         // if honoured and is based on the order in the list.
         CompletableFuture<Void> future = CompletableFuture.completedFuture(null);
@@ -315,7 +322,11 @@ public class CommitRequestHandler extends AbstractRequestProcessor<CommitEvent> 
                         return streamMetadataTasks.notifyTxnCommit(scope, stream, segments.stream().filter(x -> usedSegments.contains(NameUtils.getSegmentNumber(x))).collect(Collectors.toList()), txnId);
                     })
                     .thenCompose(map -> streamMetadataStore.recordCommitOffsets(scope, stream, txnId, map, context, executor))
-                    .thenRun(() -> TransactionMetrics.getInstance().commitTransaction(scope, stream, timer.getElapsed()));
+                    .thenRun(() -> {
+                        Duration t = timer.getElapsed();
+                        TransactionMetrics.getInstance().commitTransaction(scope, stream, t.minus(elapsed.get()));
+                        elapsed.set(t);
+                    });
         }
         
         return future
