@@ -464,49 +464,6 @@ public class StreamTransactionMetadataTasksTest {
     }
 
     @Test(timeout = 10000)
-    public void partialTxnCreationTest() {
-        // Create mock writer objects.
-        EventStreamWriterMock<CommitEvent> commitWriter = new EventStreamWriterMock<>();
-        EventStreamWriterMock<AbortEvent> abortWriter = new EventStreamWriterMock<>();
-
-        // Create transaction tasks.
-        txnTasks = new StreamTransactionMetadataTasks(streamStore, 
-                SegmentHelperMock.getFailingSegmentHelperMock(), executor, "host", 
-                new GrpcAuthHelper(this.authEnabled, "secret", 600));
-        txnTasks.initializeStreamWriters(commitWriter, abortWriter);
-
-        // Create ControllerService.
-        consumer = new ControllerService(kvtStore, kvtMetadataTasks, streamStore, bucketStore, streamMetadataTasks, txnTasks,
-                segmentHelperMock, executor, null);
-
-        final ScalingPolicy policy1 = ScalingPolicy.fixed(2);
-        final StreamConfiguration configuration1 = StreamConfiguration.builder().scalingPolicy(policy1).build();
-
-        // Create stream and scope
-        Assert.assertEquals(Controller.CreateScopeStatus.Status.SUCCESS, consumer.createScope(SCOPE).join().getStatus());
-        Assert.assertEquals(Controller.CreateStreamStatus.Status.SUCCESS,
-                streamMetadataTasks.createStream(SCOPE, STREAM, configuration1, 0).join());
-
-        // Create partial transaction
-        final long lease = 10000;
-
-        AssertExtensions.assertFutureThrows("Transaction creation fails, although a new txn id gets added to the store",
-                txnTasks.createTxn(SCOPE, STREAM, lease, null),
-                e -> e instanceof RuntimeException);
-
-        // Ensure that exactly one transaction is active on the stream.
-        Set<UUID> txns = streamStore.getActiveTxns(SCOPE, STREAM, null, executor).join().keySet();
-        assertEquals(1, txns.size());
-
-        // Ensure that transaction state is OPEN.
-        UUID txn1 = txns.stream().findFirst().get();
-        assertEquals(TxnStatus.OPEN, streamStore.transactionStatus(SCOPE, STREAM, txn1, null, executor).join());
-
-        // Ensure that timeout service knows about the transaction.
-        assertTrue(txnTasks.getTimeoutService().containsTxn(SCOPE, STREAM, txn1));
-    }
-
-    @Test(timeout = 10000)
     public void txnCreationTest() {
         // Create mock writer objects.
         EventStreamWriterMock<CommitEvent> commitWriter = new EventStreamWriterMock<>();

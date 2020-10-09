@@ -186,154 +186,9 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                final State state, final OperationContext context,
                                                final Executor executor) {
         Stream stream = getStream(scope, name, context);
-        CompletableFuture<VersionedMetadata<State>> future = fetchStateFuture(stream, context);
+        CompletableFuture<VersionedMetadata<State>> future = fetStateRecord(stream, context);
         return Futures.completeOn(future.thenCompose(stateRec -> stream.updateVersionedState(stateRec, state)
                                                            .thenAccept(updated -> loadState(context, updated))), executor);
-    }
-
-    private void loadState(OperationContext context, VersionedMetadata<State> stateRec) {
-        if (context != null) {
-            context.load("state", stateRec);
-        }
-    }
-
-    private void unloadState(OperationContext context) {
-        if (context != null) {
-            context.unload("state");
-        }
-    }
-
-    private CompletableFuture<VersionedMetadata<State>> fetchStateFuture(Stream stream, OperationContext context) {
-        if (context == null) {
-            return stream.getVersionedState();
-        } else {
-            VersionedMetadata<State> r = context.get("state", State.class);
-            if (r == null) {
-                return stream.getVersionedState()
-                             .thenApply(x -> {
-                                 loadState(context, x);
-                                 return x;
-                             });
-            } else {
-                return CompletableFuture.completedFuture(r);
-            }
-        }
-    }
-
-    private void loadConfig(OperationContext context, VersionedMetadata<StreamConfigurationRecord> record) {
-        if (context != null) {
-            context.load("config", record);
-        }
-    }
-
-    private void unloadConfig(OperationContext context) {
-        if (context != null) {
-            context.unload("config");
-        }
-    }
-    
-    private CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> fetchConfigFuture(Stream stream, OperationContext context) {
-        if (context == null) {
-            return stream.getVersionedConfigurationRecord();
-        } else {
-            VersionedMetadata<StreamConfigurationRecord> r = context.get("config", StreamConfigurationRecord.class);
-            if (r == null) {
-                return stream.getVersionedConfigurationRecord()
-                             .thenApply(x -> {
-                                 loadConfig(context, x);
-                                 return x;
-                             });
-            } else {
-                return CompletableFuture.completedFuture(r);
-            }
-        }
-    }
-
-    private void loadTruncationRecord(OperationContext context, VersionedMetadata<StreamTruncationRecord> record) {
-        if (context != null) {
-            context.load("truncate", record);
-        }
-    }
-    
-    private void unloadTruncationRecord(OperationContext context) {
-        if (context != null) {
-            context.unload("truncate");
-        }
-    }
-    
-    private CompletableFuture<VersionedMetadata<StreamTruncationRecord>> fetchTruncateFuture(Stream stream, OperationContext context) {
-        if (context == null) {
-            return stream.getTruncationRecord();
-        } else {
-            VersionedMetadata<StreamTruncationRecord> r = context.get("truncate", StreamTruncationRecord.class);
-            if (r == null) {
-                return stream.getTruncationRecord()
-                        .thenApply(x -> {
-                            loadTruncationRecord(context, x);
-                            return x;
-                        });
-            } else {
-                return CompletableFuture.completedFuture(r);
-            }
-        }
-    }
-    
-    private void loadEpochTransitionRecord(OperationContext context, VersionedMetadata<EpochTransitionRecord> record) {
-        if (context != null) {
-            context.load("scale", record);
-        }
-    }
-
-    private void unloadEpochTransitionRecord(OperationContext context) {
-        if (context != null) {
-            context.unload("scale");
-        }
-    }
-    
-    private CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> fetchCommittingFuture(Stream stream, OperationContext context) {
-        if (context == null) {
-            return stream.getVersionedCommitTransactionsRecord();
-        } else {
-            VersionedMetadata<CommittingTransactionsRecord> r = context.get("commit", CommittingTransactionsRecord.class);
-            if (r == null) {
-                return stream.getVersionedCommitTransactionsRecord()
-                        .thenApply(x -> {
-                            loadCommittingRecord(context, x);
-                            return x;
-                        });
-            } else {
-                return CompletableFuture.completedFuture(r);
-            }
-        }
-    }
-    
-    private void loadCommittingRecord(OperationContext context, VersionedMetadata<CommittingTransactionsRecord> record) {
-        if (context != null) {
-            context.load("commit", record);
-        }
-    }
-    
-    private void unloadCommittingRecord(OperationContext context) {
-        if (context != null) {
-            context.unload("commit");
-        }
-    }
-    
-    private CompletableFuture<VersionedMetadata<EpochTransitionRecord>> fetchETRFuture(Stream stream, OperationContext context) {
-        if (context == null) {
-            return stream.getEpochTransition();
-        } else {
-            VersionedMetadata<EpochTransitionRecord> r = context.get("scale", EpochTransitionRecord.class);
-            if (r == null) {
-                return stream.getEpochTransition()
-                        .thenApply(x -> {
-                            loadEpochTransitionRecord(context, x);
-                            return x;
-                        });
-            } else {
-                return CompletableFuture.completedFuture(r);
-            }
-        }
     }
 
     @Override
@@ -343,7 +198,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                              final Executor executor) {
         Stream stream = getStream(scope, name, context);
         unloadState(context);
-        return Futures.completeOn(fetchStateFuture(stream, context).thenApply(VersionedMetadata::getObject), executor);
+        return Futures.completeOn(fetStateRecord(stream, context).thenApply(VersionedMetadata::getObject), executor);
     }
     
     @Override
@@ -365,7 +220,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     public CompletableFuture<VersionedMetadata<State>> getVersionedState(final String scope, final String name,
                                              final OperationContext context,
                                              final Executor executor) {
-        return Futures.completeOn(fetchStateFuture(getStream(scope, name, context), context), executor);
+        return Futures.completeOn(fetStateRecord(getStream(scope, name, context), context), executor);
     }
 
     /**
@@ -467,7 +322,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                    final OperationContext context, final Executor executor) {
         Stream stream = getStream(scope, name, context);
         
-        return Futures.completeOn(fetchTruncateFuture(stream, context)
+        return Futures.completeOn(fetchTruncationRecord(stream, context)
                 .thenCompose(r -> Futures.toVoid(stream.startTruncation(streamCut, r)
                                         .handle((s, e) -> {
                                             if (e != null) {
@@ -501,7 +356,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                                                                    final OperationContext context,
                                                                                                    final Executor executor) {
         unloadTruncationRecord(context);
-        return Futures.completeOn(fetchTruncateFuture(getStream(scope, name, context), context), executor);
+        return Futures.completeOn(fetchTruncationRecord(getStream(scope, name, context), context), executor);
     }
 
     @Override
@@ -509,7 +364,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                                                             final String name,
                                                                                             final OperationContext context,
                                                                                             final Executor executor) {
-        return Futures.completeOn(fetchTruncateFuture(getStream(scope, name, context), context), executor);
+        return Futures.completeOn(fetchTruncationRecord(getStream(scope, name, context), context), executor);
     }
 
     @Override
@@ -519,7 +374,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                             final OperationContext context,
                                                             final Executor executor) {
         Stream stream = getStream(scope, name, context);
-        return Futures.completeOn(fetchConfigFuture(stream, context)
+        return Futures.completeOn(fetchConfigRecord(stream, context)
                 .thenCompose(record -> Futures.toVoid(stream.startUpdateConfiguration(record, configuration)
                                                             .handle((s, e) -> {
                                                                 if (e != null) {
@@ -552,7 +407,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     public CompletableFuture<StreamConfiguration> getConfiguration(final String scope,
                                                                    final String name,
                                                                    final OperationContext context, final Executor executor) {
-        return Futures.completeOn(fetchConfigFuture(getStream(scope, name, context), context)
+        return Futures.completeOn(fetchConfigRecord(getStream(scope, name, context), context)
                 .thenApply(x -> x.getObject().getStreamConfiguration()), executor);
     }
 
@@ -562,7 +417,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                                                                          final OperationContext context,
                                                                                                          final Executor executor) {
         unloadConfig(context);
-        return Futures.completeOn(fetchConfigFuture(getStream(scope, name, context), context), executor);
+        return Futures.completeOn(fetchConfigRecord(getStream(scope, name, context), context), executor);
     }
 
     @Override
@@ -570,19 +425,19 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                                                                   final String name,
                                                                                                   final OperationContext context,
                                                                                                   final Executor executor) {
-        return Futures.completeOn(fetchConfigFuture(getStream(scope, name, context), context), executor);
+        return Futures.completeOn(fetchConfigRecord(getStream(scope, name, context), context), executor);
     }
 
     @Override
     public CompletableFuture<Boolean> isSealed(final String scope, final String name, final OperationContext context, final Executor executor) {
-        return Futures.completeOn(fetchStateFuture(getStream(scope, name, context), context)
+        return Futures.completeOn(fetStateRecord(getStream(scope, name, context), context)
                 .thenApply(state -> state.getObject().equals(State.SEALED)), executor);
     }
 
     @Override
     public CompletableFuture<Void> setSealed(final String scope, final String name, final OperationContext context, final Executor executor) {
         Stream stream = getStream(scope, name, context);
-        return Futures.completeOn(fetchStateFuture(stream, context)
+        return Futures.completeOn(fetStateRecord(stream, context)
                                         .thenCompose(stateRec -> Futures.toVoid(stream.updateVersionedState(stateRec, State.SEALED)
                                                                                       .handle((s, e) -> {
                                                                                           if (e != null) {
@@ -608,7 +463,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     @Override
     public CompletableFuture<Map<StreamSegmentRecord, Long>> getSegmentsAtHead(final String scope, final String name, final OperationContext context, final Executor executor) {
         final Stream stream = getStream(scope, name, context);
-        return Futures.completeOn(fetchTruncateFuture(stream, context)
+        return Futures.completeOn(fetchTruncationRecord(stream, context)
                 .thenCompose(truncationRecord -> {
                     if (truncationRecord.getObject().equals(StreamTruncationRecord.EMPTY)) {
                         return stream.getSegmentsInEpoch(0)
@@ -626,7 +481,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     @Override
     public CompletableFuture<List<StreamSegmentRecord>> getActiveSegments(final String scope, final String name, final OperationContext context, final Executor executor) {
         final Stream stream = getStream(scope, name, context);
-        return Futures.completeOn(fetchStateFuture(stream, context)
+        return Futures.completeOn(fetStateRecord(stream, context)
                         .thenComposeAsync(state -> {
                             if (State.SEALED.equals(state.getObject())) {
                                 return CompletableFuture.completedFuture(Collections.emptyList());
@@ -695,7 +550,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     @Override
     public CompletableFuture<VersionedMetadata<EpochTransitionRecord>> getEpochTransition(String scope, String stream,
                                                                                           OperationContext context, ScheduledExecutorService executor) {
-        return Futures.completeOn(fetchETRFuture(getStream(scope, stream, context), context), executor);
+        return Futures.completeOn(fetchEpochTransitionRecord(getStream(scope, stream, context), context), executor);
     }
 
     @Override
@@ -883,7 +738,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                                           final OperationContext context,
                                                                           final Executor executor) {
         int epoch = RecordHelper.getTransactionEpoch(txId);
-        return Futures.completeOn(fetchTxnFuture(getStream(scopeName, streamName, context), txId, context)
+        return Futures.completeOn(fetchTxnRecord(getStream(scopeName, streamName, context), txId, context)
                 .thenApply(data -> {
                     ActiveTxnRecord activeTxnRecord = data.getObject();
                     return new VersionedTransactionData(epoch, txId, data.getVersion(),
@@ -900,7 +755,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
                                                                           final OperationContext context,
                                                                           final Executor executor) {
         int epoch = RecordHelper.getTransactionEpoch(txId);
-        return Futures.completeOn(fetchTxnFuture(getStream(scopeName, streamName, context), txId, context), executor);
+        return Futures.completeOn(fetchTxnRecord(getStream(scopeName, streamName, context), txId, context), executor);
     }
 
     @Override
@@ -1099,42 +954,13 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
             ScheduledExecutorService executor) {
         return Futures.completeOn(fetchCommittingFuture(getStream(scope, stream, context), context), executor);
     }
-
-    private void loadActiveTxn(OperationContext context, UUID txnId, VersionedMetadata<ActiveTxnRecord> record) {
-        if (context != null) {
-            context.load("txn" + txnId, record);
-        }
-    }
-
-    private void unloadActiveTxn(OperationContext context, UUID txnId) {
-        if (context != null) {
-            context.unload("txn" + txnId);
-        }
-    }
-
-    private CompletableFuture<VersionedMetadata<ActiveTxnRecord>> fetchTxnFuture(Stream stream, UUID txnId, OperationContext context) {
-        if (context == null) {
-            return stream.getActiveTransaction(txnId);
-        } else {
-            VersionedMetadata<ActiveTxnRecord> r = context.get("txn" + txnId, ActiveTxnRecord.class);
-            if (r == null) {
-                return stream.getActiveTransaction(txnId)
-                             .thenApply(x -> {
-                                 loadActiveTxn(context, txnId, x);
-                                 return x;
-                             });
-            } else {
-                return CompletableFuture.completedFuture(r);
-            }
-        }
-    }
-
+    
     @Override
     public CompletableFuture<Void> recordCommitOffsets(String scope, String stream, UUID txnId, Map<Long, Long> commitOffsets, 
                                                        OperationContext context, ScheduledExecutorService executor) {
         Stream streamObj = getStream(scope, stream, context);
         
-        return Futures.completeOn(Futures.toVoid(Futures.exceptionallyExpecting(fetchTxnFuture(streamObj, txnId, context)
+        return Futures.completeOn(Futures.toVoid(Futures.exceptionallyExpecting(fetchTxnRecord(streamObj, txnId, context)
                 .thenCompose(txn -> streamObj.recordCommitOffsets(txnId, txn, commitOffsets)), DATA_NOT_FOUND_PREDICATE, null)
                 .handle((x, e) -> {
                     if (e != null) {
@@ -1152,7 +978,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
         Stream streamObj = getStream(scope, stream, context);
 
         return Futures.completeOn(Futures.allOfWithResults(record.getObject().getTransactionsToCommit().stream().map(x -> 
-                Futures.exceptionallyExpecting(fetchTxnFuture(streamObj, x, context), DATA_NOT_FOUND_PREDICATE, 
+                Futures.exceptionallyExpecting(fetchTxnRecord(streamObj, x, context), DATA_NOT_FOUND_PREDICATE, 
                         new VersionedMetadata<>(ActiveTxnRecord.EMPTY, null))).collect(Collectors.toList()))
                                          .thenCompose(streamObj::generateMarksForTransactions)
                                          .thenCompose(x -> Futures.toVoid(streamObj.completeCommittingTransactions(record)
@@ -1267,6 +1093,180 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
 
             return new SimpleEntry<>(totalNumSplits.get(), totalNumMerges.get());
         });
+    }
+
+    private void loadState(OperationContext context, VersionedMetadata<State> stateRec) {
+        if (context != null) {
+            context.load("state", stateRec);
+        }
+    }
+
+    private void unloadState(OperationContext context) {
+        if (context != null) {
+            context.unload("state");
+        }
+    }
+
+    private CompletableFuture<VersionedMetadata<State>> fetStateRecord(Stream stream, OperationContext context) {
+        if (context == null) {
+            return stream.getVersionedState();
+        } else {
+            VersionedMetadata<State> r = context.get("state", State.class);
+            if (r == null) {
+                return stream.getVersionedState()
+                             .thenApply(x -> {
+                                 loadState(context, x);
+                                 return x;
+                             });
+            } else {
+                return CompletableFuture.completedFuture(r);
+            }
+        }
+    }
+
+    private void loadConfig(OperationContext context, VersionedMetadata<StreamConfigurationRecord> record) {
+        if (context != null) {
+            context.load("config", record);
+        }
+    }
+
+    private void unloadConfig(OperationContext context) {
+        if (context != null) {
+            context.unload("config");
+        }
+    }
+
+    private CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> fetchConfigRecord(Stream stream, OperationContext context) {
+        if (context == null) {
+            return stream.getVersionedConfigurationRecord();
+        } else {
+            VersionedMetadata<StreamConfigurationRecord> r = context.get("config", StreamConfigurationRecord.class);
+            if (r == null) {
+                return stream.getVersionedConfigurationRecord()
+                             .thenApply(x -> {
+                                 loadConfig(context, x);
+                                 return x;
+                             });
+            } else {
+                return CompletableFuture.completedFuture(r);
+            }
+        }
+    }
+
+    private void loadTruncationRecord(OperationContext context, VersionedMetadata<StreamTruncationRecord> record) {
+        if (context != null) {
+            context.load("truncate", record);
+        }
+    }
+
+    private void unloadTruncationRecord(OperationContext context) {
+        if (context != null) {
+            context.unload("truncate");
+        }
+    }
+
+    private CompletableFuture<VersionedMetadata<StreamTruncationRecord>> fetchTruncationRecord(Stream stream, OperationContext context) {
+        if (context == null) {
+            return stream.getTruncationRecord();
+        } else {
+            VersionedMetadata<StreamTruncationRecord> r = context.get("truncate", StreamTruncationRecord.class);
+            if (r == null) {
+                return stream.getTruncationRecord()
+                             .thenApply(x -> {
+                                 loadTruncationRecord(context, x);
+                                 return x;
+                             });
+            } else {
+                return CompletableFuture.completedFuture(r);
+            }
+        }
+    }
+
+    private void loadEpochTransitionRecord(OperationContext context, VersionedMetadata<EpochTransitionRecord> record) {
+        if (context != null) {
+            context.load("scale", record);
+        }
+    }
+
+    private void unloadEpochTransitionRecord(OperationContext context) {
+        if (context != null) {
+            context.unload("scale");
+        }
+    }
+
+    private CompletableFuture<VersionedMetadata<EpochTransitionRecord>> fetchEpochTransitionRecord(Stream stream, OperationContext context) {
+        if (context == null) {
+            return stream.getEpochTransition();
+        } else {
+            VersionedMetadata<EpochTransitionRecord> r = context.get("scale", EpochTransitionRecord.class);
+            if (r == null) {
+                return stream.getEpochTransition()
+                             .thenApply(x -> {
+                                 loadEpochTransitionRecord(context, x);
+                                 return x;
+                             });
+            } else {
+                return CompletableFuture.completedFuture(r);
+            }
+        }
+    }
+
+    private CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> fetchCommittingFuture(Stream stream, OperationContext context) {
+        if (context == null) {
+            return stream.getVersionedCommitTransactionsRecord();
+        } else {
+            VersionedMetadata<CommittingTransactionsRecord> r = context.get("commit", CommittingTransactionsRecord.class);
+            if (r == null) {
+                return stream.getVersionedCommitTransactionsRecord()
+                             .thenApply(x -> {
+                                 loadCommittingRecord(context, x);
+                                 return x;
+                             });
+            } else {
+                return CompletableFuture.completedFuture(r);
+            }
+        }
+    }
+
+    private void loadCommittingRecord(OperationContext context, VersionedMetadata<CommittingTransactionsRecord> record) {
+        if (context != null) {
+            context.load("commit", record);
+        }
+    }
+
+    private void unloadCommittingRecord(OperationContext context) {
+        if (context != null) {
+            context.unload("commit");
+        }
+    }
+
+    private void loadActiveTxn(OperationContext context, UUID txnId, VersionedMetadata<ActiveTxnRecord> record) {
+        if (context != null) {
+            context.load("txn" + txnId, record);
+        }
+    }
+
+    private void unloadActiveTxn(OperationContext context, UUID txnId) {
+        if (context != null) {
+            context.unload("txn" + txnId);
+        }
+    }
+
+    private CompletableFuture<VersionedMetadata<ActiveTxnRecord>> fetchTxnRecord(Stream stream, UUID txnId, OperationContext context) {
+        if (context == null) {
+            return stream.getActiveTransaction(txnId);
+        } else {
+            VersionedMetadata<ActiveTxnRecord> r = context.get("txn" + txnId, ActiveTxnRecord.class);
+            if (r == null) {
+                return stream.getActiveTransaction(txnId)
+                             .thenApply(x -> {
+                                 loadActiveTxn(context, txnId, x);
+                                 return x;
+                             });
+            } else {
+                return CompletableFuture.completedFuture(r);
+            }
+        }
     }
 
     /**
