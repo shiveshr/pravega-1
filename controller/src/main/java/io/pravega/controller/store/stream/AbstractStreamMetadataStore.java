@@ -1150,17 +1150,22 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     public CompletableFuture<Void> completeCommitTransactions(String scope, String stream, VersionedMetadata<CommittingTransactionsRecord> record,
                                                               OperationContext context, ScheduledExecutorService executor) {
         Stream streamObj = getStream(scope, stream, context);
-        return Futures.completeOn(Futures.toVoid(streamObj.completeCommittingTransactions(record)
-                .handle((result, e) -> {
-                    if (e != null) {
-                        unloadCommittingRecord(context);
-                        throw new CompletionException(e);
-                    }
-                    loadCommittingRecord(context, result);
-                    streamObj.getNumberOfOngoingTransactions().thenAccept(count ->
-                            TransactionMetrics.reportOpenTransactions(scope, stream, count));
-                    return null;
-                })), executor);
+
+        return Futures.completeOn(Futures.allOfWithResults(record.getObject().getTransactionsToCommit().stream().map(x -> 
+                Futures.exceptionallyExpecting(fetchTxnFuture(streamObj, x, context), DATA_NOT_FOUND_PREDICATE, 
+                        new VersionedMetadata<>(ActiveTxnRecord.EMPTY, null))).collect(Collectors.toList()))
+                                         .thenCompose(streamObj::generateMarksForTransactions)
+                                         .thenCompose(x -> Futures.toVoid(streamObj.completeCommittingTransactions(record)
+                                                                                   .handle((result, e) -> {
+                                                                                       if (e != null) {
+                                                                                           unloadCommittingRecord(context);
+                                                                                           throw new CompletionException(e);
+                                                                                       }
+                                                                                       loadCommittingRecord(context, result);
+                                                                                       streamObj.getNumberOfOngoingTransactions().thenAccept(count ->
+                                                                                               TransactionMetrics.reportOpenTransactions(scope, stream, count));
+                                                                                       return null;
+                                                                                   }))), executor);
     }
 
     @Override

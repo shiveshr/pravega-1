@@ -1518,14 +1518,15 @@ public abstract class StreamTestBase {
         .thenCompose(y -> streamObj.getOrderedCommittingTxnInLowestEpoch(100)
         .thenCompose(z -> streamObj.startCommittingTransactions(y, z))).join();
         streamObj.getActiveTransaction(txnId).thenCompose(y -> streamObj.recordCommitOffsets(txnId, y, Collections.singletonMap(0L, 1L))).join();
-        streamObj.generateMarksForTransactions(record.getObject()).join();
+        List<VersionedMetadata<ActiveTxnRecord>> txnRecords = Collections.singletonList(streamObj.getActiveTransaction(txnId).join());
+        streamObj.generateMarksForTransactions(txnRecords).join();
 
         // verify that writer mark is created in the store
         WriterMark mark = streamObj.getWriterMark(writer1).join();
         assertEquals(mark.getTimestamp(), time);
 
         // idempotent call to generateMarksForTransactions
-        streamObj.generateMarksForTransactions(record.getObject()).join();
+        streamObj.generateMarksForTransactions(txnRecords).join();
         mark = streamObj.getWriterMark(writer1).join();
         assertEquals(mark.getTimestamp(), time);
 
@@ -1534,7 +1535,7 @@ public abstract class StreamTestBase {
         AssertExtensions.assertFutureThrows("", streamObj.getActiveTx(0, txnId),
                 e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException);
 
-        streamObj.generateMarksForTransactions(record.getObject()).join();
+        streamObj.generateMarksForTransactions(txnRecords).join();
         mark = streamObj.getWriterMark(writer1).join();
         assertEquals(mark.getTimestamp(), time);
     }
@@ -1571,7 +1572,9 @@ public abstract class StreamTestBase {
         streamObj.getActiveTransaction(txnId2).thenCompose(y -> streamObj.recordCommitOffsets(txnId2, y, Collections.singletonMap(0L, 2L))).join();
         streamObj.getActiveTransaction(txnId3).thenCompose(y -> streamObj.recordCommitOffsets(txnId3, y, Collections.singletonMap(0L, 3L))).join();
         streamObj.getActiveTransaction(txnId4).thenCompose(y -> streamObj.recordCommitOffsets(txnId4, y, Collections.singletonMap(0L, 4L))).join();
-        streamObj.generateMarksForTransactions(record.getObject()).join();
+        List<VersionedMetadata<ActiveTxnRecord>> txnRecords = Lists.newArrayList(streamObj.getActiveTransaction(txnId1).join(),
+                streamObj.getActiveTransaction(txnId2).join(), streamObj.getActiveTransaction(txnId3).join(), streamObj.getActiveTransaction(txnId4).join());
+        streamObj.generateMarksForTransactions(txnRecords).join();
 
         // verify that writer mark is created in the store
         WriterMark mark = streamObj.getWriterMark(writer).join();

@@ -466,18 +466,23 @@ class SegmentOutputStreamImpl implements SegmentOutputStream {
 
     public CompletableFuture<Void> create() {
         List<String> t = NameUtils.extractSegmentTokens(segmentName);
+
         Segment segment = new Segment(t.get(0), t.get(1), Long.parseLong(t.get(2)));
         RawClient client = new RawClient(controller, connectionPool, segment);
 
         return tokenProvider.retrieveToken()
-                     .thenCompose(token -> client.sendRequest(requestId, 
-                             new WireCommands.CreateSegment(requestId,
-                segmentName, WireCommands.CreateSegment.NO_SCALE, 0, token)))
-                .thenAccept(reply -> {
-                    if (!(reply instanceof WireCommands.SegmentCreated)) {
-                        throw new RuntimeException("unable to create segment");     
-                    }
-                });
+                     .thenCompose(token -> {
+                         final long requestId = client.getFlow().asLong();
+
+                         return client.sendRequest(requestId,
+                                 new WireCommands.CreateSegment(requestId,
+                                         segmentName, WireCommands.CreateSegment.NO_SCALE, 0, token))
+                               .thenAccept(reply -> {
+                                   if (!(reply instanceof WireCommands.SegmentCreated)) {
+                                       throw new RuntimeException("unable to create segment");
+                                   }
+                               });
+                     });
     }
 
     /**

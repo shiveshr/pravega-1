@@ -1640,15 +1640,12 @@ public abstract class StreamMetadataStoreTest {
 
         String writer1 = "writer1";
         long time = 1L;
-        System.out.println("shivesh::" + store.getTransaction(scope, stream, txnId, null, executor).join());
 
         store.sealTransaction(scope, stream, txnId, true, Optional.of(tx01.getVersion()), writer1, time, null, executor).join();
         VersionedMetadata<CommittingTransactionsRecord> record = store.startCommitTransactions(scope, stream, 100, null, executor).join();
         store.recordCommitOffsets(scope, stream, txnId, Collections.singletonMap(0L, 1L), null, executor).join();
         store.completeCommitTransactions(scope, stream, record, null, executor).join();
-
-        System.out.println("shivesh::" + store.getTransaction(scope, stream, txnId, null, executor).join());
-
+        
         // verify that writer mark is created in the store
         WriterMark mark = store.getWriterMark(scope, stream, writer1, null, executor).join();
         assertEquals(mark.getTimestamp(), time);

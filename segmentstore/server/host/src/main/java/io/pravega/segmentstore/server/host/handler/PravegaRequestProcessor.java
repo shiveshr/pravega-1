@@ -421,6 +421,7 @@ public class PravegaRequestProcessor extends FailingRequestProcessor implements 
 
     @Override
     public void createSegment(CreateSegment createStreamSegment) {
+        
         Timer timer = new Timer();
         final String operation = "createSegment";
 

@@ -424,6 +424,8 @@ interface Stream {
      */
     CompletableFuture<TxnStatus> checkTransactionStatus(final UUID txId);
 
+    CompletableFuture<Void> generateMarksForTransactions(List<VersionedMetadata<ActiveTxnRecord>> txnRecords);
+
     /**
      * Aborts a transaction.
      * If already aborted, return TxnStatus.Aborted.

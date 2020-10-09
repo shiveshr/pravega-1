@@ -711,11 +711,12 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
 
     private CompletableFuture<Void> notifyTxnCreation(final String scope, final String stream,
                                                       final long segmentId, final UUID txnId) {
-        return TaskStepsRetryHelper.withRetries(() -> segmentHelper.createTransaction(scope,
-                stream,
-                segmentId,
-                txnId,
-                this.retrieveDelegationToken()), executor);
+        return CompletableFuture.completedFuture(null);
+        //        return TaskStepsRetryHelper.withRetries(() -> segmentHelper.createTransaction(scope,
+        //                stream,
+        //                segmentId,
+        //                txnId,
+        //                this.retrieveDelegationToken()), executor);
     }
 
     private OperationContext getNonNullOperationContext(final String scope,
