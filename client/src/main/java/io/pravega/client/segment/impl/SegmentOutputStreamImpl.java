@@ -40,6 +40,7 @@ import io.pravega.client.security.auth.DelegationTokenProvider;
 import io.pravega.client.control.impl.Controller;
 import io.pravega.client.stream.impl.PendingEvent;
 import io.pravega.common.Exceptions;
+import io.pravega.common.Timer;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.Retry;
 import io.pravega.common.util.Retry.RetryWithBackoff;
@@ -471,6 +472,7 @@ class SegmentOutputStreamImpl implements SegmentOutputStream {
     }
 
     public CompletableFuture<Void> create() {
+        Timer timer = new Timer();
         List<String> t = NameUtils.extractSegmentTokens(segmentName);
 
         Segment segment = new Segment(t.get(0), t.get(1), Long.parseLong(t.get(2)));
@@ -479,12 +481,12 @@ class SegmentOutputStreamImpl implements SegmentOutputStream {
         return tokenProvider.retrieveToken()
                      .thenCompose(token -> {
                          final long requestId = client.getFlow().asLong();
-
+                         
                          return client.sendRequest(requestId,
                                  new WireCommands.CreateSegment(requestId,
                                          segmentName, WireCommands.CreateSegment.NO_SCALE, 0, token))
                                .thenAccept(reply -> {
-                                   if (!(reply instanceof WireCommands.SegmentCreated)) {
+                                   if (!(reply instanceof WireCommands.SegmentCreated || reply instanceof WireCommands.SegmentAlreadyExists)) {
                                        throw new RuntimeException("unable to create segment");
                                    }
                                });

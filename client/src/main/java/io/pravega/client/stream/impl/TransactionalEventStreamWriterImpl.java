@@ -140,10 +140,10 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
             for (SegmentTransaction<Type> tx : inner.values()) {
                 tx.close();
             }
-            inner.clear(); // clear all references to SegmentTransaction to enable garbage collection.
             // let commit know which txn segments have been used for the txn. 
             Futures.getThrowingException(controller.commitTransaction(stream, writerId, timestamp, txId, 
                     inner.keySet().stream().map(Segment::getSegmentId).collect(Collectors.toList())));
+            inner.clear(); // clear all references to SegmentTransaction to enable garbage collection.
             pinger.stopPing(txId);
             closed.set(true);
         }

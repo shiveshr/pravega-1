@@ -1080,7 +1080,7 @@ public class ControllerImpl implements Controller {
         Preconditions.checkNotNull(stream, "stream");
         Preconditions.checkNotNull(txId, "txId");
         long traceId = LoggerHelpers.traceEnter(log, "commitTransaction", stream, txId);
-
+        
         final CompletableFuture<TxnStatus> result = this.retryConfig.runAsync(() -> {
             RPCAsyncCallback<TxnStatus> callback = new RPCAsyncCallback<>(traceId, "commitTransaction", stream, writerId, timestamp, txId);
             TxnRequest.Builder txnRequest = TxnRequest.newBuilder()
