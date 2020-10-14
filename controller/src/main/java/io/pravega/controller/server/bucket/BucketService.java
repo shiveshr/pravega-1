@@ -254,12 +254,16 @@ abstract class BucketService extends AbstractService {
 
     @VisibleForTesting
     Set<Stream> getKnownStreams() {
-        return Collections.unmodifiableSet(knownStreams);
+        synchronized (lock) {
+            return Collections.unmodifiableSet(knownStreams);
+        }
     }
 
     @VisibleForTesting
     Collection<QueueElement> getWorkerQueue() {
-        return Collections.unmodifiableCollection(workQueue);
+        synchronized (lock) {
+            return Collections.unmodifiableCollection(workQueue);
+        }
     }
     
     @Data

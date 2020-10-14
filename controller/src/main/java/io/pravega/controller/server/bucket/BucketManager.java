@@ -26,6 +26,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -39,7 +40,6 @@ import java.util.stream.IntStream;
  */
 @Slf4j
 public abstract class BucketManager extends AbstractService {
-    private final String processId;
     @Getter(AccessLevel.PROTECTED)
     private final BucketStore.ServiceType serviceType;
     private final Function<Integer, BucketService> bucketServiceSupplier;
@@ -49,9 +49,8 @@ public abstract class BucketManager extends AbstractService {
     @Getter(AccessLevel.PROTECTED)
     private final ScheduledExecutorService executor;
 
-    BucketManager(final String processId, final BucketStore.ServiceType serviceType, final ScheduledExecutorService executor,
+    BucketManager(final BucketStore.ServiceType serviceType, final ScheduledExecutorService executor,
                   final Function<Integer, BucketService> bucketServiceSupplier) {
-        this.processId = processId;
         this.serviceType = serviceType;
         this.executor = executor;
         this.lock = new Object();
@@ -78,7 +77,7 @@ public abstract class BucketManager extends AbstractService {
     protected abstract int getBucketCount();
 
     CompletableFuture<Void> tryTakeOwnership(int bucket) {
-        return takeBucketOwnership(bucket, processId, executor)
+        return takeBucketOwnership(bucket, executor)
                          .thenCompose(isOwner -> {
                     if (isOwner) {
                         log.info("{}: Taken ownership for bucket {}", serviceType, bucket);
@@ -124,6 +123,33 @@ public abstract class BucketManager extends AbstractService {
         }, executor);
         bucketService.startAsync();
         return bucketService;
+    }
+    
+    CompletableFuture<Void> stopBucketService(int bucket) {
+        CompletableFuture<Void> bucketFuture = new CompletableFuture<>();
+        BucketService bucketService;
+        synchronized (lock) {
+            bucketService = buckets.get(bucket);
+        }
+        bucketService.addListener(new Listener() {
+            @Override
+            public void terminated(State from) {
+                super.terminated(from);
+                synchronized (lock) {
+                    buckets.remove(bucket);
+                }
+                bucketFuture.complete(null);
+            }
+
+            @Override
+            public void failed(State from, Throwable failure) {
+                super.failed(from, failure);
+                bucketFuture.completeExceptionally(failure);
+            }
+        }, executor);
+
+        bucketService.stopAsync();
+        return bucketFuture;
     }
 
     @Override
@@ -177,14 +203,14 @@ public abstract class BucketManager extends AbstractService {
      * Method to take ownership of a bucket.
      *
      * @param bucket      bucket id
-     * @param processId   process id
      * @param executor    executor
      * @return future, which when completed, will contain a boolean which tells if ownership attempt succeeded or failed.
      */
-    abstract CompletableFuture<Boolean> takeBucketOwnership(int bucket, String processId, Executor executor);
+    abstract CompletableFuture<Boolean> takeBucketOwnership(int bucket, Executor executor);
 
-    @VisibleForTesting
     Map<Integer, BucketService> getBucketServices() {
-        return Collections.unmodifiableMap(buckets);
+        synchronized (lock) {
+            return Collections.unmodifiableMap(buckets);
+        }
     }
 }

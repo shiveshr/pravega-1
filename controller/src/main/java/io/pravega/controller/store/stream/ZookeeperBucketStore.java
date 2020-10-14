@@ -114,6 +114,18 @@ public class ZookeeperBucketStore implements BucketStore {
                               }
                           });
     }
+    
+    public CompletableFuture<Void> releaseBucketOwnership(final ServiceType serviceType, int bucketId, String processId) {
+        String bucketPath = ZKPaths.makePath(getBucketOwnershipPath(serviceType), "" + bucketId);
+        return storeHelper.getData(bucketPath, x -> x)
+                   .thenCompose(d -> {
+                       if (SerializationUtils.deserialize(d.getObject()).equals(processId)) {
+                           return storeHelper.deleteNode(bucketPath, d.getVersion());
+                       } else {
+                           return CompletableFuture.completedFuture(null);
+                       }
+                   });
+    }
 
     public PathChildrenCache getBucketPathChildrenCache(ServiceType serviceType, int bucketId) {
         return storeHelper.getPathChildrenCache(getBucketPath(serviceType, bucketId), true);

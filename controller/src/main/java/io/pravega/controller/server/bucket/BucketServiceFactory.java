@@ -18,17 +18,24 @@ import lombok.extern.slf4j.Slf4j;
 import java.time.Duration;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 @Slf4j
 public class BucketServiceFactory {
     private final String hostId;
     private final BucketStore bucketStore;
     private final int maxConcurrentExecutions;
-
+    private final Supplier<Integer> clusterSizeSupplier;
+    
     public BucketServiceFactory(@NonNull String hostId, @NonNull BucketStore bucketStore, int maxConcurrentExecutions) {
+        this(hostId, bucketStore, maxConcurrentExecutions, () -> 1);
+    }
+
+    public BucketServiceFactory(@NonNull String hostId, @NonNull BucketStore bucketStore, int maxConcurrentExecutions, Supplier<Integer> clusterSizeSupplier) {
         this.hostId = hostId;
         this.bucketStore = bucketStore;
         this.maxConcurrentExecutions = maxConcurrentExecutions;
+        this.clusterSizeSupplier = clusterSizeSupplier;
     }
 
     public BucketManager createRetentionService(Duration executionDuration, BucketWork work, ScheduledExecutorService executorService) {
@@ -39,7 +46,8 @@ public class BucketServiceFactory {
                         new ZooKeeperBucketService(BucketStore.ServiceType.RetentionService, bucket, zkBucketStore, executorService,
                                 maxConcurrentExecutions, executionDuration, work);
 
-                return new ZooKeeperBucketManager(hostId, zkBucketStore, BucketStore.ServiceType.RetentionService, executorService, zkSupplier);
+                return new ZooKeeperBucketManager(hostId, zkBucketStore, BucketStore.ServiceType.RetentionService, executorService, zkSupplier, 
+                        clusterSizeSupplier);
             case InMemory:
                 InMemoryBucketStore inMemoryBucketStore = (InMemoryBucketStore) bucketStore;
                 Function<Integer, BucketService> inMemorySupplier = bucket ->
@@ -61,7 +69,8 @@ public class BucketServiceFactory {
                         new ZooKeeperBucketService(BucketStore.ServiceType.WatermarkingService, bucket, zkBucketStore, executorService,
                                 maxConcurrentExecutions, executionDuration, work);
 
-                return new ZooKeeperBucketManager(hostId, zkBucketStore, BucketStore.ServiceType.WatermarkingService, executorService, zkSupplier);
+                return new ZooKeeperBucketManager(hostId, zkBucketStore, BucketStore.ServiceType.WatermarkingService, executorService, zkSupplier,
+                        clusterSizeSupplier);
             case InMemory:
                 InMemoryBucketStore inMemoryBucketStore = (InMemoryBucketStore) bucketStore;
                 Function<Integer, BucketService> inMemorySupplier = bucket ->
