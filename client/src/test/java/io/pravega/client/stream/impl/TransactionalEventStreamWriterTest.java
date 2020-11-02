@@ -11,6 +11,7 @@ package io.pravega.client.stream.impl;
 
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.pravega.client.control.impl.Controller;
 import io.pravega.client.segment.impl.Segment;
 import io.pravega.client.segment.impl.SegmentOutputStreamFactory;
 import io.pravega.client.segment.impl.SegmentSealedException;
@@ -336,7 +337,7 @@ public class TransactionalEventStreamWriterTest extends ThreadPooledTestSuite {
         }
 
         // verify if segments are flushed and closed.
-        Mockito.verify(outputStream, Mockito.times(2)).close();
+        Mockito.verify(outputStream, Mockito.times(1)).close();
         Mockito.verify(controller, Mockito.times(2)).commitTransaction(eq(stream), anyString(), isNull(), eq(txid));
         assertTrue(bad.unacked.isEmpty());
         assertTrue(outputStream.unacked.isEmpty());

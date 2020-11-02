@@ -9,17 +9,19 @@
  */
 package io.pravega.shared.protocol.netty;
 
+import com.google.common.collect.Iterators;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufInputStream;
+import io.netty.buffer.CompositeByteBuf;
 import io.pravega.common.Exceptions;
+import io.pravega.common.util.AbstractBufferView;
 import io.pravega.common.util.BufferView;
 import io.pravega.common.util.ByteArraySegment;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
-import java.util.Arrays;
-import java.util.List;
+import java.util.Iterator;
 import javax.annotation.concurrent.NotThreadSafe;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +30,7 @@ import lombok.RequiredArgsConstructor;
  * {@link BufferView} wrapper for {@link ByteBuf} instances.
  */
 @NotThreadSafe
-public class ByteBufWrapper implements BufferView {
+public class ByteBufWrapper extends AbstractBufferView implements BufferView {
     //region Members
 
     private final ByteBuf buf;
@@ -76,8 +78,21 @@ public class ByteBufWrapper implements BufferView {
     }
 
     @Override
-    public List<ByteBuffer> getContents() {
-        return Arrays.asList(this.buf.nioBuffers());
+    public <ExceptionT extends Exception> void collect(Collector<ExceptionT> bufferCollector) throws ExceptionT {
+        for (ByteBuffer bb : this.buf.duplicate().nioBuffers()) {
+            bufferCollector.accept(bb);
+        }
+    }
+
+    @Override
+    public Iterator<ByteBuffer> iterateBuffers() {
+        ByteBuf bb = this.buf.duplicate();
+        if (bb instanceof CompositeByteBuf) {
+            return Iterators.transform(((CompositeByteBuf) bb).iterator(), ByteBuf::nioBuffer);
+        } else if (bb.nioBufferCount() == 1) {
+            return Iterators.singletonIterator(bb.nioBuffer());
+        }
+        return Iterators.forArray(bb.nioBuffers());
     }
 
     @Override
@@ -130,11 +145,16 @@ public class ByteBufWrapper implements BufferView {
         ByteBuf source = this.buf.duplicate();
         int length = byteBuffer.remaining();
         if (length > getLength()) {
+            // ByteBuffer has more capacity than we need to write. We need to adjust its limit() to exactly what we need,
+            // otherwise ByteBuf.readBytes() won't copy what we need to.
+
+            // Remember the original limit, then adjust it to what we need to copy. Since we copy less than its remaining
+            // capacity, we are guaranteed not to overflow it when setting the new limit.
             int origLimit = byteBuffer.limit();
             length = getLength();
-            byteBuffer.limit(length);
+            byteBuffer.limit(byteBuffer.position() + length);
             source.readBytes(byteBuffer);
-            byteBuffer.limit(origLimit);
+            byteBuffer.limit(origLimit); // Restore original ByteBuffer limit.
         } else {
             source.readBytes(byteBuffer);
         }
@@ -154,7 +174,7 @@ public class ByteBufWrapper implements BufferView {
      * {@link BufferView.Reader} implementation.
      */
     @RequiredArgsConstructor
-    private static class ByteBufReader implements Reader {
+    private static class ByteBufReader extends AbstractReader implements Reader {
         private final ByteBuf buf;
 
         @Override
@@ -169,6 +189,42 @@ public class ByteBufWrapper implements BufferView {
                 this.buf.readBytes(segment.array(), segment.arrayOffset(), len);
             }
             return len;
+        }
+
+        @Override
+        public byte readByte() {
+            try {
+                return this.buf.readByte();
+            } catch (IndexOutOfBoundsException ex) {
+                throw new OutOfBoundsException();
+            }
+        }
+
+        @Override
+        public int readInt() {
+            try {
+                return this.buf.readInt();
+            } catch (IndexOutOfBoundsException ex) {
+                throw new OutOfBoundsException();
+            }
+        }
+
+        @Override
+        public long readLong() {
+            try {
+                return this.buf.readLong();
+            } catch (IndexOutOfBoundsException ex) {
+                throw new OutOfBoundsException();
+            }
+        }
+
+        @Override
+        public BufferView readSlice(int length) {
+            try {
+                return new ByteBufWrapper(this.buf.readSlice(length));
+            } catch (IndexOutOfBoundsException ex) {
+                throw new OutOfBoundsException();
+            }
         }
     }
 

@@ -104,7 +104,7 @@ public final class Config {
     public static final Property<Boolean> PROPERTY_AUTH_ENABLED = Property.named(
             "security.auth.enable", false, "auth.enabled");
 
-    public static final Property<String> PROPERTY_AUTH_PASSWORD_FILE = Property.named(
+    public static final Property<String> PROPERTY_PWD_AUTH_HANDLER_ACCOUNTS_STORE = Property.named(
             "security.pwdAuthHandler.accountsDb.location", "", "auth.userPasswordFile");
 
     public static final Property<String> PROPERTY_TOKEN_SIGNING_KEY = Property.named(
@@ -127,6 +127,9 @@ public final class Config {
 
     public static final Property<String> PROPERTY_TLS_ENABLED_FOR_SEGMENT_STORE = Property.named(
             "segmentstore.connect.channel.tls", "", "auth.segmentStoreTlsEnabled");
+
+    public static final Property<Integer> PROPERTY_SEGMENT_STORE_REQUEST_TIMEOUT_SECONDS = Property.named(
+            "segmentstore.connect.channel.timeoutSeconds", 120, "");
 
     public static final Property<String> PROPERTY_ZK_URL = Property.named(
             "zk.connect.uri", "localhost:2181", "zkURL");
@@ -262,9 +265,11 @@ public final class Config {
 
     // Print stack trace for all threads during shutdown
     public static final boolean DUMP_STACK_ON_SHUTDOWN;
-    
+
     public static final MetricsConfig METRICS_CONFIG;
     public static final GRPCServerConfig GRPC_SERVER_CONFIG;
+
+    public static final Integer REQUEST_TIMEOUT_SECONDS_SEGMENT_STORE;
 
     private static final String METRICS_PATH = "controller.metrics.";
 
@@ -290,7 +295,7 @@ public final class Config {
         CLUSTER_MIN_REBALANCE_INTERVAL = p.getInt(PROPERTY_MIN_REBALANCE_INTERVAL_SECONDS);
 
         AUTHORIZATION_ENABLED = p.getBoolean(PROPERTY_AUTH_ENABLED);
-        USER_PASSWORD_FILE = p.get(PROPERTY_AUTH_PASSWORD_FILE);
+        USER_PASSWORD_FILE = p.get(PROPERTY_PWD_AUTH_HANDLER_ACCOUNTS_STORE);
         TOKEN_SIGNING_KEY = p.get(PROPERTY_TOKEN_SIGNING_KEY);
         ACCESS_TOKEN_TTL_IN_SECONDS = p.getInt(PROPERTY_ACCESS_TOKEN_TTL_SECONDS);
 
@@ -331,6 +336,8 @@ public final class Config {
         USE_PRAVEGA_TABLES = p.getBoolean(PROPERTY_USE_PRAVEGA_TABLES);
         GRPC_SERVER_CONFIG = createGrpcServerConfig();
         METRICS_CONFIG = createMetricsConfig(properties);
+
+        REQUEST_TIMEOUT_SECONDS_SEGMENT_STORE = p.getInt(PROPERTY_SEGMENT_STORE_REQUEST_TIMEOUT_SECONDS);
     }
 
     private static Properties loadConfiguration() {

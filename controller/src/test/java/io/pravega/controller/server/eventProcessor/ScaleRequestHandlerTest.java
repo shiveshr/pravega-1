@@ -12,7 +12,8 @@ package io.pravega.controller.server.eventProcessor;
 import com.google.common.collect.Lists;
 import io.pravega.client.ClientConfig;
 import io.pravega.client.EventStreamClientFactory;
-import io.pravega.client.netty.impl.ConnectionFactoryImpl;
+import io.pravega.client.connection.impl.ConnectionFactory;
+import io.pravega.client.connection.impl.SocketConnectionFactoryImpl;
 import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.client.stream.EventWriterConfig;
 import io.pravega.client.stream.ScalingPolicy;
@@ -29,7 +30,7 @@ import io.pravega.controller.server.eventProcessor.requesthandlers.AutoScaleTask
 import io.pravega.controller.server.eventProcessor.requesthandlers.CommitRequestHandler;
 import io.pravega.controller.server.eventProcessor.requesthandlers.ScaleOperationTask;
 import io.pravega.controller.server.eventProcessor.requesthandlers.StreamRequestHandler;
-import io.pravega.controller.server.rpc.auth.GrpcAuthHelper;
+import io.pravega.controller.server.security.auth.GrpcAuthHelper;
 import io.pravega.controller.store.stream.BucketStore;
 import io.pravega.controller.store.stream.EpochTransitionOperationExceptions;
 import io.pravega.controller.store.stream.State;
@@ -37,7 +38,7 @@ import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.store.stream.StreamStoreFactory;
 import io.pravega.controller.store.stream.TxnStatus;
-import io.pravega.controller.store.stream.VersionedMetadata;
+import io.pravega.controller.store.VersionedMetadata;
 import io.pravega.controller.store.stream.VersionedTransactionData;
 import io.pravega.controller.store.stream.records.EpochRecord;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
@@ -73,6 +74,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+
+import org.apache.commons.lang3.NotImplementedException;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
@@ -111,7 +114,7 @@ public abstract class ScaleRequestHandlerTest {
 
     private TestingServer zkServer;
     private EventStreamClientFactory clientFactory;
-    private ConnectionFactoryImpl connectionFactory;
+    private ConnectionFactory connectionFactory;
 
     private RequestTracker requestTracker = new RequestTracker(true);
 
@@ -141,7 +144,7 @@ public abstract class ScaleRequestHandlerTest {
 
         taskMetadataStore = TaskStoreFactory.createZKStore(zkClient, executor);
 
-        connectionFactory = new ConnectionFactoryImpl(ClientConfig.builder().build());
+        connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder().build());
         clientFactory = mock(EventStreamClientFactory.class);
         SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock();
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelper,
@@ -188,7 +191,8 @@ public abstract class ScaleRequestHandlerTest {
     public void testScaleRequest() throws ExecutionException, InterruptedException {
         AutoScaleTask requestHandler = new AutoScaleTask(streamMetadataTasks, streamStore, executor);
         ScaleOperationTask scaleRequestHandler = new ScaleOperationTask(streamMetadataTasks, streamStore, executor);
-        StreamRequestHandler multiplexer = new StreamRequestHandler(requestHandler, scaleRequestHandler, null, null, null, null, streamStore, executor);
+        StreamRequestHandler multiplexer = new StreamRequestHandler(requestHandler, scaleRequestHandler,
+                null, null, null, null, streamStore, executor);
         // Send number of splits = 1
         EventWriterMock writer = new EventWriterMock();
         streamMetadataTasks.setRequestEventWriter(writer);
@@ -285,7 +289,8 @@ public abstract class ScaleRequestHandlerTest {
     public void testScaleRequestWithMinimumSegment() throws ExecutionException, InterruptedException {
         AutoScaleTask requestHandler = new AutoScaleTask(streamMetadataTasks, streamStore, executor);
         ScaleOperationTask scaleRequestHandler = new ScaleOperationTask(streamMetadataTasks, streamStore, executor);
-        StreamRequestHandler multiplexer = new StreamRequestHandler(requestHandler, scaleRequestHandler, null, null, null, null, streamStore, executor);
+        StreamRequestHandler multiplexer = new StreamRequestHandler(requestHandler, scaleRequestHandler,
+                null, null, null, null, streamStore, executor);
         EventWriterMock writer = new EventWriterMock();
         streamMetadataTasks.setRequestEventWriter(writer);
 
@@ -998,6 +1003,11 @@ public abstract class ScaleRequestHandlerTest {
         public CompletableFuture<Void>  writeEvent(String routingKey, ControllerEvent event) {
             queue.add(event);
             return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public CompletableFuture<Void> writeEvents(String routingKey, List<ControllerEvent> events) {
+            throw new NotImplementedException("mock doesnt require this");
         }
 
         @Override
