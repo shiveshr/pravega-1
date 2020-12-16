@@ -17,6 +17,7 @@ import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.BitConverter;
+import io.pravega.common.util.ByteArraySegment;
 import io.pravega.controller.mocks.SegmentHelperMock;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.security.auth.GrpcAuthHelper;
@@ -28,8 +29,10 @@ import io.pravega.controller.store.stream.records.CompletedTxnRecord;
 import io.pravega.controller.store.stream.records.EpochTransitionRecord;
 import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.stream.api.grpc.v1.Controller;
+import io.pravega.shared.NameUtils;
 import io.pravega.test.common.AssertExtensions;
 import io.pravega.test.common.TestingServerStarter;
+import lombok.Synchronized;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.RetryOneTime;
@@ -40,6 +43,7 @@ import java.time.Duration;
 import java.util.AbstractMap.SimpleEntry;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -48,6 +52,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -81,7 +86,7 @@ public class PravegaTablesStreamMetadataStoreTest extends StreamMetadataStoreTes
         cli = CuratorFrameworkFactory.newClient(zkServer.getConnectString(), sessionTimeout, connectionTimeout, new RetryOneTime(2000));
         cli.start();
         segmentHelperMockForTables = SegmentHelperMock.getSegmentHelperMockForTables(executor);
-        store = new PravegaTablesStreamMetadataStore(segmentHelperMockForTables, cli, executor, Duration.ofSeconds(1), GrpcAuthHelper.getDisabledAuthHelper());
+        store = new TestPravegaStore(segmentHelperMockForTables, cli, executor, Duration.ofSeconds(1), GrpcAuthHelper.getDisabledAuthHelper());
         ImmutableMap<BucketStore.ServiceType, Integer> map = ImmutableMap.of(BucketStore.ServiceType.RetentionService, 1,
                 BucketStore.ServiceType.WatermarkingService, 1);
 
@@ -425,7 +430,7 @@ public class PravegaTablesStreamMetadataStoreTest extends StreamMetadataStoreTes
         String scopeName = "partial";
         byte[] idBytes = new byte[2 * Long.BYTES];
         UUID id = UUID.randomUUID();
-        BitConverter.writeUUID(idBytes, 0, id);
+        BitConverter.writeUUID(new ByteArraySegment(idBytes), id);
 
         // add entry for a scope in scopes table 
         storeHelper.addNewEntry(PravegaTablesStreamMetadataStore.SCOPES_TABLE, scopeName, idBytes).join();
@@ -508,5 +513,37 @@ public class PravegaTablesStreamMetadataStoreTest extends StreamMetadataStoreTes
                 null, executor).join();
         store.completeScale(scope, stream, versioned, null, executor).join();
         store.setState(scope, stream, State.ACTIVE, null, executor).join();
+    }
+    
+    static class TestPravegaStore extends PravegaTablesStreamMetadataStore implements TestStore {
+        HashMap<String, PravegaTablesStream> map = new HashMap<>();
+        
+        TestPravegaStore(SegmentHelper segmentHelper, CuratorFramework curatorClient, ScheduledExecutorService executor, Duration gcPeriod, GrpcAuthHelper authHelper) {
+            super(segmentHelper, curatorClient, executor, gcPeriod, authHelper);
+        }
+
+        @Override
+        @Synchronized
+        PravegaTablesStream newStream(String scope, String name, OperationContext context) {
+            String scopedStreamName = NameUtils.getScopedStreamName(scope, name);
+            if (map.containsKey(scopedStreamName)) {
+                return map.get(scopedStreamName);
+            } else {
+                return super.newStream(scope, name, context);
+            }
+        }
+
+        @Override
+        @Synchronized
+        public void setStream(Stream stream) {
+            String scopedStreamName = NameUtils.getScopedStreamName(stream.getScope(), stream.getName());
+            map.put(scopedStreamName, (PravegaTablesStream) stream);
+        }
+
+        @Override
+        public void close() {
+            map.clear();
+            super.close();
+        }
     }
 }

@@ -282,7 +282,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      * @param writerId   writer id
      * @param timestamp  commit time as recorded by writer
      * @param contextOpt optional context
-     * @param segmentsList seglist
+     * @param segmentsList segment list
      * @return true/false.
      */
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
@@ -355,15 +355,9 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                    // Step 4. Notify segment stores about new txn.
                                    CompletableFuture<List<StreamSegmentRecord>> segmentsFuture = txnFuture.thenComposeAsync(txnData ->
                                            streamMetadataStore.getSegmentsInEpoch(scope, stream, txnData.getEpoch(), ctx, executor), executor);
-
-                                   CompletableFuture<Void> notify = segmentsFuture.thenComposeAsync(activeSegments ->
-                                           notifyTxnCreation(scope, stream, activeSegments, txnId), executor).whenComplete((v, e) ->
-                                           // Method notifyTxnCreation ensures that notification completes
-                                           // even in the presence of n/w or segment store failures.
-                                           log.trace("Txn={}, notified segments stores", txnId));
-
+                                   
                                    // Step 5. Start tracking txn in timeout service
-                                   return notify.whenCompleteAsync((result, ex) -> {
+                                   return segmentsFuture.whenCompleteAsync((result, ex) -> {
                                        addTxnToTimeoutService(scope, stream, lease, maxExecutionPeriod, txnId, txnFuture);
                                    }, executor).thenApplyAsync(v -> {
                                        List<StreamSegmentRecord> segments = segmentsFuture.join().stream().map(x -> {
@@ -717,27 +711,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                     }
                 }), executor);
     }
-
-    private CompletableFuture<Void> notifyTxnCreation(final String scope, final String stream,
-                                                      final List<StreamSegmentRecord> segments, final UUID txnId) {
-        Timer timer = new Timer();
-        return Futures.allOf(segments.stream()
-                .parallel()
-                .map(segment -> notifyTxnCreation(scope, stream, segment.segmentId(), txnId))
-                .collect(Collectors.toList()))
-                .thenRun(() -> TransactionMetrics.getInstance().createTransactionSegments(timer.getElapsed()));
-    }
-
-    private CompletableFuture<Void> notifyTxnCreation(final String scope, final String stream,
-                                                      final long segmentId, final UUID txnId) {
-        return CompletableFuture.completedFuture(null);
-        //        return TaskStepsRetryHelper.withRetries(() -> segmentHelper.createTransaction(scope,
-        //                stream,
-        //                segmentId,
-        //                txnId,
-        //                this.retrieveDelegationToken()), executor);
-    }
-
+    
     private OperationContext getNonNullOperationContext(final String scope,
                                                         final String stream,
                                                         final OperationContext contextOpt) {

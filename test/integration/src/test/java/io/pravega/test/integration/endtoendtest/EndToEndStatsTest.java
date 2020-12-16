@@ -163,11 +163,6 @@ public class EndToEndStatsTest {
         }
 
         @Override
-        public void getSegmentInfo(Duration elapsed) {
-            
-        }
-
-        @Override
         public void policyUpdate(String streamSegmentName, byte type, int targetRate) {
 
         }

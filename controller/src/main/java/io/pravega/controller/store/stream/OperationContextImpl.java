@@ -9,35 +9,38 @@
  */
 package io.pravega.controller.store.stream;
 
-import io.pravega.controller.store.VersionedMetadata;
-import lombok.Getter;
-import java.util.concurrent.ConcurrentHashMap;
+import io.pravega.controller.store.Scope;
+import lombok.Synchronized;
+
+import javax.annotation.concurrent.GuardedBy;
+import java.util.function.Function;
 
 class OperationContextImpl implements OperationContext {
-
-    @Getter
-    private final Stream stream;
-
-    private final ConcurrentHashMap<String, VersionedMetadata<?>> fetched; 
-
-    OperationContextImpl(Stream stream) {
-        this.stream = stream;
-        fetched = new ConcurrentHashMap<>();
+    private final Function<OperationContext, Scope> scopeFactory;
+    private final Function<OperationContext, Stream> streamFactory;
+    @GuardedBy("$lock")
+    private Scope scope;
+    @GuardedBy("$lock")
+    private Stream stream;
+    
+    OperationContextImpl(Function<OperationContext, Scope> scopeFactory, Function<OperationContext, Stream> streamFactory) {
+        this.scopeFactory = scopeFactory;
+        this.streamFactory = streamFactory;
     }
-
-    @Override
-    public void load(String key, VersionedMetadata<?> value) {
-        fetched.put(key, value);
+    
+    @Synchronized
+    Scope getScope() {
+        if (scope == null) {
+            scope = scopeFactory.apply(this);
+        }
+        return scope;
     }
-
-    @Override
-    public void unload(String key) {
-        fetched.remove(key);
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    public <T> VersionedMetadata<T> get(String key, Class<T> tClass) {
-        return (VersionedMetadata<T>) fetched.get(key);
+    
+    @Synchronized
+    Stream getStream() {
+        if (stream == null) {
+            stream = streamFactory.apply(this);
+        }
+        return stream;
     }
 }

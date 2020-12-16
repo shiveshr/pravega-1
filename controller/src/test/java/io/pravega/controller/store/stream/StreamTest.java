@@ -82,7 +82,7 @@ public class StreamTest {
         
         PravegaTablesStream stream = new PravegaTablesStream("test", "test",
                 storeHelper, orderer, () -> 0, 
-                scope::getStreamsInScopeTableName, executor);
+                scope::getStreamsInScopeTableName, executor, true);
         testStream(stream);
     }
     
@@ -139,7 +139,7 @@ public class StreamTest {
         response = stream.checkStreamExists(streamConfig2, creationTime2, startingSegmentNumber).get();
         assertEquals(CreateStreamResponse.CreateStatus.EXISTS_CREATING, response.getStatus());
 
-        stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.CREATING)).get();
+        stream.updateState(State.CREATING).get();
 
         response = stream.checkStreamExists(streamConfig1, creationTime1, startingSegmentNumber).get();
         assertEquals(CreateStreamResponse.CreateStatus.NEW, response.getStatus());
@@ -148,7 +148,7 @@ public class StreamTest {
         response = stream.checkStreamExists(streamConfig2, creationTime2, startingSegmentNumber).get();
         assertEquals(CreateStreamResponse.CreateStatus.EXISTS_CREATING, response.getStatus());
 
-        stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.ACTIVE)).get();
+        stream.updateState(State.ACTIVE).get();
 
         response = stream.checkStreamExists(streamConfig1, creationTime1, startingSegmentNumber).get();
         assertEquals(CreateStreamResponse.CreateStatus.EXISTS_ACTIVE, response.getStatus());
@@ -157,7 +157,7 @@ public class StreamTest {
         response = stream.checkStreamExists(streamConfig2, creationTime2, startingSegmentNumber).get();
         assertEquals(CreateStreamResponse.CreateStatus.EXISTS_ACTIVE, response.getStatus());
 
-        stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.SEALING)).get();
+        stream.updateState(State.SEALING).get();
 
         response = stream.checkStreamExists(streamConfig1, creationTime1, startingSegmentNumber).get();
         assertEquals(CreateStreamResponse.CreateStatus.EXISTS_ACTIVE, response.getStatus());
@@ -187,7 +187,7 @@ public class StreamTest {
                 PravegaTablesScope scope = new PravegaTablesScope(x, storeHelper);
                 Futures.exceptionallyExpecting(scope.createScope(), e -> Exceptions.unwrap(e) instanceof StoreException.DataExistsException, null).join();
                 scope.addStreamToScope(y).join();
-                return new PravegaTablesStream(x, y, storeHelper, orderer, () -> 0, scope::getStreamsInScopeTableName, executor);
+                return new PravegaTablesStream(x, y, storeHelper, orderer, () -> 0, scope::getStreamsInScopeTableName, executor, true);
             });
         }
     }

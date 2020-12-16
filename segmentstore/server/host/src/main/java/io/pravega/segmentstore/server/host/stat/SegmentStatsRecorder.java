@@ -36,14 +36,7 @@ public interface SegmentStatsRecorder extends AutoCloseable {
      * @param streamSegmentName segment.
      */
     void sealSegment(String streamSegmentName);
-
-    /**
-     * get segment info. 
-     * 
-     * @param elapsed elapsed.
-     */
-    void getSegmentInfo(Duration elapsed);
-
+    
     /**
      * Method to notify segment policy events.
      *
@@ -110,12 +103,7 @@ public interface SegmentStatsRecorder extends AutoCloseable {
             @Override
             public void sealSegment(String streamSegmentName) {
             }
-
-            @Override
-            public void getSegmentInfo(Duration elapsed) {
-                
-            }
-
+            
             @Override
             public void policyUpdate(String streamSegmentName, byte type, int targetRate) {
             }

@@ -32,6 +32,8 @@ import io.pravega.controller.store.stream.records.StreamConfigurationRecord;
 import io.pravega.controller.store.stream.records.StreamCutRecord;
 import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.stream.records.WriterMark;
+import io.pravega.controller.store.stream.records.StreamSubscriber;
+import io.pravega.controller.store.stream.records.Subscribers;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -71,6 +73,7 @@ class ZKStream extends PersistentStreamBase {
     private static final String CREATION_TIME_PATH = STREAM_PATH + "/creationTime";
     private static final String CONFIGURATION_PATH = STREAM_PATH + "/configuration";
     private static final String TRUNCATION_PATH = STREAM_PATH + "/truncation";
+    private static final String SUBSCRIBERS_PATH = STREAM_PATH + "/subscribers";
     private static final String STATE_PATH = STREAM_PATH + "/state";
     private static final String EPOCH_TRANSITION_PATH = STREAM_PATH + "/epochTransition";
     private static final String RETENTION_SET_PATH = STREAM_PATH + "/retention";
@@ -94,6 +97,7 @@ class ZKStream extends PersistentStreamBase {
     private final String creationPath;
     private final String configurationPath;
     private final String truncationPath;
+    private final String subscribersPath;
     private final String statePath;
     private final String epochTransitionPath;
     private final String committingTxnsPath;
@@ -144,6 +148,7 @@ class ZKStream extends PersistentStreamBase {
         creationPath = String.format(CREATION_TIME_PATH, scopeName, streamName);
         configurationPath = String.format(CONFIGURATION_PATH, scopeName, streamName);
         truncationPath = String.format(TRUNCATION_PATH, scopeName, streamName);
+        subscribersPath = String.format(SUBSCRIBERS_PATH, scopeName, streamName);
         statePath = String.format(STATE_PATH, scopeName, streamName);
         retentionSetPath = String.format(RETENTION_SET_PATH, scopeName, streamName);
         retentionStreamCutRecordPathFormat = String.format(RETENTION_STREAM_CUT_RECORD_PATH, scopeName, streamName) + "/%d";
@@ -237,7 +242,32 @@ class ZKStream extends PersistentStreamBase {
         return getId().thenCompose(id -> store.getCachedData(creationPath, id, x -> BitConverter.readLong(x, 0))
                 .thenApply(VersionedMetadata::getObject));
     }
-    
+
+    @Override
+    public CompletableFuture<Void> createSubscriber(String subscriber, long generation) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public CompletableFuture<VersionedMetadata<StreamSubscriber>> getSubscriberRecord(String subscriber) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public CompletableFuture<List<String>> listSubscribers() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public CompletableFuture<Version> setSubscriberData(final VersionedMetadata<StreamSubscriber> subscriber) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public CompletableFuture<Void> removeSubscriber(String subscriber, long generation) {
+        throw new UnsupportedOperationException();
+    }
+
     @Override
     CompletableFuture<Void> createRetentionSetDataIfAbsent(RetentionSet data) {
         return Futures.toVoid(store.createZNodeIfNotExist(retentionSetPath, data.toBytes()));
@@ -247,6 +277,7 @@ class ZKStream extends PersistentStreamBase {
     CompletableFuture<VersionedMetadata<RetentionSet>> getRetentionSetData() {
         return store.getData(retentionSetPath, RetentionSet::fromBytes);
     }
+
 
     @Override
     CompletableFuture<Version> updateRetentionSetData(VersionedMetadata<RetentionSet> retention) {
@@ -414,6 +445,12 @@ class ZKStream extends PersistentStreamBase {
     }
 
     @Override
+    CompletableFuture<Void> createSubscribersRecordIfAbsent() {
+        Subscribers subscribersSetRecord = new Subscribers(ImmutableMap.of());
+        return Futures.toVoid(store.createZNodeIfNotExist(subscribersPath, subscribersSetRecord.toBytes()));
+    }
+
+    @Override
     public CompletableFuture<Void> createMarkerData(long segmentId, long timestamp) {
         final String path = ZKPaths.makePath(markerPath, String.format("%d", segmentId));
         byte[] b = new byte[Long.BYTES];
@@ -490,7 +527,7 @@ class ZKStream extends PersistentStreamBase {
     }
 
     @Override
-    public CompletableFuture<List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>>> getOrderedCommittingTxnInLowestEpoch(int limit) {
+    public CompletableFuture<List<Map.Entry<UUID, ActiveTxnRecord>>> getOrderedCommittingTxnInLowestEpoch(int limit) {
         return super.getOrderedCommittingTxnInLowestEpochHelper(txnCommitOrderer, limit, executor);
     }
 
@@ -720,10 +757,16 @@ class ZKStream extends PersistentStreamBase {
                 });
     }
 
-    @Override
-    public void refresh() {
-        String id = this.idRef.getAndSet(null);
+    @VisibleForTesting
+    void refresh() {
+        String id = idRef.get();
         id = id == null ? "" : id;
+        refresh(id);
+        idRef.set(null);
+    }
+
+    @VisibleForTesting
+    void refresh(String id) {
         // invalidate all mutable records in the cache 
         store.invalidateCache(statePath, id);
         store.invalidateCache(configurationPath, id);
@@ -754,6 +797,9 @@ class ZKStream extends PersistentStreamBase {
                     .thenApply(pos -> {
                         String s = pos.toString();
                         this.idRef.compareAndSet(null, s);
+                        // we will refresh the cache before using any other apis in this object. 
+                        // earlier we would create one single zkstream object but now we are creating 
+                        this.refresh(s);
                         return s;
                     }), e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, "");
         }

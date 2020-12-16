@@ -417,8 +417,6 @@ public class ZkStreamTest {
         assertEquals(segmentsInEpoch.size(), 5);
         assertTrue(segmentsInEpoch.containsAll(Lists.newArrayList(0L, six, nine, ten, eleven)));
 
-        store.getState(SCOPE, streamName, true, context, executor).join();
-        
         assertFalse(store.isSealed(SCOPE, streamName, context, executor).get());
         assertNotEquals(0, store.getActiveSegments(SCOPE, streamName, context, executor).get().size());
         store.setSealed(SCOPE, streamName, context, executor).get();
@@ -569,7 +567,7 @@ public class ZkStreamTest {
         final ScalingPolicy policy1 = ScalingPolicy.fixed(2);
         final StreamConfiguration configuration1 = StreamConfiguration.builder().scalingPolicy(policy1).build();
         stream.create(configuration1, System.currentTimeMillis(), startingSegmentNumber).join();
-        stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.ACTIVE)).join();
+        stream.updateState(State.ACTIVE).join();
         UUID txId = stream.generateNewTxnId(0, 0L).join();
         stream.createTransaction(txId, 1000L, 1000L).join();
 
@@ -610,7 +608,7 @@ public class ZkStreamTest {
         final StreamConfiguration configuration1 = StreamConfiguration.builder().scalingPolicy(policy1).build();
         stream.create(configuration1, System.currentTimeMillis(), startingSegmentNumber).join();
         stream.createStreamPositionNodeIfAbsent(0).join();
-        stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.ACTIVE)).join();
+        stream.updateState(State.ACTIVE).join();
         Long creationTime = stream.getCreationTime().join();
         Integer position = stream.getStreamPosition().join();
         assertEquals(0, position.intValue());
@@ -619,13 +617,12 @@ public class ZkStreamTest {
         // verify that both timestamps are same
         assertEquals(creationTime, cachedCreationTime.getObject());
         // delete stream.
-        stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.SEALING)).join();
-        stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.SEALED)).join();
+        stream.updateState(State.SEALING).join();
+        stream.updateState(State.SEALED).join();
         stream.deleteStream().join();
 
         // refresh the stream object to indicate new request context
         stream.refresh();
-
         AssertExtensions.assertFutureThrows("should throw data not found for stream", stream.getEpochRecord(0), 
             e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException);
         
@@ -633,7 +630,8 @@ public class ZkStreamTest {
         stream.refresh();
 
         // verify that metadata doesn't exist in the store.
-        AssertExtensions.assertFutureThrows("Stream deleted", stream.getCreationTime(), e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException);
+        AssertExtensions.assertFutureThrows("Stream deleted", stream.getCreationTime(), 
+                e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException);
         
         // verify that cached entries still exist. 
         VersionedMetadata<?> cachedCreationTimeExists = storeHelper.getCache().getCachedData(key);
@@ -642,7 +640,7 @@ public class ZkStreamTest {
         // create stream again.
         stream.create(configuration1, System.currentTimeMillis(), startingSegmentNumber).join();
         stream.createStreamPositionNodeIfAbsent(1).join();
-        stream.getVersionedState().thenCompose(y -> stream.updateState(y, State.ACTIVE)).join();
+        stream.updateState(State.ACTIVE).join();
 
         Long creationTimeNew = stream.getCreationTime().join();
         Integer positionNew = stream.getStreamPosition().join();

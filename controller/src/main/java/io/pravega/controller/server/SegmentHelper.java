@@ -266,6 +266,7 @@ public class SegmentHelper implements AutoCloseable {
                     if (r instanceof WireCommands.NoSuchSegment) {
                         WireCommands.NoSuchSegment reply = (WireCommands.NoSuchSegment) r;
                         if (reply.getSegment().equals(transactionName)) {
+                            // idempotent case when segment is already merged, we get the write offset for the parent segment.
                             return getSegmentInfo(scope, stream, targetSegmentId, delegationToken)
                                     .thenApply(WireCommands.StreamSegmentInfo::getWriteOffset);
                         } else {
@@ -502,6 +503,7 @@ public class SegmentHelper implements AutoCloseable {
      * @param state             Last known state of the iterator.
      * @param delegationToken   The token to be presented to the Segment Store.
      * @param clientRequestId   Request id.
+
      * @return A CompletableFuture that will return the next set of {@link TableSegmentKey}s returned from the SegmentStore.
      */
     public CompletableFuture<IteratorItem<TableSegmentKey>> readTableKeys(final String tableName,
@@ -509,7 +511,6 @@ public class SegmentHelper implements AutoCloseable {
                                                                           final IteratorStateImpl state,
                                                                           final String delegationToken,
                                                                           final long clientRequestId) {
-
         final Controller.NodeUri uri = getTableUri(tableName);
         final WireCommandType type = WireCommandType.READ_TABLE_KEYS;
         RawClient connection = new RawClient(ModelHelper.encode(uri), connectionPool);

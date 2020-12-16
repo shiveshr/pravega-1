@@ -25,6 +25,7 @@ import io.pravega.controller.store.stream.records.StreamCutReferenceRecord;
 import io.pravega.controller.store.stream.records.StreamSegmentRecord;
 import io.pravega.controller.store.stream.records.StreamTruncationRecord;
 import io.pravega.controller.store.stream.records.WriterMark;
+import io.pravega.controller.store.stream.records.StreamSubscriber;
 
 import java.util.AbstractMap.SimpleEntry;
 import java.util.List;
@@ -77,15 +78,14 @@ interface Stream {
      * @return CompletableFuture which, upon completion, has the creation time of the stream. 
      */
     CompletableFuture<Long> getCreationTime();
-
+    
     /**
      * Starts updating the configuration of an existing stream.
      *
      * @param configuration new stream configuration.
      * @return future of new StreamConfigWithVersion.
      */
-    CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> startUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing,
-                                                     final StreamConfiguration configuration);
+    CompletableFuture<Void> startUpdateConfiguration(final StreamConfiguration configuration);
 
     /**
      * Completes an ongoing updates configuration of an existing stream.
@@ -93,8 +93,15 @@ interface Stream {
      * @return future of new StreamConfigWithVersion.
      * @param existing
      */
-    CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing);
-    
+    CompletableFuture<Void> completeUpdateConfiguration(VersionedMetadata<StreamConfigurationRecord> existing);
+
+    /**
+     * Fetches the current stream configuration.
+     *
+     * @return current stream configuration.
+     */
+    CompletableFuture<StreamConfiguration> getConfiguration();
+
     /**
      * Fetches the current stream configuration.
      *
@@ -103,12 +110,48 @@ interface Stream {
     CompletableFuture<VersionedMetadata<StreamConfigurationRecord>> getVersionedConfigurationRecord();
 
     /**
+     * Create subscribers record for storing metadata about Stream Subscribers.
+     * Also add this new Subscriber to the Record.
+     * @param subscriber first subscriber to be added the SubscribersRecord in Stream Metadata.
+     * @param generation generation of subscriber in Stream Metadata.
+     * @return future of operation.
+     */
+    CompletableFuture<Void> createSubscriber(String subscriber, long generation);
+
+    /**
+     * Fetches the record corresponding to the subscriber
+     * @return record holding information about this subscriber for the Stream.
+     */
+    CompletableFuture<VersionedMetadata<StreamSubscriber>> getSubscriberRecord(String subscriber);
+
+    /**
+     * Fetches names for all subscribers of the Stream
+     * @return iterator to iterate over all subscribers for the Stream.
+     */
+    CompletableFuture<List<String>> listSubscribers();
+
+    /**
+     * Update subscribers record for the Stream.
+     * @param previous - Subscriber Record that would be replaced by this update API
+     * @param subscriberData  new Subscriber Record that would replace the previous one.
+     * @return future of operation.
+     */
+    CompletableFuture<Void> updateSubscriberStreamCut(final VersionedMetadata<StreamSubscriber> previous, final StreamSubscriber subscriberData);
+
+    /**
+     * Remove subscriber from list of Subscribers for the Stream.
+     * @param subscriber  subscriber to be removed.
+     * @return future of operation.
+     */
+    CompletableFuture<Void> removeSubscriber(final String subscriber, final long generation);
+
+    /**
      * Starts truncating an existing stream.
      *
      * @param streamCut new stream cut.
      * @return future of new StreamProperty.
      */
-    CompletableFuture<VersionedMetadata<StreamTruncationRecord>> startTruncation(final Map<Long, Long> streamCut, VersionedMetadata<StreamTruncationRecord> existing);
+    CompletableFuture<Void> startTruncation(final Map<Long, Long> streamCut);
 
     /**
      * Completes an ongoing stream truncation.
@@ -116,7 +159,7 @@ interface Stream {
      * @return future of operation.
      * @param record
      */
-    CompletableFuture<VersionedMetadata<StreamTruncationRecord>> completeTruncation(VersionedMetadata<StreamTruncationRecord> record);
+    CompletableFuture<Void> completeTruncation(VersionedMetadata<StreamTruncationRecord> record);
 
     /**
      * Fetches the current stream cut.
@@ -124,7 +167,7 @@ interface Stream {
      * @return current stream cut.
      */
     CompletableFuture<VersionedMetadata<StreamTruncationRecord>> getTruncationRecord();
-    
+
     /**
      * Api to get the current state with its current version.
      *
@@ -137,7 +180,7 @@ interface Stream {
      *
      * @return boolean indicating whether the state of stream is updated.
      */
-    CompletableFuture<VersionedMetadata<State>> updateState(VersionedMetadata<State> currState, State state);
+    CompletableFuture<Void> updateState(final State state);
 
     /**
      * Api to update versioned state as a CAS operation.
@@ -147,6 +190,14 @@ interface Stream {
      */
     CompletableFuture<VersionedMetadata<State>> updateVersionedState(final VersionedMetadata<State> state, final State newState);
     
+    /**
+     * Get the state of the stream.
+     *
+     * @return state othe given stream.
+     * @param ignoreCached ignore cached value and fetch from store
+     */
+    CompletableFuture<State> getState(boolean ignoreCached);
+
     /**
      * Fetches details of specified segment.
      *
@@ -201,6 +252,13 @@ interface Stream {
      * @return Future which when completed will contain currently active segments
      */
     CompletableFuture<List<StreamSegmentRecord>> getActiveSegments();
+    
+    /**
+     * Method to get segments at the head of the stream.
+     * 
+     * @return Future which when completed will contain segments at head of stream with offsets
+     */
+    CompletableFuture<Map<StreamSegmentRecord, Long>> getSegmentsAtHead();
     
     /**
      * Returns the active segments in the specified epoch.
@@ -285,7 +343,7 @@ interface Stream {
      * @param record  existing versioned record.
      * @return A future which when completed indicates the completion current scale workflow.                 
      */
-    CompletableFuture<VersionedMetadata<EpochTransitionRecord>> completeScale(VersionedMetadata<EpochTransitionRecord> record);
+    CompletableFuture<Void> completeScale(VersionedMetadata<EpochTransitionRecord> record);
 
     /**
      * Api to indicate to store to start rolling transaction. 
@@ -378,7 +436,7 @@ interface Stream {
      * @return Transaction metadata along with its version.
      */
     CompletableFuture<VersionedTransactionData> pingTransaction(final VersionedTransactionData txnData, final long lease);
-    
+
     /**
      * Fetch transaction metadata along with its version.
      *
@@ -423,8 +481,6 @@ interface Stream {
      * @return     transaction status.
      */
     CompletableFuture<TxnStatus> checkTransactionStatus(final UUID txId);
-
-    CompletableFuture<Void> generateMarksForTransactions(List<VersionedMetadata<ActiveTxnRecord>> txnRecords);
 
     /**
      * Aborts a transaction.
@@ -511,10 +567,10 @@ interface Stream {
      * Method to fetch committing transaction record from the store for a given stream.
      * Note: this will not throw data not found exception if the committing transaction node is not found. Instead
      * it returns null.
+     * @param limit maximum number of transactions to include in a commit batch 
      * @return A completableFuture which, when completed, will contain committing transaction record if it exists, or null otherwise.
      */
-    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> versioned,
-                                                                                                   List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>> list);
+    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> startCommittingTransactions(int limit);
 
     /**
      * Method to fetch committing transaction record from the store for a given stream.
@@ -526,14 +582,6 @@ interface Stream {
     CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getVersionedCommitTransactionsRecord();
 
     /**
-     * This method finds transactions to commit in lowest epoch and returns a sorted list of transaction ids, 
-     * sorted by their order of commits. 
-     * @param limit number of txns to fetch.
-     * @return CompletableFuture which when completed will return ordered list of transaction ids and records.
-     */
-    CompletableFuture<List<Map.Entry<UUID, VersionedMetadata<ActiveTxnRecord>>>> getOrderedCommittingTxnInLowestEpoch(int limit);
-
-    /**
      * Method to reset committing transaction record from the store for a given stream.
      * This method is also responsible for marking all involved transactions as committed. 
      * It also generates marks for writers if applicable before marking the said transactions 
@@ -542,7 +590,7 @@ interface Stream {
      * @return A completableFuture which, when completed, will mean that deletion of txnCommitNode is complete.
      * @param record existing versioned record.
      */
-    CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record);
+    CompletableFuture<Void> completeCommittingTransactions(VersionedMetadata<CommittingTransactionsRecord> record);
 
     /**
      * Method to record commit offset for a transaction. This method stores the commit offset in ActiveTransaction record. 
@@ -551,7 +599,7 @@ interface Stream {
      * @param commitOffsets segment to offset position where transaction was committed
      * @return A completableFuture which, when completed, will have transaction commit offset recorded successfully.
      */
-    CompletableFuture<VersionedMetadata<ActiveTxnRecord>> recordCommitOffsets(UUID txnId, VersionedMetadata<ActiveTxnRecord> txn, Map<Long, Long> commitOffsets);
+    CompletableFuture<Void> recordCommitOffsets(UUID txnId, Map<Long, Long> commitOffsets);
     
     /**
      * This method attempts to create a new Waiting Request node and set the processor's name in the node.
@@ -619,12 +667,6 @@ interface Stream {
     CompletableFuture<Map<String, WriterMark>> getAllWriterMarks();
 
     /**
-     * Refresh the stream object. Typically to be used to invalidate any caches.
-     * This allows us reuse of stream object without having to recreate a new stream object for each new operation
-     */
-    void refresh();
-
-    /**
      * Method to get the requested chunk of the HistoryTimeSeries.
      *
      * @param chunkNumber chunk number.
@@ -648,4 +690,24 @@ interface Stream {
      * @return Completable future that, upon completion, holds the epoch in which the segment was sealed.
      */
     CompletableFuture<Integer> getSegmentSealedEpoch(long segmentId);
+
+    /**
+     * Method to compare streamcuts to check if streamcut1 is strictly ahead of streamcut2. 
+     * Strictly means if the two streamcuts are overlapping for any range, then this method will reply in negative. 
+     * 
+     * @param cut1 streamcut to check
+     * @param cut2 streamcut to check against. 
+     *
+     * @return CompletableFuture which, upon completion, will indicate if the streamcut1 is strictly ahead of streamcut2.
+     */
+    CompletableFuture<Boolean> isStreamCutStrictlyGreaterThan(Map<Long, Long> cut1, Map<Long, Long> cut2);
+
+    /**
+     * Finds the latest streamcutreference record from retentionset that is strictly before the supplied streamcut.
+     * 
+     * @param streamCut streamcut to check
+     * @return A completable future which when completed will the reference record to the latest stream cut from retention set which
+     * is strictly before the supplied streamcut. 
+     */
+    CompletableFuture<StreamCutReferenceRecord> findStreamCutReferenceRecordBefore(Map<Long, Long> streamCut, RetentionSet retentionSet);
 }

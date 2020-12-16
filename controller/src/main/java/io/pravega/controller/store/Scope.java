@@ -10,12 +10,12 @@
 package io.pravega.controller.store;
 
 import io.pravega.common.util.BitConverter;
-import org.apache.commons.lang3.tuple.Pair;
-
+import io.pravega.common.util.ByteArraySegment;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import org.apache.commons.lang3.tuple.Pair;
 
 /**
  * Properties of a Scope and operations that can be performed on it.
@@ -65,7 +65,9 @@ public interface Scope {
      * Refresh the scope object. Typically to be used to invalidate any caches.
      * This allows us reuse of scope object without having to recreate a new scope object for each new operation
      */
-    void refresh();
+    default void refresh() {
+        // no op
+    }
 
     /**
      * A paginated api on the scope to get requested number of KeyValueTables from under the scope
@@ -81,7 +83,7 @@ public interface Scope {
 
     default byte[] newId() {
         byte[] b = new byte[2 * Long.BYTES];
-        BitConverter.writeUUID(b, 0, UUID.randomUUID());
+        BitConverter.writeUUID(new ByteArraySegment(b), UUID.randomUUID());
         return b;
     }
 }

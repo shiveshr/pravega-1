@@ -52,6 +52,10 @@ service ControllerService {
     rpc getCurrentSegmentsKeyValueTable(KeyValueTableInfo) returns (SegmentRanges);
     rpc listKeyValueTablesInScope(KVTablesInScopeRequest) returns (KVTablesInScopeResponse);
     rpc deleteKeyValueTable(KeyValueTableInfo) returns (DeleteKVTableStatus);
+    rpc addSubscriber(StreamSubscriberInfo) returns (AddSubscriberStatus);
+    rpc deleteSubscriber(StreamSubscriberInfo) returns (DeleteSubscriberStatus);
+    rpc listSubscribers(StreamInfo) returns (SubscribersResponse);
+    rpc updateSubscriberStreamCut(SubscriberStreamCut) returns (UpdateSubscriberStatus);
 }
 
 message ServerRequest {
@@ -127,6 +131,57 @@ message UpdateStreamStatus {
         SCOPE_NOT_FOUND = 3;
     }
     Status status = 1;
+}
+
+message AddSubscriberStatus {
+    enum Status {
+        SUCCESS = 0;
+        FAILURE = 1;
+        STREAM_NOT_FOUND = 2;
+    }
+    Status status = 1;
+}
+
+message DeleteSubscriberStatus {
+    enum Status {
+        SUCCESS = 0;
+        FAILURE = 1;
+        STREAM_NOT_FOUND = 2;
+    }
+    Status status = 1;
+}
+
+message UpdateSubscriberStatus {
+    enum Status {
+        SUCCESS = 0;
+        FAILURE = 1;
+        STREAM_NOT_FOUND = 2;
+        SUBSCRIBER_NOT_FOUND = 3;
+        STREAMCUT_NOT_VALID = 4;
+    }
+    Status status = 1;
+}
+
+message StreamSubscriberInfo {
+    string scope = 1;
+    string stream = 2;
+    string subscriber = 3;
+    int64 operationGeneration = 4;
+}
+
+message SubscriberStreamCut {
+    string subscriber = 1;
+    StreamCut streamCut = 2;
+}
+
+message SubscribersResponse {
+    repeated string subscribers = 1;
+    enum Status {
+        SUCCESS = 0;
+        FAILURE = 1;
+        STREAM_NOT_FOUND = 2;
+    }
+    Status status = 2;
 }
 
 message DeleteStreamStatus {
@@ -222,6 +277,15 @@ message ContinuationToken {
 message StreamInfo {
     string scope = 1;
     string stream = 2;
+    enum AccessOperation {
+        UNSPECIFIED = 0;
+        NONE = 1;
+        ANY = 2;
+        READ = 3;
+        WRITE = 4;
+        READ_WRITE = 5;
+    }
+    AccessOperation accessOperation = 3;
 }
 
 message ScalingPolicy {
@@ -244,6 +308,7 @@ message RetentionPolicy {
     }
     RetentionPolicyType retentionType = 1;
     int64 retentionParam = 2;
+    int64 retentionMax = 3;
 }
 
 message StreamConfig {

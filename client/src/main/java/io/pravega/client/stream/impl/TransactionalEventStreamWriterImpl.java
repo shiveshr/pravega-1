@@ -24,15 +24,16 @@ import io.pravega.client.stream.Transaction.Status;
 import io.pravega.client.stream.TransactionalEventStreamWriter;
 import io.pravega.client.stream.TxnFailedException;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import io.pravega.common.concurrent.Futures;
+import io.pravega.shared.security.auth.AccessOperation;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.ToString;
@@ -90,8 +91,8 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
         TransactionImpl(String writerId, UUID txId, Controller controller, Stream stream) {
             this.writerId = writerId;
             this.txId = txId;
-            this.segments = null;
             this.inner = null;
+            this.segments = null;
             this.controller = controller;
             this.stream = stream;
             this.pinger = null;
@@ -113,11 +114,14 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
             Preconditions.checkNotNull(event);
             throwIfClosed();
             Segment s = segments.getSegmentForKey(routingKey);
+            AtomicReference<DelegationTokenProvider> tokenProvider = new AtomicReference<>();
+
             SegmentTransaction<Type> transaction = inner.computeIfAbsent(s, x -> {
-                DelegationTokenProvider tokenProvider = DelegationTokenProviderFactory.create(
-                        segments.getDelegationToken(), controller, x);
+                if (tokenProvider.get() == null) {
+                    tokenProvider.set(DelegationTokenProviderFactory.create(controller, s, AccessOperation.WRITE));
+                }
                 SegmentOutputStream out = writer.outputStreamFactory.createOutputStreamForTransaction(s, txId,
-                        writer.config, tokenProvider);
+                        writer.config, tokenProvider.get());
                 return new SegmentTransactionImpl<>(txId, out, writer.serializer);
             });
             
@@ -208,7 +212,7 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
         if (status != Status.OPEN) {
             return new TransactionImpl<>(writerId, txId, controller, stream);
         }
-        
+
         // get the segments corresponding to the transaction.
         StreamSegments segments = Futures.getThrowingException(
                 controller.getEpochSegments(stream.getScope(), stream.getStreamName(), getEpoch(txId)));
@@ -220,7 +224,7 @@ public class TransactionalEventStreamWriterImpl<Type> implements TransactionalEv
         DelegationTokenProvider tokenProvider = null;
         for (Segment s : segments.getSegments()) {
             if (tokenProvider == null) {
-                tokenProvider = DelegationTokenProviderFactory.create(segments.getDelegationToken(), controller, s);
+                tokenProvider = DelegationTokenProviderFactory.create(controller, s, AccessOperation.WRITE);
             }
             SegmentOutputStream out = outputStreamFactory.createOutputStreamForTransaction(s, txId, config,
                     tokenProvider);
