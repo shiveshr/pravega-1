@@ -38,10 +38,7 @@ import io.pravega.client.stream.impl.ClientFactoryImpl;
 import io.pravega.client.stream.impl.JavaSerializer;
 import io.pravega.client.stream.impl.StreamCutImpl;
 import io.pravega.client.watermark.WatermarkSerializer;
-<<<<<<< HEAD
-=======
 import io.pravega.common.concurrent.ExecutorServiceHelpers;
->>>>>>> master
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.hash.RandomFactory;
 import io.pravega.shared.NameUtils;
