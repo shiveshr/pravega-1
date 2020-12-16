@@ -165,7 +165,7 @@ public class SegmentStatsRecorderTest extends ThreadPooledTestSuite {
         assertEquals(elapsed.toMillis(), getTimerMillis(MetricsNames.SEGMENT_READ_LATENCY));
 
         // Merge metrics.
-        context.statsRecorder.merge(segmentName, 123L, 2, 234L, Duration.ofMillis(100));
+        context.statsRecorder.merge(segmentName, 123L, 2, 234L, Duration.ofMillis(10));
         assertEquals(123L * 2, getCounterValue(MetricsNames.SEGMENT_WRITE_BYTES, segmentName));
         assertEquals(2 * 2, getCounterValue(MetricsNames.SEGMENT_WRITE_EVENTS, segmentName));
 

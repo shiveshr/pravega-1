@@ -1933,7 +1933,7 @@ public abstract class PersistentStreamBase implements Stream {
         int epoch = nextEpoch.getKey();
         List<Long> orders = new ArrayList<>();
         List<String> txnIds = new ArrayList<>();
-        nextEpoch.getValue().forEach(x -> {
+        nextEpoch.getValue().stream().sorted(Comparator.comparingLong(Map.Entry::getKey)).forEach(x -> {
             orders.add(x.getKey());
             txnIds.add(x.getValue());
         });
