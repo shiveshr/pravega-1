@@ -421,11 +421,14 @@ public abstract class PersistentStreamBase implements Stream {
     }
 
     @Override
-    public CompletableFuture<Void> updateSubscriberStreamCut(final VersionedMetadata<StreamSubscriber> previous, final StreamSubscriber newSubscriberData) {
-        return isStreamCutValidForTruncation(previous.getObject().getTruncationStreamCut(), newSubscriberData.getTruncationStreamCut())
+    public CompletableFuture<Void> updateSubscriberStreamCut(final VersionedMetadata<StreamSubscriber> previous,
+                                                             final String subscriber, long generation, ImmutableMap<Long, Long> streamCut) {
+        return isStreamCutValidForTruncation(previous.getObject().getTruncationStreamCut(), streamCut)
                 .thenCompose(isValid -> {
                     if (isValid) {
-                       return Futures.toVoid(setSubscriberData(new VersionedMetadata<>(newSubscriberData, previous.getVersion())));
+                       return Futures.toVoid(setSubscriberData(new VersionedMetadata<>(new StreamSubscriber(subscriber, generation,
+                                                                                            streamCut, System.currentTimeMillis()),
+                                                                                            previous.getVersion())));
                     } else {
                         return Futures.failedFuture(StoreException.create(StoreException.Type.OPERATION_NOT_ALLOWED,
                                 "New StreamCut is lower than the previous value."));
@@ -1984,7 +1987,7 @@ public abstract class PersistentStreamBase implements Stream {
         return Futures.allOfWithResults(txnIds.stream().map(txnIdStr -> {
             UUID txnId = UUID.fromString(txnIdStr);
             return Futures.exceptionallyExpecting(getActiveTx(epoch, txnId).thenApply(VersionedMetadata::getObject),
-                    ZKStreamMetadataStore.DATA_NOT_FOUND_PREDICATE, ActiveTxnRecord.EMPTY);
+                    DATA_NOT_FOUND_PREDICATE, ActiveTxnRecord.EMPTY);
         }).collect(Collectors.toList()));
     }
 

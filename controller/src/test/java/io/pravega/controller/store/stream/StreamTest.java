@@ -81,7 +81,7 @@ public class StreamTest extends ThreadPooledTestSuite {
         scope.addStreamToScope("test").join();
 
         PravegaTablesStream stream = new PravegaTablesStream("test", "test",
-                storeHelper, orderer, () -> 0, 
+                storeHelper, orderer, () -> 0,
                 scope::getStreamsInScopeTableName, executorService(), true);
         testStream(stream);
     }

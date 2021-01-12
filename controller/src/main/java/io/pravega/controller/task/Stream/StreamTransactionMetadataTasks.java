@@ -342,35 +342,31 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
             Timer timer = new Timer();
 
             return streamMetadataStore.generateTransactionId(scope, stream, ctx, executor)
-                               .thenCompose(txnId -> {
+                .thenCompose(txnId -> {
+                    CompletableFuture<Void> addIndex = addTxnToIndex(scope, stream, txnId);
 
-                                   CompletableFuture<Void> addIndex = addTxnToIndex(scope, stream, txnId);
+                   // Step 3. Create txn node in the store.
+                   CompletableFuture<VersionedTransactionData> txnFuture = createTxnInStore(scope, stream, lease,
+                           ctx, maxExecutionPeriod, txnId, addIndex);
+                   Duration elapsed = timer.getElapsed();
+                   TransactionMetrics.getInstance().createTransactionInStore(elapsed);
 
-                                   // Step 3. Create txn node in the store.
-                                   CompletableFuture<VersionedTransactionData> txnFuture = createTxnInStore(scope, stream, lease,
-                                           ctx, maxExecutionPeriod, txnId, addIndex);
-                                   Duration elapsed = timer.getElapsed();
-                                   TransactionMetrics.getInstance().createTransactionInStore(elapsed);
-
-                                   // Step 4. Notify segment stores about new txn.
-                                   CompletableFuture<List<StreamSegmentRecord>> segmentsFuture = txnFuture.thenComposeAsync(txnData ->
-                                           streamMetadataStore.getSegmentsInEpoch(scope, stream, txnData.getEpoch(), ctx, executor), executor);
-                                   
-                                   // Step 5. Start tracking txn in timeout service
-                                   return segmentsFuture.whenCompleteAsync((result, ex) -> {
-                                       addTxnToTimeoutService(scope, stream, lease, maxExecutionPeriod, txnId, txnFuture);
-                                   }, executor).thenApplyAsync(v -> {
-                                       List<StreamSegmentRecord> segments = segmentsFuture.join().stream().map(x -> {
-                                           long generalizedSegmentId = RecordHelper.generalizedSegmentId(x.segmentId(), txnId);
-                                           int epoch = NameUtils.getEpoch(generalizedSegmentId);
-                                           int segmentNumber = NameUtils.getSegmentNumber(generalizedSegmentId);
-                                           return StreamSegmentRecord.builder().creationEpoch(epoch).segmentNumber(segmentNumber)
-                                                                     .creationTime(x.getCreationTime()).keyStart(x.getKeyStart()).keyEnd(x.getKeyEnd()).build();
-                                       }).collect(Collectors.toList());
-
-                                       return new ImmutablePair<>(txnFuture.join(), segments);
-                                   }, executor);
-                               });
+                   // Step 4. Notify segment stores about new txn.
+                   CompletableFuture<List<StreamSegmentRecord>> segmentsFuture = txnFuture.thenComposeAsync(txnData ->
+                           streamMetadataStore.getSegmentsInEpoch(scope, stream, txnData.getEpoch(), ctx, executor), executor);
+                   // Step 5. Start tracking txn in timeout service
+                   return segmentsFuture.whenCompleteAsync((result, ex) -> {
+                       addTxnToTimeoutService(scope, stream, lease, maxExecutionPeriod, txnId, txnFuture);
+                   }, executor).thenApplyAsync(v -> {
+                       List<StreamSegmentRecord> segments = segmentsFuture.join().stream().map(x -> {
+                           long generalizedSegmentId = RecordHelper.generalizedSegmentId(x.segmentId(), txnId);
+                           int epoch = NameUtils.getEpoch(generalizedSegmentId);
+                           int segmentNumber = NameUtils.getSegmentNumber(generalizedSegmentId);
+                           return StreamSegmentRecord.builder().creationEpoch(epoch).segmentNumber(segmentNumber).creationTime(x.getCreationTime()).keyStart(x.getKeyStart()).keyEnd(x.getKeyEnd()).build();
+                       }).collect(Collectors.toList());
+                       return new ImmutablePair<>(txnFuture.join(), segments);
+                   }, executor);
+               });
         }, e -> {
             Throwable unwrap = Exceptions.unwrap(e);
             return unwrap instanceof StoreException.WriteConflictException || unwrap instanceof StoreException.DataNotFoundException;
