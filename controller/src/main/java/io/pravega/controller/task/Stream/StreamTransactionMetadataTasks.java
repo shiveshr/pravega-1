@@ -16,6 +16,7 @@ import io.pravega.client.stream.EventWriterConfig;
 import io.pravega.common.Exceptions;
 import io.pravega.common.Timer;
 import io.pravega.common.concurrent.Futures;
+import io.pravega.common.tracing.RequestTracker;
 import io.pravega.controller.metrics.TransactionMetrics;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.eventProcessor.ControllerEventProcessorConfig;
@@ -96,6 +97,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     private final CompletableFuture<EventStreamWriter<CommitEvent>> commitWriterFuture;
     private final CompletableFuture<EventStreamWriter<AbortEvent>> abortWriterFuture;
     private final AtomicLong maxTransactionExecutionTimeBound;
+    private final RequestTracker requestTracker;
 
     @VisibleForTesting
     public StreamTransactionMetadataTasks(final StreamMetadataStore streamMetadataStore,
@@ -105,13 +107,14 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                           final String hostId,
                                           final TimeoutServiceConfig timeoutServiceConfig,
                                           final BlockingQueue<Optional<Throwable>> taskCompletionQueue,
-                                          final GrpcAuthHelper authHelper) {
+                                          final GrpcAuthHelper authHelper, RequestTracker requestTracker) {
         this.hostId = hostId;
         this.executor = executor;
         this.eventExecutor = eventExecutor;
         this.streamMetadataStore = streamMetadataStore;
         this.segmentHelper = segmentHelper;
         this.authHelper = authHelper;
+        this.requestTracker = requestTracker;
         this.timeoutService = new TimerWheelTimeoutService(this, timeoutServiceConfig, taskCompletionQueue);
         readyLatch = new CountDownLatch(1);
         this.commitWriterFuture = new CompletableFuture<>();
@@ -126,8 +129,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                           final String hostId,
                                           final TimeoutServiceConfig timeoutServiceConfig,
                                           final BlockingQueue<Optional<Throwable>> taskCompletionQueue,
-                                          final GrpcAuthHelper authHelper) {
-        this(streamMetadataStore, segmentHelper, executor, executor, hostId, timeoutServiceConfig, taskCompletionQueue, authHelper);
+                                          final GrpcAuthHelper authHelper, RequestTracker requestTracker) {
+        this(streamMetadataStore, segmentHelper, executor, executor, hostId, timeoutServiceConfig, taskCompletionQueue, authHelper, requestTracker);
     }
 
     public StreamTransactionMetadataTasks(final StreamMetadataStore streamMetadataStore,
@@ -136,8 +139,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                           final ScheduledExecutorService eventExecutor,
                                           final String hostId,
                                           final TimeoutServiceConfig timeoutServiceConfig,
-                                          final GrpcAuthHelper authHelper) {
-        this(streamMetadataStore, segmentHelper, executor, eventExecutor, hostId, timeoutServiceConfig, null, authHelper);
+                                          final GrpcAuthHelper authHelper, RequestTracker requestTracker) {
+        this(streamMetadataStore, segmentHelper, executor, eventExecutor, hostId, timeoutServiceConfig, null, authHelper, requestTracker);
     }
 
     @VisibleForTesting
@@ -145,8 +148,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                           final SegmentHelper segmentHelper,
                                           final ScheduledExecutorService executor,
                                           final String hostId,
-                                          final GrpcAuthHelper authHelper) {
-        this(streamMetadataStore, segmentHelper, executor, executor, hostId, TimeoutServiceConfig.defaultConfig(), authHelper);
+                                          final GrpcAuthHelper authHelper, RequestTracker requestTracker) {
+        this(streamMetadataStore, segmentHelper, executor, executor, hostId, TimeoutServiceConfig.defaultConfig(), authHelper, requestTracker);
     }
 
     private void setReady() {
@@ -215,7 +218,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                                                                       final String stream,
                                                                                       final long lease,
                                                                                       final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
+        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "createTxn", UUID.randomUUID().toString());
         return createTxnBody(scope, stream, lease, context);
     }
 
@@ -234,7 +237,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                                     final UUID txId,
                                                     final long lease,
                                                     final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
+        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "pingTxn", txId.toString());
         return pingTxnBody(scope, stream, txId, lease, context);
     }
 
@@ -253,7 +256,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                                  final UUID txId,
                                                  final Version version,
                                                  final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
+        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "abortTxn", txId.toString());
         return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, false, txId, version, context),
                 RETRYABLE_PREDICATE, 3, executor);
     }
@@ -269,7 +272,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      */
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
+        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "commitTxn", txId.toString());
         return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, "", Long.MIN_VALUE, context),
                 RETRYABLE_PREDICATE, 3, executor);
     }
@@ -288,7 +291,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final String writerId, final long timestamp,
                                                   final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt);
+        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "commitTxn", txId.toString());
         return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, writerId, timestamp, context),
                 RETRYABLE_PREDICATE, 3, executor);
     }
@@ -719,8 +722,11 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
 
     private OperationContext getNonNullOperationContext(final String scope,
                                                         final String stream,
-                                                        final OperationContext contextOpt) {
-        return contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
+                                                        final OperationContext contextOpt,
+                                                        final String method, 
+                                                        final String txnId) {
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor(scope, stream, method, txnId);
+        return contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
     }
 
     public String retrieveDelegationToken() {

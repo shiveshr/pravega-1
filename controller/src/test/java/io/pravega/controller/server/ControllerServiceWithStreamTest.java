@@ -138,7 +138,7 @@ public abstract class ControllerServiceWithStreamTest {
         EventHelper helperMock = EventHelperMock.getEventHelperMock(executor, "host", ((AbstractStreamMetadataStore) streamStore).getHostTaskIndex());
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelperMock,
                 executor, "host", disabledAuthHelper, requestTracker, helperMock);
-        streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelperMock, executor, "host", disabledAuthHelper);
+        streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelperMock, executor, "host", disabledAuthHelper, requestTracker);
         StreamRequestHandler streamRequestHandler = new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamStore, executor),
                 new ScaleOperationTask(streamMetadataTasks, streamStore, executor),
                 new UpdateStreamTask(streamMetadataTasks, streamStore, bucketStore, executor),

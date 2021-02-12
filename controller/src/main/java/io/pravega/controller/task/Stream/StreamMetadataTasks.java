@@ -683,8 +683,8 @@ public class StreamMetadataTasks extends TaskBase {
      */
     public CompletableFuture<UpdateStreamStatus.Status> updateStream(String scope, String stream, StreamConfiguration newConfig,
                                                                      OperationContext contextOpt) {
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
-        final long requestId = requestTracker.getRequestIdFor("updateStream", scope, stream);
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("updateStream", scope, stream);
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
 
         // 1. get configuration
         return streamMetadataStore.getConfigurationRecord(scope, stream, context, executor)
@@ -742,8 +742,8 @@ public class StreamMetadataTasks extends TaskBase {
      * @return update status.
      */
     public CompletableFuture<SubscribersResponse> listSubscribers(String scope, String stream, OperationContext contextOpt) {
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
-        final long requestId = requestTracker.getRequestIdFor("listSubscribers", scope, stream);
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("listSubscribers", scope, stream);
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
         return streamMetadataStore.checkStreamExists(scope, stream, context)
                .thenCompose(exists -> {
                if (!exists) {
@@ -786,8 +786,8 @@ public class StreamMetadataTasks extends TaskBase {
     public CompletableFuture<UpdateSubscriberStatus.Status> updateSubscriberStreamCut(String scope, String stream,
                                                                              String subscriber, String readerGroupId, long generation, ImmutableMap<Long, Long> truncationStreamCut,
                                                                              OperationContext contextOpt) {
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
-        final long requestId = requestTracker.getRequestIdFor("updateSubscriberStreamCut", scope, stream);
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("updateSubscriberStreamCut", scope, stream);
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
 
         return RetryHelper.withRetriesAsync(() -> streamMetadataStore.checkStreamExists(scope, stream, context)
                 .thenCompose(exists -> {
@@ -848,8 +848,8 @@ public class StreamMetadataTasks extends TaskBase {
     public CompletableFuture<Void> retention(final String scope, final String stream, final RetentionPolicy policy,
                                              final long recordingTime, final OperationContext contextOpt, final String delegationToken) {
         Preconditions.checkNotNull(policy);
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
-        final long requestId = requestTracker.getRequestIdFor("truncateStream", scope, stream);
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("truncateStream", scope, stream);
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
 
         return streamMetadataStore.getRetentionSet(scope, stream, context, executor)
                 .thenCompose(retentionSet -> {
@@ -1220,7 +1220,9 @@ public class StreamMetadataTasks extends TaskBase {
      */
     public CompletableFuture<StreamCutRecord> generateStreamCut(final String scope, final String stream, final StreamCutRecord previous,
                                                                 final OperationContext contextOpt, String delegationToken) {
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("generateStreamCut", scope, stream);
+
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
 
         return streamMetadataStore.getActiveSegments(scope, stream, context, executor)
                 .thenCompose(activeSegments -> Futures.allOfWithResults(activeSegments
@@ -1249,8 +1251,8 @@ public class StreamMetadataTasks extends TaskBase {
     public CompletableFuture<UpdateStreamStatus.Status> truncateStream(final String scope, final String stream,
                                                                        final Map<Long, Long> streamCut,
                                                                        final OperationContext contextOpt) {
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
-        final long requestId = requestTracker.getRequestIdFor("truncateStream", scope, stream);
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("truncateStream", scope, stream);
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
 
         // 1. get stream cut
         return startTruncation(scope, stream, streamCut, context, requestId)
@@ -1272,7 +1274,7 @@ public class StreamMetadataTasks extends TaskBase {
 
     public CompletableFuture<Boolean> startTruncation(String scope, String stream, Map<Long, Long> streamCut,
                                                        OperationContext contextOpt, long requestId) {
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
 
         return streamMetadataStore.getTruncationRecord(scope, stream, context, executor)
                 .thenCompose(property -> {
@@ -1328,8 +1330,8 @@ public class StreamMetadataTasks extends TaskBase {
 
     @VisibleForTesting
     CompletableFuture<UpdateStreamStatus.Status> sealStream(String scope, String stream, OperationContext contextOpt, int retryCount) {
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
-        final long requestId = requestTracker.getRequestIdFor("sealStream", scope, stream);
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("sealStream", scope, stream);
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
 
         // 1. post event for seal.
         SealStreamEvent event = new SealStreamEvent(scope, stream, requestId);
@@ -1373,8 +1375,8 @@ public class StreamMetadataTasks extends TaskBase {
      */
     public CompletableFuture<DeleteStreamStatus.Status> deleteStream(final String scope, final String stream,
                                                                      final OperationContext contextOpt) {
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream) : contextOpt;
-        final long requestId = requestTracker.getRequestIdFor("deleteStream", scope, stream);
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("deleteStream", scope, stream);
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
 
         // We can delete streams only if they are sealed. However, for partially created streams, they could be in different
         // stages of partial creation and we should be able to clean them up. 
@@ -1436,13 +1438,15 @@ public class StreamMetadataTasks extends TaskBase {
      * @param segmentsToSeal segments to be sealed.
      * @param newRanges      key ranges for new segments.
      * @param scaleTimestamp scaling time stamp.
-     * @param context        optional context
+     * @param contextOpt        optional context
      * @return returns the newly created segments.
      */
     public CompletableFuture<ScaleResponse> manualScale(String scope, String stream, List<Long> segmentsToSeal,
                                                         List<Map.Entry<Double, Double>> newRanges, long scaleTimestamp,
-                                                        OperationContext context) {
-        final long requestId = requestTracker.getRequestIdFor("scaleStream", scope, stream, String.valueOf(scaleTimestamp));
+                                                        OperationContext contextOpt) {
+        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("scaleStream", scope, stream, String.valueOf(scaleTimestamp));
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
+
         ScaleOpEvent event = new ScaleOpEvent(scope, stream, segmentsToSeal, newRanges, true, scaleTimestamp, requestId);
 
         return eventHelper.addIndexAndSubmitTask(event,
@@ -1545,7 +1549,7 @@ public class StreamMetadataTasks extends TaskBase {
     @VisibleForTesting
     CompletableFuture<CreateStreamStatus.Status> createStreamBody(String scope, String stream, StreamConfiguration config, long timestamp) {
         final long requestId = requestTracker.getRequestIdFor("createStream", scope, stream);
-        final OperationContext context = streamMetadataStore.createContext(scope, stream);
+        final OperationContext context = streamMetadataStore.createContext(scope, stream, requestId);
 
         return this.streamMetadataStore.createStream(scope, stream, config, timestamp, context, executor)
                 .thenComposeAsync(response -> {
@@ -1622,7 +1626,7 @@ public class StreamMetadataTasks extends TaskBase {
                                             this.retrieveDelegationToken(), requestId);
                                 })
                                 .thenCompose(v -> {
-                                    final OperationContext context = streamMetadataStore.createContext(scope, markStream);
+                                    final OperationContext context = streamMetadataStore.createContext(scope, markStream, requestId);
 
                                     return streamMetadataStore.getVersionedState(scope, markStream, context, executor)
                                                        .thenCompose(state -> 

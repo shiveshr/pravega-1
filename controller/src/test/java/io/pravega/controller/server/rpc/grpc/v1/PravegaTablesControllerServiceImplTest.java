@@ -123,7 +123,7 @@ public class PravegaTablesControllerServiceImplTest extends ControllerServiceImp
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore, segmentHelper,
                 executorService, "host", GrpcAuthHelper.getDisabledAuthHelper(), requestTracker, helperMock);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper,
-                executorService, "host", GrpcAuthHelper.getDisabledAuthHelper());
+                executorService, "host", GrpcAuthHelper.getDisabledAuthHelper(), requestTracker);
         this.streamRequestHandler = spy(new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamStore, executorService),
                 new ScaleOperationTask(streamMetadataTasks, streamStore, executorService),
                 new UpdateStreamTask(streamMetadataTasks, streamStore, bucketStore, executorService),

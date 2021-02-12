@@ -91,6 +91,15 @@ public class PravegaTablesStreamMetadataStore extends AbstractStreamMetadataStor
         this.executor = executor;
     }
 
+    @Override
+    public OperationContext createContext(String scopeName, String streamName, long requestId) {
+        PravegaTablesScope scope = newScope(scopeName);
+        PravegaTablesStream stream = new PravegaTablesStream(scopeName, streamName, storeHelper, orderer, completedTxnGCRef.get()::getLatestBatch,
+                scope::getStreamsInScopeTableName, executor, requestId, true);
+
+        return new OperationContextImpl(scope, stream, requestId);
+    }
+
     @VisibleForTesting 
     CompletableFuture<Void> gcCompletedTxn() {
         List<String> batches = new ArrayList<>();
@@ -153,10 +162,9 @@ public class PravegaTablesStreamMetadataStore extends AbstractStreamMetadataStor
         completedTxnGCRef.set(garbageCollector);
     }
 
-    @Override
-    PravegaTablesStream newStream(final String scope, final String name, OperationContext context) {
+    PravegaTablesStream newStream(final String scope, final String name) {
         return new PravegaTablesStream(scope, name, storeHelper, orderer, completedTxnGCRef.get()::getLatestBatch,
-                () -> ((PravegaTablesScope) getScope(scope, context)).getStreamsInScopeTableName(), executor, context == null);
+                () -> ((PravegaTablesScope) getScope(scope)).getStreamsInScopeTableName(), executor);
     }
 
     @Override

@@ -58,9 +58,10 @@ public interface StreamMetadataStore extends AutoCloseable {
      *
      * @param scope Stream scope.
      * @param name  Stream name.
+     * @param requestId requestId.
      * @return Return a streamContext
      */
-    OperationContext createContext(final String scope, final String name);
+    OperationContext createContext(final String scope, final String name, long requestId);
 
     /**
      * Creates a new stream with the given name and configuration.

@@ -10,37 +10,51 @@
 package io.pravega.controller.store.stream;
 
 import io.pravega.controller.store.Scope;
-import lombok.Synchronized;
-
-import javax.annotation.concurrent.GuardedBy;
-import java.util.function.Function;
+import lombok.Getter;
 
 class OperationContextImpl implements OperationContext {
-    private final Function<OperationContext, Scope> scopeFactory;
-    private final Function<OperationContext, Stream> streamFactory;
-    @GuardedBy("$lock")
-    private Scope scope;
-    @GuardedBy("$lock")
-    private Stream stream;
-    
-    OperationContextImpl(Function<OperationContext, Scope> scopeFactory, Function<OperationContext, Stream> streamFactory) {
-        this.scopeFactory = scopeFactory;
-        this.streamFactory = streamFactory;
+    @Getter
+    private final Scope scope;
+    @Getter
+    private final Stream stream;
+    @Getter
+    private final long requestId;
+
+//    @GuardedBy("$lock")
+//    private final Map<String, VersionedMetadata<?>> map = new HashMap<>();
+
+    OperationContextImpl(Scope scope, Stream stream, long requestId) {
+        this.scope = scope;
+        this.stream = stream;
+        this.requestId = requestId;
     }
     
-    @Synchronized
-    Scope getScope() {
-        if (scope == null) {
-            scope = scopeFactory.apply(this);
-        }
-        return scope;
-    }
-    
-    @Synchronized
-    Stream getStream() {
-        if (stream == null) {
-            stream = streamFactory.apply(this);
-        }
-        return stream;
-    }
+//    @Synchronized
+//    @Override
+//    public <T> void load(String tableName, String key, VersionedMetadata<T> value) {
+//        if (value != null) {
+//            map.put(tableName + key, value);
+//        }
+//    }
+//
+//    @SuppressWarnings("unchecked")
+//    @Synchronized
+//    @Override
+//    public <T> VersionedMetadata<T> get(String tableName, String key, Class<T> tClass) {
+//        VersionedMetadata<?> versionedMetadata = map.get(tableName + key);
+//        assert versionedMetadata == null || versionedMetadata.getObject().getClass().isAssignableFrom(tClass);
+//        return (VersionedMetadata<T>) versionedMetadata;
+//    }
+//
+//    @Synchronized
+//    @Override
+//    public void unload(String tableName, String key) {
+//        map.remove(tableName + key);
+//    }
+//
+//    @Synchronized
+//    @Override
+//    public void unloadAll() {
+//        map.clear();
+//    }
 }

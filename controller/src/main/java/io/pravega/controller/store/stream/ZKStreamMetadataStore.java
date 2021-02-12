@@ -111,7 +111,7 @@ public class ZKStreamMetadataStore extends AbstractStreamMetadataStore implement
     }
 
     @Override
-    ZKStream newStream(final String scopeName, final String name, OperationContext context) {
+    ZKStream newStream(final String scopeName, final String name) {
         return new ZKStream(scopeName, name, storeHelper, completedTxnGC::getLatestBatch, executor, orderer);
     }
 

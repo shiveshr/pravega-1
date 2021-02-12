@@ -9,11 +9,11 @@
  */
 package io.pravega.controller.store.stream;
 
-/**
- * Interface for defining an operation context.
- * A context caches metadata fetches so within a context if for the same entity, multiple
- * read operations against the store are requested, the values are served from the context's cache.
- */
-public interface OperationContext {
-    long getRequestId();
+import io.pravega.controller.store.VersionedMetadata;
+
+interface FetchedValues {
+    <T> void load(String tableName, String key, VersionedMetadata<T> value);
+    <T> VersionedMetadata<T> get(String tableName, String key, Class<T> tClass);
+    void unload(String tableName, String key);
+    void unloadAll();
 }

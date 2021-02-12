@@ -120,7 +120,7 @@ public class ControllerServiceTest {
         streamMetadataTasks = new StreamMetadataTasks(streamStore, bucketStore, taskMetadataStore,
                 segmentHelper, executor, "host", GrpcAuthHelper.getDisabledAuthHelper(), requestTracker);
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore,
-                segmentHelper, executor, "host", GrpcAuthHelper.getDisabledAuthHelper());
+                segmentHelper, executor, "host", GrpcAuthHelper.getDisabledAuthHelper(), requestTracker);
 
         kvtMetadataTasks = new TableMetadataTasks(kvtStore, segmentHelper,  executor,  executor,
                 "host", GrpcAuthHelper.getDisabledAuthHelper(), requestTracker);

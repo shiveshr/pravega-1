@@ -184,7 +184,7 @@ public abstract class StreamMetadataTasksTest {
 
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(
                 streamStorePartialMock, segmentHelperMock, executor, "host", 
-                new GrpcAuthHelper(authEnabled, "key", 300));
+                new GrpcAuthHelper(authEnabled, "key", 300), requestTracker);
 
         this.streamRequestHandler = new StreamRequestHandler(new AutoScaleTask(streamMetadataTasks, streamStorePartialMock, executor),
                 new ScaleOperationTask(streamMetadataTasks, streamStorePartialMock, executor),

@@ -62,6 +62,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -95,10 +96,10 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     abstract Scope newScope(final String scopeName);
 
     @Override
-    public OperationContext createContext(String scopeName, String streamName) {
-        Function<OperationContext, Scope> scopefunction = x -> newScope(scopeName);
-        Function<OperationContext, Stream> streamfunction = x -> newStream(scopeName, streamName, x);
-        return new OperationContextImpl(scopefunction, streamfunction);
+    public OperationContext createContext(String scopeName, String streamName, long requestId) {
+        Scope scope = newScope(scopeName);
+        Stream stream = newStream(scopeName, streamName);
+        return new OperationContextImpl(scope, stream, requestId);
     }
 
     @Override
@@ -862,7 +863,8 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
         if (context != null) {
             return ((OperationContextImpl) context).getStream();
         } else {
-            return newStream(scope, name, null);
+            // if context is null, generate a new request id. 
+            return newStream(scope, name);
         }
     }
     
@@ -1013,7 +1015,7 @@ public abstract class AbstractStreamMetadataStore implements StreamMetadataStore
     abstract CompletableFuture<Void> recordLastStreamSegment(final String scope, final String stream, int lastActiveSegment,
                                                              OperationContext context, final Executor executor);
 
-    abstract Stream newStream(final String scopeName, final String name, OperationContext context);
+    abstract Stream newStream(final String scopeName, final String name);
 
     abstract CompletableFuture<Int96> getNextCounter();
 

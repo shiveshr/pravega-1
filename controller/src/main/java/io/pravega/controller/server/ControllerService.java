@@ -20,6 +20,7 @@ import io.pravega.common.Timer;
 import io.pravega.common.cluster.Cluster;
 import io.pravega.common.cluster.ClusterException;
 import io.pravega.common.concurrent.Futures;
+import io.pravega.common.tracing.RequestTracker;
 import io.pravega.common.util.RetriesExhaustedException;
 import io.pravega.controller.metrics.StreamMetrics;
 import io.pravega.controller.metrics.TransactionMetrics;
@@ -93,6 +94,7 @@ public class ControllerService {
     private final SegmentHelper segmentHelper;
     private final Executor executor;
     private final Cluster cluster;
+    private final RequestTracker requestTracker;
 
     public CompletableFuture<List<NodeUri>> getControllerServerList() {
         if (cluster == null) {
@@ -223,7 +225,8 @@ public class ControllerService {
     public CompletableFuture<SubscribersResponse> listSubscribers(String scope, String stream) {
         Preconditions.checkNotNull(scope, "scopeName is null");
         Preconditions.checkNotNull(stream, "streamName is null");
-        return streamMetadataTasks.listSubscribers(scope, stream, null);
+        return streamMetadataTasks.listSubscribers(scope, stream, 
+                streamStore.createContext(scope, stream, requestTracker.getRequestIdFor(scope, stream, "listSubscribers")));
 
     }
 
@@ -238,7 +241,8 @@ public class ControllerService {
         Preconditions.checkNotNull(readerGroupId, "readerGroupId is null");
         Preconditions.checkNotNull(truncationStreamCut, "Truncation StreamCut is null");
         Timer timer = new Timer();
-        return streamMetadataTasks.updateSubscriberStreamCut(scope, stream, subscriber, readerGroupId, generation, truncationStreamCut, null)
+        return streamMetadataTasks.updateSubscriberStreamCut(scope, stream, subscriber, readerGroupId, generation, truncationStreamCut,
+                streamStore.createContext(scope, stream, requestTracker.getRequestIdFor(scope, stream, "updateSubscriberStreamCut", subscriber)))
                             .thenApplyAsync(status -> {
                                 reportUpdateTruncationSCMetrics(scope, stream, status, timer.getElapsed());
                                 return UpdateSubscriberStatus.newBuilder().setStatus(status).build();
@@ -339,8 +343,7 @@ public class ControllerService {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Exceptions.checkArgument(epoch >= 0, "epoch", "Epoch cannot be less than 0");
-        OperationContext context = streamStore.createContext(scope, stream);
-        return streamStore.getEpoch(scope, stream, epoch, context, executor)
+        return streamStore.getEpoch(scope, stream, epoch, null, executor)
                           .thenApplyAsync(epochRecord -> getSegmentRanges(epochRecord.getSegments(), scope, stream), executor);
     }
 
@@ -359,17 +362,20 @@ public class ControllerService {
 
     public CompletableFuture<Map<SegmentRange, List<Long>>> getSegmentsImmediatelyFollowing(SegmentId segment) {
         Preconditions.checkNotNull(segment, "segment");
-        OperationContext context = streamStore.createContext(segment.getStreamInfo().getScope(), segment
-                .getStreamInfo().getStream());
-        return streamStore.getSuccessors(segment.getStreamInfo().getScope(),
-                segment.getStreamInfo().getStream(),
+        String scope = segment.getStreamInfo().getScope();
+        String stream = segment.getStreamInfo().getStream();
+        long requestId = requestTracker.getRequestIdFor(scope, stream, "getSegmentsImmediatelyFollowing", 
+                Long.toString(segment.getSegmentId()));
+        OperationContext context = streamStore.createContext(scope, stream, requestId);
+        return streamStore.getSuccessors(scope,
+                stream,
                 segment.getSegmentId(),
                 context,
                 executor)
                 .thenApply(successors -> successors.entrySet().stream()
                         .collect(Collectors.toMap(
-                                entry -> ModelHelper.createSegmentRange(segment.getStreamInfo().getScope(),
-                                                segment.getStreamInfo().getStream(), entry.getKey().segmentId(),
+                                entry -> ModelHelper.createSegmentRange(scope,
+                                        stream, entry.getKey().segmentId(),
                                                 entry.getKey().getKeyStart(),
                                                 entry.getKey().getKeyEnd()),
                                 Map.Entry::getValue)));

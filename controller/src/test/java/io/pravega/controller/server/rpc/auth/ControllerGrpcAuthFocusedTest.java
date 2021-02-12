@@ -176,7 +176,7 @@ public class ControllerGrpcAuthFocusedTest {
                 EXECUTOR, "host", authHelper, requestTracker, helper);
 
         streamTransactionMetadataTasks = new StreamTransactionMetadataTasks(streamStore, segmentHelper,
-                EXECUTOR, "host", authHelper);
+                EXECUTOR, "host", authHelper, requestTracker);
 
         kvtMetadataTasks = new TableMetadataTasks(kvtStore,  segmentHelper,
                 EXECUTOR, EXECUTOR, "host", authHelper, requestTracker, helper);

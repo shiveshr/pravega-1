@@ -119,22 +119,30 @@ class PravegaTablesStream extends PersistentStreamBase {
     private final AtomicReference<String> idRef;
     private final ZkOrderedStore txnCommitOrderer;
     private final ScheduledExecutorService executor;
-    private final Context context;
+    private final Fetched fetched;
     private final long operationStartTime;
-
+    private final long requestId;
+    
     @VisibleForTesting
     PravegaTablesStream(final String scopeName, final String streamName, PravegaTablesStoreHelper storeHelper, ZkOrderedStore txnCommitOrderer,
                         Supplier<Integer> currentBatchSupplier, Supplier<CompletableFuture<String>> streamsInScopeTableNameSupplier,
-                        ScheduledExecutorService executor, boolean withContext) {
+                        ScheduledExecutorService executor) {
         this(scopeName, streamName, storeHelper, txnCommitOrderer, currentBatchSupplier, HistoryTimeSeries.HISTORY_CHUNK_SIZE,
-                SealedSegmentsMapShard.SHARD_SIZE, streamsInScopeTableNameSupplier, executor, withContext);
+                SealedSegmentsMapShard.SHARD_SIZE, streamsInScopeTableNameSupplier, executor, Long.MIN_VALUE, false);
     }
-
+    
+    PravegaTablesStream(final String scopeName, final String streamName, PravegaTablesStoreHelper storeHelper, ZkOrderedStore txnCommitOrderer,
+                        Supplier<Integer> currentBatchSupplier, Supplier<CompletableFuture<String>> streamsInScopeTableNameSupplier,
+                        ScheduledExecutorService executor, long requestId, boolean reuseFetchedValues) {
+        this(scopeName, streamName, storeHelper, txnCommitOrderer, currentBatchSupplier, HistoryTimeSeries.HISTORY_CHUNK_SIZE,
+                SealedSegmentsMapShard.SHARD_SIZE, streamsInScopeTableNameSupplier, executor, requestId, reuseFetchedValues);
+    }
+    
     @VisibleForTesting
     PravegaTablesStream(final String scopeName, final String streamName, PravegaTablesStoreHelper storeHelper, ZkOrderedStore txnCommitOrderer,
                         Supplier<Integer> currentBatchSupplier, int chunkSize, int shardSize,
-                        Supplier<CompletableFuture<String>> streamsInScopeTableNameSupplier, ScheduledExecutorService executor,
-                        boolean withContext) {
+                        Supplier<CompletableFuture<String>> streamsInScopeTableNameSupplier, ScheduledExecutorService executor, 
+                        long requestId, boolean reuseFetchedValues) {
         super(scopeName, streamName, chunkSize, shardSize);
         this.storeHelper = storeHelper;
         this.txnCommitOrderer = txnCommitOrderer;
@@ -142,7 +150,8 @@ class PravegaTablesStream extends PersistentStreamBase {
         this.streamsInScopeTableNameSupplier = streamsInScopeTableNameSupplier;
         this.idRef = new AtomicReference<>(null);
         this.executor = executor;
-        this.context = withContext ? new Context() : null;
+        this.fetched = reuseFetchedValues ? new Fetched() : null;
+        this.requestId = requestId;
         this.operationStartTime = System.currentTimeMillis();
     }
 
@@ -281,7 +290,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     public CompletableFuture<Long> getCreationTime() {
         return getMetadataTable()
                 .thenCompose(metadataTable -> 
-                        getAndLoadToContext(metadataTable, CREATION_TIME_KEY, Long.class, BYTES_TO_LONG_FUNCTION))
+                        getAndLoad(metadataTable, CREATION_TIME_KEY, Long.class, BYTES_TO_LONG_FUNCTION))
                 .thenApply(VersionedMetadata::getObject);
     }
 
@@ -295,7 +304,7 @@ class PravegaTablesStream extends PersistentStreamBase {
                           return getMetadataTable()
                                   .thenCompose(metaTable -> {
                                       Subscribers newSubscribers = Subscribers.add(subscriberSetRecord.getObject(), newSubscriber);
-                                      return updateAndLoadToContext(metaTable, SUBSCRIBER_SET_KEY, newSubscribers,
+                                      return updateAndLoad(metaTable, SUBSCRIBER_SET_KEY, newSubscribers,
                                               Subscribers::toBytes, subscriberSetRecord.getVersion());
                                   });
                       }
@@ -308,7 +317,7 @@ class PravegaTablesStream extends PersistentStreamBase {
                                     final StreamSubscriber newSubscriberRecord = new StreamSubscriber(newSubscriber, newGeneration,
                                                                                                         ImmutableMap.of(), System.currentTimeMillis());
                                     return Futures.toVoid(getMetadataTable().thenApply(metadataTable -> 
-                                            addAndLoadToContext(metadataTable, getKeyForSubscriber(newSubscriber),
+                                            addAndLoad(metadataTable, getKeyForSubscriber(newSubscriber),
                                                     newSubscriberRecord, StreamSubscriber::toBytes, true)));
                                 } else {
                                     // just update the generation if subscriber already exists...
@@ -330,7 +339,7 @@ class PravegaTablesStream extends PersistentStreamBase {
                 .thenCompose(subscriberSetRecord -> {
                     if (subscriberSetRecord == null) {
                         return Futures.toVoid(getMetadataTable()
-                                .thenCompose(metadataTable -> addAndLoadToContext(metadataTable, SUBSCRIBER_SET_KEY, 
+                                .thenCompose(metadataTable -> addAndLoad(metadataTable, SUBSCRIBER_SET_KEY, 
                                         Subscribers.EMPTY_SET, Subscribers::toBytes, true)));
                     } else {
                         return CompletableFuture.completedFuture(null);
@@ -342,16 +351,16 @@ class PravegaTablesStream extends PersistentStreamBase {
         return getMetadataTable()
                 .thenCompose(table -> {
                     if (ignoreCached) {
-                        unloadFromContext(table, SUBSCRIBER_SET_KEY);
+                        unload(table, SUBSCRIBER_SET_KEY);
                     }
-                    return getAndLoadToContext(table, SUBSCRIBER_SET_KEY, Subscribers.class, Subscribers::fromBytes);
+                    return getAndLoad(table, SUBSCRIBER_SET_KEY, Subscribers.class, Subscribers::fromBytes);
                 });
     }
 
     @Override
     CompletableFuture<Version> setSubscriberData(final VersionedMetadata<StreamSubscriber> streamSubscriber) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, getKeyForSubscriber(streamSubscriber.getObject().getSubscriber()),
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, getKeyForSubscriber(streamSubscriber.getObject().getSubscriber()),
                         streamSubscriber.getObject(), StreamSubscriber::toBytes, streamSubscriber.getVersion()));
     }
 
@@ -368,7 +377,7 @@ class PravegaTablesStream extends PersistentStreamBase {
                             .thenCompose(subscriberSetRecord -> {
                                 if (subscriberSetRecord.getObject().getSubscribers().contains(subscriber)) {
                                     Subscribers subSet = Subscribers.remove(subscriberSetRecord.getObject(), subscriber);
-                                    return Futures.toVoid(updateAndLoadToContext(table, SUBSCRIBER_SET_KEY, subSet, x -> x.toBytes(), subscriberSetRecord.getVersion()));
+                                    return Futures.toVoid(updateAndLoad(table, SUBSCRIBER_SET_KEY, subSet, x -> x.toBytes(), subscriberSetRecord.getVersion()));
                                 }
                                 return CompletableFuture.completedFuture(null);
                             })));
@@ -403,19 +412,19 @@ class PravegaTablesStream extends PersistentStreamBase {
                                 .thenCompose(epochWithTxnTable -> storeHelper.expectingDataNotFound(
                                         storeHelper.deleteTable(epochWithTxnTable, false), null))
                                 .thenCompose(deleted -> storeHelper.deleteTable(getMetadataTableName(id), false))))
-                .thenAccept(v -> clearContext());
+                .thenAccept(v -> clearFetched());
     }
 
     @Override
     CompletableFuture<Void> createRetentionSetDataIfAbsent(RetentionSet data) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> Futures.toVoid(addAndLoadToContext(metadataTable, RETENTION_SET_KEY, data, RetentionSet::toBytes, true)));
+                .thenCompose(metadataTable -> Futures.toVoid(addAndLoad(metadataTable, RETENTION_SET_KEY, data, RetentionSet::toBytes, true)));
     }
 
     @Override
     CompletableFuture<VersionedMetadata<RetentionSet>> getRetentionSetData() {
         return getMetadataTable()
-                .thenCompose(metadataTable -> getAndLoadToContext(metadataTable, RETENTION_SET_KEY, RetentionSet.class, 
+                .thenCompose(metadataTable -> getAndLoad(metadataTable, RETENTION_SET_KEY, RetentionSet.class, 
                         RetentionSet::fromBytes));
     }
 
@@ -423,14 +432,14 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<Version> updateRetentionSetData(VersionedMetadata<RetentionSet> retention) {
         return getMetadataTable()
                 .thenCompose(metadataTable -> 
-                        updateAndLoadToContext(metadataTable, RETENTION_SET_KEY, retention.getObject(), RetentionSet::toBytes, retention.getVersion()));
+                        updateAndLoad(metadataTable, RETENTION_SET_KEY, retention.getObject(), RetentionSet::toBytes, retention.getVersion()));
     }
 
     @Override
     CompletableFuture<Void> createStreamCutRecordData(long recordingTime, StreamCutRecord record) {
         String key = String.format(RETENTION_STREAM_CUT_RECORD_KEY_FORMAT, recordingTime);
         return getMetadataTable()
-                .thenCompose(metadataTable -> Futures.toVoid(addAndLoadToContext(metadataTable, key, record, 
+                .thenCompose(metadataTable -> Futures.toVoid(addAndLoad(metadataTable, key, record, 
                         StreamCutRecord::toBytes, true)));
     }
 
@@ -438,7 +447,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<VersionedMetadata<StreamCutRecord>> getStreamCutRecordData(long recordingTime) {
         String key = String.format(RETENTION_STREAM_CUT_RECORD_KEY_FORMAT, recordingTime);
         return getMetadataTable()
-                .thenCompose(metadataTable -> getAndLoadToContext(metadataTable, key, StreamCutRecord.class,
+                .thenCompose(metadataTable -> getAndLoad(metadataTable, key, StreamCutRecord.class,
                         StreamCutRecord::fromBytes));
     }
 
@@ -455,7 +464,7 @@ class PravegaTablesStream extends PersistentStreamBase {
         String key = String.format(HISTORY_TIMESERIES_CHUNK_FORMAT, chunkNumber);
         return getMetadataTable()
                 .thenCompose(metadataTable -> 
-                        Futures.toVoid(addAndLoadToContext(metadataTable, key, data, HistoryTimeSeries::toBytes, true)));
+                        Futures.toVoid(addAndLoad(metadataTable, key, data, HistoryTimeSeries::toBytes, true)));
     }
 
     @Override
@@ -464,10 +473,10 @@ class PravegaTablesStream extends PersistentStreamBase {
         return getMetadataTable()
                 .thenCompose(metadataTable -> {
                     if (ignoreCached) {
-                        unloadFromContext(metadataTable, key);
+                        unload(metadataTable, key);
                         storeHelper.invalidateCache(metadataTable, key);
                     }
-                    return getAndLoadToContext(metadataTable, key, HistoryTimeSeries.class, HistoryTimeSeries::fromBytes);
+                    return getAndLoad(metadataTable, key, HistoryTimeSeries.class, HistoryTimeSeries::fromBytes);
                 });
     }
 
@@ -475,7 +484,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<Version> updateHistoryTimeSeriesChunkData(int chunkNumber, VersionedMetadata<HistoryTimeSeries> data) {
         String key = String.format(HISTORY_TIMESERIES_CHUNK_FORMAT, chunkNumber);
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, key, data.getObject(), 
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, key, data.getObject(), 
                         HistoryTimeSeries::toBytes, data.getVersion()));
     }
 
@@ -483,14 +492,14 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<Void> createCurrentEpochRecordDataIfAbsent(EpochRecord data) {
         return getMetadataTable()
                 .thenCompose(metadataTable -> {
-                    return Futures.toVoid(addAndLoadToContext(metadataTable, CURRENT_EPOCH_KEY, data.getEpoch(), INTEGER_TO_BYTES_FUNCTION, true));
+                    return Futures.toVoid(addAndLoad(metadataTable, CURRENT_EPOCH_KEY, data.getEpoch(), INTEGER_TO_BYTES_FUNCTION, true));
                 });
     }
 
     @Override
     CompletableFuture<Version> updateCurrentEpochRecordData(VersionedMetadata<EpochRecord> data) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, CURRENT_EPOCH_KEY, data.getObject().getEpoch(), 
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, CURRENT_EPOCH_KEY, data.getObject().getEpoch(), 
                         INTEGER_TO_BYTES_FUNCTION, data.getVersion()));
     }
 
@@ -499,10 +508,10 @@ class PravegaTablesStream extends PersistentStreamBase {
         return getMetadataTable()
                 .thenCompose(metadataTable -> {
                     if (ignoreCached) {
-                        unloadFromContext(metadataTable, CURRENT_EPOCH_KEY);
+                        unload(metadataTable, CURRENT_EPOCH_KEY);
                         storeHelper.invalidateCache(metadataTable, CURRENT_EPOCH_KEY);
                     }
-                    return getAndLoadToContext(metadataTable, CURRENT_EPOCH_KEY, Integer.class, BYTES_TO_INTEGER_FUNCTION)
+                    return getAndLoad(metadataTable, CURRENT_EPOCH_KEY, Integer.class, BYTES_TO_INTEGER_FUNCTION)
                             .thenCompose(versionedEpochNumber -> getEpochRecord(versionedEpochNumber.getObject())
                                               .thenApply(epochRecord -> new VersionedMetadata<>(epochRecord, versionedEpochNumber.getVersion())));
                 });
@@ -512,7 +521,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<Void> createEpochRecordDataIfAbsent(int epoch, EpochRecord data) {
         String key = String.format(EPOCH_RECORD_KEY_FORMAT, epoch);
         return getMetadataTable()
-                .thenCompose(metadataTable -> addAndLoadToContext(metadataTable, key, data, EpochRecord::toBytes, true))
+                .thenCompose(metadataTable -> addAndLoad(metadataTable, key, data, EpochRecord::toBytes, true))
                 .thenCompose(v -> {
                     if (data.getEpoch() == data.getReferenceEpoch()) {
                         // this is an original epoch. we should create transactions in epoch table
@@ -528,7 +537,7 @@ class PravegaTablesStream extends PersistentStreamBase {
         return getMetadataTable()
                 .thenCompose(metadataTable -> {
                     String key = String.format(EPOCH_RECORD_KEY_FORMAT, epoch);
-                    return getAndLoadToContext(metadataTable, key, EpochRecord.class, EpochRecord::fromBytes);
+                    return getAndLoad(metadataTable, key, EpochRecord.class, EpochRecord::fromBytes);
                 });
     }
 
@@ -536,14 +545,14 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<Void> createSealedSegmentSizesMapShardDataIfAbsent(int shard, SealedSegmentsMapShard data) {
         String key = String.format(SEGMENTS_SEALED_SIZE_MAP_SHARD_FORMAT, shard);
         return getMetadataTable()
-                .thenCompose(metadataTable -> Futures.toVoid(addAndLoadToContext(metadataTable, key, data, SealedSegmentsMapShard::toBytes, true)));
+                .thenCompose(metadataTable -> Futures.toVoid(addAndLoad(metadataTable, key, data, SealedSegmentsMapShard::toBytes, true)));
     }
 
     @Override
     CompletableFuture<VersionedMetadata<SealedSegmentsMapShard>> getSealedSegmentSizesMapShardData(int shard) {
         String key = String.format(SEGMENTS_SEALED_SIZE_MAP_SHARD_FORMAT, shard);
         return getMetadataTable()
-                .thenCompose(metadataTable -> getAndLoadToContext(metadataTable, key, SealedSegmentsMapShard.class,
+                .thenCompose(metadataTable -> getAndLoad(metadataTable, key, SealedSegmentsMapShard.class,
                          SealedSegmentsMapShard::fromBytes));
     }
 
@@ -551,7 +560,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<Version> updateSealedSegmentSizesMapShardData(int shard, VersionedMetadata<SealedSegmentsMapShard> data) {
         String key = String.format(SEGMENTS_SEALED_SIZE_MAP_SHARD_FORMAT, shard);
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, key, data.getObject(), SealedSegmentsMapShard::toBytes, data.getVersion()));
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, key, data.getObject(), SealedSegmentsMapShard::toBytes, data.getVersion()));
     }
 
     @Override
@@ -568,14 +577,14 @@ class PravegaTablesStream extends PersistentStreamBase {
 
         return getMetadataTable()
                 .thenCompose(metadataTable -> storeHelper.addNewEntriesIfAbsent(metadataTable, map)
-                                                         .thenAccept(v -> loadMultipleEntriesToContext(metadataTable, forContext)));
+                                                         .thenAccept(v -> loadMultipleEntries(metadataTable, forContext)));
     }
 
     @Override
     CompletableFuture<VersionedMetadata<Integer>> getSegmentSealedRecordData(long segmentId) {
         String key = String.format(SEGMENT_SEALED_EPOCH_KEY_FORMAT, segmentId);
         return getMetadataTable()
-                .thenCompose(metadataTable -> getAndLoadToContext(metadataTable, key, Integer.class,
+                .thenCompose(metadataTable -> getAndLoad(metadataTable, key, Integer.class,
                         BYTES_TO_INTEGER_FUNCTION));
     }
 
@@ -583,13 +592,13 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<Void> createEpochTransitionIfAbsent(EpochTransitionRecord epochTransition) {
         return getMetadataTable()
                 .thenCompose(metadataTable -> 
-                        Futures.toVoid(addAndLoadToContext(metadataTable, EPOCH_TRANSITION_KEY, epochTransition, EpochTransitionRecord::toBytes, true)));
+                        Futures.toVoid(addAndLoad(metadataTable, EPOCH_TRANSITION_KEY, epochTransition, EpochTransitionRecord::toBytes, true)));
     }
 
     @Override
     CompletableFuture<Version> updateEpochTransitionNode(VersionedMetadata<EpochTransitionRecord> epochTransition) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, EPOCH_TRANSITION_KEY,
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, EPOCH_TRANSITION_KEY,
                             epochTransition.getObject(), EpochTransitionRecord::toBytes, epochTransition.getVersion()));
     }
 
@@ -597,7 +606,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<VersionedMetadata<EpochTransitionRecord>> getEpochTransitionNode() {
         return getMetadataTable()
                 .thenCompose(metadataTable -> 
-                        getAndLoadToContext(metadataTable, EPOCH_TRANSITION_KEY, EpochTransitionRecord.class,
+                        getAndLoad(metadataTable, EPOCH_TRANSITION_KEY, EpochTransitionRecord.class,
                                 EpochTransitionRecord::fromBytes));
     }
 
@@ -605,19 +614,19 @@ class PravegaTablesStream extends PersistentStreamBase {
     CompletableFuture<Void> storeCreationTimeIfAbsent(final long creationTime) {
         return getMetadataTable()
                 .thenCompose(metadataTable ->
-                        Futures.toVoid(addAndLoadToContext(metadataTable, CREATION_TIME_KEY, creationTime, LONG_TO_BYTES_FUNCTION, true)));
+                        Futures.toVoid(addAndLoad(metadataTable, CREATION_TIME_KEY, creationTime, LONG_TO_BYTES_FUNCTION, true)));
     }
 
     @Override
     public CompletableFuture<Void> createConfigurationIfAbsent(final StreamConfigurationRecord configuration) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> Futures.toVoid(addAndLoadToContext(metadataTable, CONFIGURATION_KEY, configuration, StreamConfigurationRecord::toBytes, true)));
+                .thenCompose(metadataTable -> Futures.toVoid(addAndLoad(metadataTable, CONFIGURATION_KEY, configuration, StreamConfigurationRecord::toBytes, true)));
     }
 
     @Override
     public CompletableFuture<Void> createStateIfAbsent(final StateRecord state) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> Futures.toVoid(addAndLoadToContext(metadataTable, STATE_KEY, state, StateRecord::toBytes, true)));
+                .thenCompose(metadataTable -> Futures.toVoid(addAndLoad(metadataTable, STATE_KEY, state, StateRecord::toBytes, true)));
     }
 
     @Override
@@ -625,14 +634,14 @@ class PravegaTablesStream extends PersistentStreamBase {
         final String key = String.format(SEGMENT_MARKER_PATH_FORMAT, segmentId);
 
         return getMetadataTable()
-                .thenCompose(metadataTable -> Futures.toVoid(addAndLoadToContext(metadataTable, key, timestamp, LONG_TO_BYTES_FUNCTION, true)));
+                .thenCompose(metadataTable -> Futures.toVoid(addAndLoad(metadataTable, key, timestamp, LONG_TO_BYTES_FUNCTION, true)));
     }
 
     @Override
     CompletableFuture<Version> updateMarkerData(long segmentId, VersionedMetadata<Long> data) {
         final String key = String.format(SEGMENT_MARKER_PATH_FORMAT, segmentId);
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, key, data.getObject(), LONG_TO_BYTES_FUNCTION, data.getVersion()));
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, key, data.getObject(), LONG_TO_BYTES_FUNCTION, data.getVersion()));
     }
 
     @Override
@@ -640,7 +649,7 @@ class PravegaTablesStream extends PersistentStreamBase {
         final String key = String.format(SEGMENT_MARKER_PATH_FORMAT, segmentId);
         return getMetadataTable().thenCompose(metadataTable ->
                 storeHelper.expectingDataNotFound(
-                        getAndLoadToContext(metadataTable, key, Long.class, BYTES_TO_LONG_FUNCTION), null));
+                        getAndLoad(metadataTable, key, Long.class, BYTES_TO_LONG_FUNCTION), null));
     }
 
     @Override
@@ -716,7 +725,7 @@ class PravegaTablesStream extends PersistentStreamBase {
                                      VersionedMetadata<ActiveTxnRecord> txn = res.get(i);
                                      list.add(txn.getObject());
                                      if (!txn.equals(NON_EXISTENT_TXN)) {
-                                         loadEntryToContext(epochTxnTable, txnIds.get(i), txn);
+                                         loadEntry(epochTxnTable, txnIds.get(i), txn);
                                      }
                                  }
                                  return list;
@@ -732,7 +741,7 @@ class PravegaTablesStream extends PersistentStreamBase {
                         result.put(x.getKey(), x.getValue());
                         return true;
             }).thenApply(v -> {
-                loadMultipleEntriesToContext(tableName, result);
+                loadMultipleEntries(tableName, result);
                 return result.entrySet().stream().collect(Collectors.toMap(x -> UUID.fromString(x.getKey()), x -> x.getValue().getObject()));
             }), Collections.emptyMap()));
     }
@@ -745,7 +754,7 @@ class PravegaTablesStream extends PersistentStreamBase {
         //  2. create txns-in-epoch table
         //  3. create txn in txns-in-epoch
         return getTransactionsInEpochTable(epoch)
-                .thenCompose(epochTable -> addAndLoadToContext(epochTable, txId.toString(), txnRecord, ActiveTxnRecord::toBytes, true));
+                .thenCompose(epochTable -> addAndLoad(epochTable, txId.toString(), txnRecord, ActiveTxnRecord::toBytes, true));
     }
 
     private CompletableFuture<Void> createTransactionsInEpochTable(int epoch) {
@@ -761,14 +770,14 @@ class PravegaTablesStream extends PersistentStreamBase {
     @Override
     CompletableFuture<VersionedMetadata<ActiveTxnRecord>> getActiveTx(final int epoch, final UUID txId) {
         return getTransactionsInEpochTable(epoch)
-                    .thenCompose(epochTxnTable -> getAndLoadToContext(epochTxnTable, txId.toString(), ActiveTxnRecord.class, 
+                    .thenCompose(epochTxnTable -> getAndLoad(epochTxnTable, txId.toString(), ActiveTxnRecord.class, 
                             ActiveTxnRecord::fromBytes));
     }
 
     @Override
     CompletableFuture<Version> updateActiveTx(final int epoch, final UUID txId, final VersionedMetadata<ActiveTxnRecord> data) {
         return getTransactionsInEpochTable(epoch)
-                .thenCompose(epochTxnTable -> updateAndLoadToContext(epochTxnTable, txId.toString(), data.getObject(), 
+                .thenCompose(epochTxnTable -> updateAndLoad(epochTxnTable, txId.toString(), data.getObject(), 
                         ActiveTxnRecord::toBytes, data.getVersion()));
     }
 
@@ -906,14 +915,14 @@ class PravegaTablesStream extends PersistentStreamBase {
     @Override
     public CompletableFuture<Void> createTruncationDataIfAbsent(final StreamTruncationRecord truncationRecord) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> Futures.toVoid(addAndLoadToContext(metadataTable,
+                .thenCompose(metadataTable -> Futures.toVoid(addAndLoad(metadataTable,
                         TRUNCATION_KEY, truncationRecord, StreamTruncationRecord::toBytes, true)));
     }
 
     @Override
     CompletableFuture<Version> setTruncationData(final VersionedMetadata<StreamTruncationRecord> truncationRecord) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, TRUNCATION_KEY,
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, TRUNCATION_KEY,
                         truncationRecord.getObject(), StreamTruncationRecord::toBytes, truncationRecord.getVersion()));
     }
 
@@ -922,10 +931,10 @@ class PravegaTablesStream extends PersistentStreamBase {
         return getMetadataTable()
                 .thenCompose(metadataTable -> {
                     if (ignoreCached) {
-                        unloadFromContext(metadataTable, TRUNCATION_KEY);
+                        unload(metadataTable, TRUNCATION_KEY);
                     }
 
-                    return getAndLoadToContext(metadataTable, TRUNCATION_KEY, StreamTruncationRecord.class, 
+                    return getAndLoad(metadataTable, TRUNCATION_KEY, StreamTruncationRecord.class, 
                             StreamTruncationRecord::fromBytes);
                 });
     }
@@ -933,7 +942,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     @Override
     CompletableFuture<Version> setConfigurationData(final VersionedMetadata<StreamConfigurationRecord> configuration) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, CONFIGURATION_KEY,
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, CONFIGURATION_KEY,
                         configuration.getObject(), StreamConfigurationRecord::toBytes, configuration.getVersion()));
     }
 
@@ -942,10 +951,10 @@ class PravegaTablesStream extends PersistentStreamBase {
         return getMetadataTable()
                 .thenCompose(metadataTable -> {
                     if (ignoreCached) {
-                        unloadFromContext(metadataTable, CONFIGURATION_KEY);
+                        unload(metadataTable, CONFIGURATION_KEY);
                     }
 
-                    return getAndLoadToContext(metadataTable, CONFIGURATION_KEY, StreamConfigurationRecord.class,
+                    return getAndLoad(metadataTable, CONFIGURATION_KEY, StreamConfigurationRecord.class,
                             StreamConfigurationRecord::fromBytes);
                 });
     }
@@ -953,7 +962,7 @@ class PravegaTablesStream extends PersistentStreamBase {
     @Override
     CompletableFuture<Version> setStateData(final VersionedMetadata<StateRecord> state) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, STATE_KEY,
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, STATE_KEY,
                         state.getObject(), StateRecord::toBytes, state.getVersion()));
     }
 
@@ -962,31 +971,31 @@ class PravegaTablesStream extends PersistentStreamBase {
         return getMetadataTable()
                 .thenCompose(metadataTable -> {
                     if (ignoreCached) {
-                        unloadFromContext(metadataTable, STATE_KEY);
+                        unload(metadataTable, STATE_KEY);
                     }
 
-                    return getAndLoadToContext(metadataTable, STATE_KEY, StateRecord.class, StateRecord::fromBytes);
+                    return getAndLoad(metadataTable, STATE_KEY, StateRecord.class, StateRecord::fromBytes);
                 });
     }
 
     @Override
     CompletableFuture<Void> createCommitTxnRecordIfAbsent(CommittingTransactionsRecord committingTxns) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> Futures.toVoid(addAndLoadToContext(
+                .thenCompose(metadataTable -> Futures.toVoid(addAndLoad(
                         metadataTable, COMMITTING_TRANSACTIONS_RECORD_KEY, committingTxns, CommittingTransactionsRecord::toBytes, true)));
     }
 
     @Override
     CompletableFuture<VersionedMetadata<CommittingTransactionsRecord>> getCommitTxnRecord() {
         return getMetadataTable()
-                .thenCompose(metadataTable -> getAndLoadToContext(metadataTable, COMMITTING_TRANSACTIONS_RECORD_KEY, 
+                .thenCompose(metadataTable -> getAndLoad(metadataTable, COMMITTING_TRANSACTIONS_RECORD_KEY, 
                         CommittingTransactionsRecord.class, CommittingTransactionsRecord::fromBytes));
     }
 
     @Override
     CompletableFuture<Version> updateCommittingTxnRecord(VersionedMetadata<CommittingTransactionsRecord> update) {
         return getMetadataTable()
-                .thenCompose(metadataTable -> updateAndLoadToContext(metadataTable, COMMITTING_TRANSACTIONS_RECORD_KEY,
+                .thenCompose(metadataTable -> updateAndLoad(metadataTable, COMMITTING_TRANSACTIONS_RECORD_KEY,
                         update.getObject(), CommittingTransactionsRecord::toBytes, update.getVersion()));
     }
 
@@ -1055,20 +1064,20 @@ class PravegaTablesStream extends PersistentStreamBase {
             return SUBSCRIBER_KEY_PREFIX + subscriber;
     }
 
-    private <X> CompletableFuture<VersionedMetadata<X>> getAndLoadToContext(String tableName, String key, Class<X> tClass,
-                                                                            Function<byte[], X> fromBytes) {
-        if (context != null) {
-            VersionedMetadata<X> value = context.get(tableName, key, tClass);
+    private <X> CompletableFuture<VersionedMetadata<X>> getAndLoad(String tableName, String key, Class<X> tClass,
+                                                                   Function<byte[], X> fromBytes) {
+        if (fetched != null) {
+            VersionedMetadata<X> value = fetched.get(tableName, key, tClass);
             
             return value != null ? CompletableFuture.completedFuture(value) :
                     storeHelper.getCachedOrLoad(tableName, key, fromBytes, operationStartTime)
                           .thenApply(fetched -> {
-                              context.load(tableName, key, fetched);
+                              this.fetched.load(tableName, key, fetched);
                               return fetched;
                           })
                           .exceptionally(e -> {
                               if (DATA_NOT_FOUND_PREDICATE.test(e)) {
-                                  unloadFromContext(tableName, key);
+                                  unload(tableName, key);
                               }
                               throw new CompletionException(e);
                           });
@@ -1077,9 +1086,9 @@ class PravegaTablesStream extends PersistentStreamBase {
         }
     }
 
-    private void unloadFromContext(String tableName, String key) {
-        if (context != null) {
-            context.unload(tableName, key);
+    private void unload(String tableName, String key) {
+        if (fetched != null) {
+            fetched.unload(tableName, key);
         }
         storeHelper.invalidateCache(tableName, key);
     }
@@ -1088,42 +1097,42 @@ class PravegaTablesStream extends PersistentStreamBase {
         CompletableFuture<Void> future = version == null ? storeHelper.removeEntry(tableName, key) :
                 storeHelper.removeEntry(tableName, key, version);
         return future.thenApply(v -> {
-                       if (context != null) {
-                           context.unload(tableName, key);
+                       if (fetched != null) {
+                           fetched.unload(tableName, key);
                        }
                        return v;
                    });
     }
 
-    private <T> CompletableFuture<Version> updateAndLoadToContext(String tableName, String key, T value, Function<T, byte[]> toBytes, Version version) {
+    private <T> CompletableFuture<Version> updateAndLoad(String tableName, String key, T value, Function<T, byte[]> toBytes, Version version) {
         return storeHelper.updateEntry(tableName, key, toBytes, value, version)
                           .thenApply(v -> {
-                              if (context != null) {
-                                  context.load(tableName, key, new VersionedMetadata<>(value, v));
+                              if (fetched != null) {
+                                  fetched.load(tableName, key, new VersionedMetadata<>(value, v));
                               }
                               return v;
                           })
                           .exceptionally(e -> {
                               if (WRITE_CONFLICT_PREDICATE.test(e)) {
-                                  unloadFromContext(tableName, key);
+                                  unload(tableName, key);
                                   storeHelper.invalidateCache(tableName, key);
                               }
                               throw new CompletionException(e);
                           });
     }
 
-    private <T> CompletableFuture<Version> addAndLoadToContext(String tableName, String key, T value, Function<T, byte[]> toBytes, 
-                                                               boolean addIfAbsent) {
+    private <T> CompletableFuture<Version> addAndLoad(String tableName, String key, T value, Function<T, byte[]> toBytes,
+                                                      boolean addIfAbsent) {
         CompletableFuture<Version> future = addIfAbsent ? 
                 storeHelper.addNewEntryIfAbsent(tableName, key, toBytes, value) :
                 storeHelper.addNewEntry(tableName, key, toBytes, value);
         
         return future.thenApply(v -> {
-                       if (context != null) {
+                       if (fetched != null) {
                            // If version is null then we were unable to add the entry as it already existed.
-                           // In that case we will not load it in the context. 
+                           // In that case we will not load it in the fetched map. 
                            if (v != null) {
-                               context.load(tableName, key, new VersionedMetadata<>(value, v));
+                               fetched.load(tableName, key, new VersionedMetadata<>(value, v));
                            } 
                        }
                        if (v == null) {
@@ -1133,29 +1142,29 @@ class PravegaTablesStream extends PersistentStreamBase {
                    });
     }
     
-    private <T> void loadEntryToContext(String tableName, String key, VersionedMetadata<T> value) {
-        if (context != null) {
-            context.load(tableName, key, value);
+    private <T> void loadEntry(String tableName, String key, VersionedMetadata<T> value) {
+        if (fetched != null) {
+            fetched.load(tableName, key, value);
         }
     }
 
-    private <T> void loadMultipleEntriesToContext(String tableName, Map<String, VersionedMetadata<T>> updates) {
-        if (context != null) {
-            updates.forEach((x, y) -> context.load(tableName, x, y));
+    private <T> void loadMultipleEntries(String tableName, Map<String, VersionedMetadata<T>> updates) {
+        if (fetched != null) {
+            updates.forEach((x, y) -> fetched.load(tableName, x, y));
         }
     }
 
-    private void clearContext() {
-        if (context != null) {
-            context.unloadAll();
+    private void clearFetched() {
+        if (fetched != null) {
+            fetched.unloadAll();
         }
     }
 
     @Data
-    class Context {
+    private static class Fetched {
         @GuardedBy("$lock")
         private final Map<String, VersionedMetadata<?>> map = new HashMap<>();
-
+        
         @Synchronized
         <T> void load(String tableName, String key, VersionedMetadata<T> value) {
             if (value != null) {

@@ -82,7 +82,7 @@ public class StreamTest extends ThreadPooledTestSuite {
 
         PravegaTablesStream stream = new PravegaTablesStream("test", "test",
                 storeHelper, orderer, () -> 0,
-                scope::getStreamsInScopeTableName, executorService(), true);
+                scope::getStreamsInScopeTableName, executorService());
         testStream(stream);
     }
     
@@ -188,7 +188,7 @@ public class StreamTest extends ThreadPooledTestSuite {
                 PravegaTablesScope scope = new PravegaTablesScope(x, storeHelper);
                 Futures.exceptionallyExpecting(scope.createScope(), e -> Exceptions.unwrap(e) instanceof StoreException.DataExistsException, null).join();
                 scope.addStreamToScope(y).join();
-                return new PravegaTablesStream(x, y, storeHelper, orderer, () -> 0, scope::getStreamsInScopeTableName, executorService(), true);
+                return new PravegaTablesStream(x, y, storeHelper, orderer, () -> 0, scope::getStreamsInScopeTableName, executorService());
             });
         }
     }

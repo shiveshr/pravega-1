@@ -87,7 +87,7 @@ public class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
 
     @Override
     @Synchronized
-    Stream newStream(String scopeName, String name, OperationContext context) {
+    Stream newStream(String scopeName, String name) {
         String key = scopedStreamName(scopeName, name);
         if (streams.containsKey(key)) {
             return streams.get(key);
