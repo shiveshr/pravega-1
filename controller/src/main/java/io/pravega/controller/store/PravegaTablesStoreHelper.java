@@ -156,10 +156,10 @@ public class PravegaTablesStoreHelper {
      * @param tableName table name
      * @return CompletableFuture which when completed will indicate successful creation of table.
      */
-    public CompletableFuture<Void> createTable(String tableName) {
+    public CompletableFuture<Void> createTable(String tableName, long requestId) {
         log.debug("create table called for table: {}", tableName);
 
-        return Futures.toVoid(withRetries(() -> segmentHelper.createTableSegment(tableName, authToken.get(), RequestTag.NON_EXISTENT_ID, false),
+        return Futures.toVoid(withRetries(() -> segmentHelper.createTableSegment(tableName, authToken.get(), requestId, false),
                 () -> String.format("create table: %s", tableName)))
                 .whenCompleteAsync((r, e) -> {
                     if (e != null) {
@@ -179,10 +179,10 @@ public class PravegaTablesStoreHelper {
      * @return CompletableFuture which when completed will indicate that the table was deleted successfully.
      * If mustBeEmpty is set to true and the table is non-empty then the future is failed with StoreException.DataNotEmptyException
      */
-    public CompletableFuture<Void> deleteTable(String tableName, boolean mustBeEmpty) {
+    public CompletableFuture<Void> deleteTable(String tableName, boolean mustBeEmpty, long requestId) {
         log.debug("delete table called for table: {}", tableName);
         return expectingDataNotFound(withRetries(() -> segmentHelper.deleteTableSegment(
-                tableName, mustBeEmpty, authToken.get(), RequestTag.NON_EXISTENT_ID),
+                tableName, mustBeEmpty, authToken.get(), requestId),
                 () -> String.format("delete table: %s", tableName)), null)
                 .thenAcceptAsync(v -> log.debug("table {} deleted successfully", tableName), executor);
     }
@@ -197,14 +197,14 @@ public class PravegaTablesStoreHelper {
      * @return CompletableFuture which when completed will have the version of the key returned by segment store.
      * If the key already exists, it will throw StoreException.DataExistsException.
      */
-    public <T> CompletableFuture<Version> addNewEntry(String tableName, String key, Function<T, byte[]> toBytes, T val) {
+    public <T> CompletableFuture<Version> addNewEntry(String tableName, String key, Function<T, byte[]> toBytes, T val, long requestId) {
         log.trace("addNewEntry called for : {} key : {}", tableName, key);
         byte[] value = toBytes.apply(val);
         List<TableSegmentEntry> entries = Collections.singletonList(
                 TableSegmentEntry.notExists(key.getBytes(Charsets.UTF_8), value));
         Supplier<String> errorMessage = () -> String.format("addNewEntry: key: %s table: %s", key, tableName);
         long time = System.currentTimeMillis();
-        return withRetries(() -> segmentHelper.updateTableEntries(tableName, entries, authToken.get(), RequestTag.NON_EXISTENT_ID),
+        return withRetries(() -> segmentHelper.updateTableEntries(tableName, entries, authToken.get(), requestId),
                 errorMessage, true)
                 .exceptionally(e -> {
                     Throwable unwrap = Exceptions.unwrap(e);
@@ -234,9 +234,9 @@ public class PravegaTablesStoreHelper {
      * @param <T> Type of value to be added
      * @return CompletableFuture which when completed will have added entry to the table if it did not exist.
      */
-    public <T> CompletableFuture<Version> addNewEntryIfAbsent(String tableName, String key, Function<T, byte[]> toBytes, T val) {
+    public <T> CompletableFuture<Version> addNewEntryIfAbsent(String tableName, String key, Function<T, byte[]> toBytes, T val, long requestId) {
         // if entry exists, we will get write conflict in attempting to create it again.
-        return expectingDataExists(addNewEntry(tableName, key, toBytes, val), null);
+        return expectingDataExists(addNewEntry(tableName, key, toBytes, val, requestId), null);
     }
 
     /**
@@ -252,13 +252,13 @@ public class PravegaTablesStoreHelper {
      * @param toAdd map of keys and values to add.
      * @return CompletableFuture which when completed successfully will indicate that all entries have been added successfully.
      */
-    public CompletableFuture<Void> addNewEntriesIfAbsent(String tableName, Map<String, byte[]> toAdd) {
+    public CompletableFuture<Void> addNewEntriesIfAbsent(String tableName, Map<String, byte[]> toAdd, long requestId) {
         List<TableSegmentEntry> entries = toAdd.entrySet().stream().map(x ->
                 TableSegmentEntry.notExists(x.getKey().getBytes(Charsets.UTF_8), x.getValue()))
                                                .collect(Collectors.toList());
         Supplier<String> errorMessage = () -> String.format("addNewEntriesIfAbsent: table: %s", tableName);
         return expectingDataExists(withRetries(() -> segmentHelper.updateTableEntries(tableName, entries, authToken.get(),
-                RequestTag.NON_EXISTENT_ID), errorMessage)
+                requestId), errorMessage)
                 .handle((r, e) -> {
                     releaseEntries(entries);
                     if (e != null) {
@@ -286,14 +286,14 @@ public class PravegaTablesStoreHelper {
      * @param <T> Type of value to be added
      * @return CompletableFuture which when completed will indicate that the value is updated in the table.
      */
-    public <T> CompletableFuture<Version> updateEntry(String tableName, String key, Function<T, byte[]> toBytes, T val, Version ver) {
+    public <T> CompletableFuture<Version> updateEntry(String tableName, String key, Function<T, byte[]> toBytes, T val, Version ver, long requestId) {
         long version = ver.asLongVersion().getLongValue();
         log.trace("updateEntry entry called for : {} key : {} version {}", tableName, key, version);
         byte[] value = toBytes.apply(val);
         long time = System.currentTimeMillis();
         List<TableSegmentEntry> entries = Collections.singletonList(
                 TableSegmentEntry.versioned(key.getBytes(Charsets.UTF_8), value, version));
-        return withRetries(() -> segmentHelper.updateTableEntries(tableName, entries, authToken.get(), RequestTag.NON_EXISTENT_ID),
+        return withRetries(() -> segmentHelper.updateTableEntries(tableName, entries, authToken.get(), requestId),
                 () -> String.format("updateEntry: key: %s table: %s", key, tableName), true)
                 .thenApplyAsync(x -> {
                     TableSegmentKeyVersion first = x.get(0);
@@ -314,12 +314,12 @@ public class PravegaTablesStoreHelper {
      * @param <T> Type of deserialized object
      * @return CompletableFuture which when completed will have the versionedMetadata retrieved from the store.
      */
-    public <T> CompletableFuture<VersionedMetadata<T>> getEntry(String tableName, String key, Function<byte[], T> fromBytes) {
+    public <T> CompletableFuture<VersionedMetadata<T>> getEntry(String tableName, String key, Function<byte[], T> fromBytes, long requestId) {
         log.trace("get entry called for : {} key : {}", tableName, key);
         List<TableSegmentKey> keys = Collections.singletonList(TableSegmentKey.unversioned(key.getBytes(Charsets.UTF_8)));
         CompletableFuture<VersionedMetadata<T>> result = new CompletableFuture<>();
         String message = "get entry: key: %s table: %s";
-        withRetries(() -> segmentHelper.readTable(tableName, keys, authToken.get(), RequestTag.NON_EXISTENT_ID),
+        withRetries(() -> segmentHelper.readTable(tableName, keys, authToken.get(), requestId),
                 () -> String.format(message, key, tableName))
                 .thenApplyAsync(x -> {
                     try {
@@ -363,14 +363,14 @@ public class PravegaTablesStoreHelper {
      * @return CompletableFuture which when completed will have the versionedMetadata retrieved from the store.
      */
     public <T> CompletableFuture<VersionedMetadata<T>> getCachedOrLoad(String tableName, String key, Function<byte[], T> fromBytes,
-                                                                       long afterTime) {
+                                                                       long afterTime, long requestId) {
         log.trace("get entry called for : {} key : {}", tableName, key);
         VersionedMetadata<Object> cached = getCachedData(tableName, key, afterTime);
         if (cached != null) {
             return CompletableFuture.completedFuture(getVersionedMetadata(cached));
         } else {
             long time = System.currentTimeMillis();
-            return getEntry(tableName, key, fromBytes)
+            return getEntry(tableName, key, fromBytes, requestId)
                     .thenApply(r -> {
                         putInCache(tableName, key, r, time);
                         return r;
@@ -389,7 +389,7 @@ public class PravegaTablesStoreHelper {
      * @return CompletableFuture which when completed will have the versionedMetadata retrieved from the store.
      */
     public <T> CompletableFuture<List<VersionedMetadata<T>>> getEntries(String tableName, List<String> keys, 
-                                                                        Function<byte[], T> fromBytes, VersionedMetadata<T> nonExistent) {
+                                                                        Function<byte[], T> fromBytes, VersionedMetadata<T> nonExistent, long requestId) {
         log.trace("get entries called for : {} keys : {}", tableName, keys);
         List<TableSegmentKey> tableKeys = keys.stream().map(key -> TableSegmentKey.unversioned(key.getBytes(Charsets.UTF_8)))
                                               .collect(Collectors.toList());
@@ -398,7 +398,7 @@ public class PravegaTablesStoreHelper {
         String message = "get entry: key: %s table: %s";
         long time = System.currentTimeMillis();
 
-        withRetries(() -> segmentHelper.readTable(tableName, tableKeys, authToken.get(), RequestTag.NON_EXISTENT_ID),
+        withRetries(() -> segmentHelper.readTable(tableName, tableKeys, authToken.get(), requestId),
                 () -> String.format(message, keys, tableName))
                 .thenApplyAsync(entries -> {
                     try {
@@ -438,8 +438,8 @@ public class PravegaTablesStoreHelper {
      * @return CompletableFuture which when completed will indicate successful deletion of entry from the table.
      * It ignores DataNotFound exception.
      */
-    public CompletableFuture<Void> removeEntry(String tableName, String key) {
-        return removeEntry(tableName, key, null);
+    public CompletableFuture<Void> removeEntry(String tableName, String key, long requestId) {
+        return removeEntry(tableName, key, null, requestId);
     }
 
     /**
@@ -450,14 +450,14 @@ public class PravegaTablesStoreHelper {
      * @return CompletableFuture which when completed will indicate successful deletion of entry from the table. 
      * It ignores DataNotFound exception. 
      */
-    public CompletableFuture<Void> removeEntry(String tableName, String key, Version ver) {
+    public CompletableFuture<Void> removeEntry(String tableName, String key, Version ver, long requestId) {
         log.trace("remove entry called for : {} key : {}", tableName, key);
         TableSegmentKey tableKey = ver == null
                 ? TableSegmentKey.unversioned(key.getBytes(Charsets.UTF_8))
                 : TableSegmentKey.versioned(key.getBytes(Charsets.UTF_8), ver.asLongVersion().getLongValue());
 
         return expectingDataNotFound(withRetries(() -> segmentHelper.removeTableKeys(
-                tableName, Collections.singletonList(tableKey), authToken.get(), RequestTag.NON_EXISTENT_ID),
+                tableName, Collections.singletonList(tableKey), authToken.get(), requestId),
                 () -> String.format("remove entry: key: %s table: %s", key, tableName)), null)
                 .thenAcceptAsync(v -> {
                     invalidateCache(tableName, key);
@@ -475,14 +475,14 @@ public class PravegaTablesStoreHelper {
      * @param keys keys to delete
      * @return CompletableFuture which when completed will have entries removed from the table.
      */
-    public CompletableFuture<Void> removeEntries(String tableName, Collection<String> keys) {
+    public CompletableFuture<Void> removeEntries(String tableName, Collection<String> keys, long requestId) {
         log.trace("remove entry called for : {} keys : {}", tableName, keys);
 
         List<TableSegmentKey> listOfKeys = keys.stream()
                                                .map(x -> TableSegmentKey.unversioned(x.getBytes(Charsets.UTF_8)))
                                                .collect(Collectors.toList());
         return expectingDataNotFound(withRetries(() -> segmentHelper.removeTableKeys(
-                tableName, listOfKeys, authToken.get(), RequestTag.NON_EXISTENT_ID),
+                tableName, listOfKeys, authToken.get(), requestId),
                 () -> String.format("remove entries: keys: %s table: %s", keys.toString(), tableName)), null)
                 .thenAcceptAsync(v -> {
                     keys.forEach(key -> invalidateCache(tableName, key));
@@ -499,11 +499,11 @@ public class PravegaTablesStoreHelper {
      * @return CompletableFuture which when completed will have a list of keys of size less than or equal to limit and
      * a new ContinutionToken.
      */
-    public CompletableFuture<Map.Entry<ByteBuf, List<String>>> getKeysPaginated(String tableName, ByteBuf continuationToken, int limit) {
+    public CompletableFuture<Map.Entry<ByteBuf, List<String>>> getKeysPaginated(String tableName, ByteBuf continuationToken, int limit, long requestId) {
         log.trace("get keys paginated called for : {}", tableName);
         return withRetries(() ->
                         segmentHelper.readTableKeys(tableName, limit, IteratorStateImpl.fromBytes(continuationToken), authToken.get(),
-                                RequestTag.NON_EXISTENT_ID),
+                                requestId),
                 () -> String.format("get keys paginated for table: %s", tableName))
                 .thenApplyAsync(result -> {
                     try {
@@ -531,11 +531,11 @@ public class PravegaTablesStoreHelper {
      */
     public <T> CompletableFuture<Map.Entry<ByteBuf, List<Map.Entry<String, VersionedMetadata<T>>>>> getEntriesPaginated(
             String tableName, ByteBuf continuationToken, int limit,
-            Function<byte[], T> fromBytes) {
+            Function<byte[], T> fromBytes, long requestId) {
         log.trace("get entries paginated called for : {}", tableName);
         long time = System.currentTimeMillis();
         return withRetries(() -> segmentHelper.readTableEntries(tableName, limit,
-                IteratorStateImpl.fromBytes(continuationToken), authToken.get(), RequestTag.NON_EXISTENT_ID),
+                IteratorStateImpl.fromBytes(continuationToken), authToken.get(), requestId),
                 () -> String.format("get entries paginated for table: %s", tableName))
                 .thenApplyAsync(result -> {
                     try {
@@ -566,8 +566,8 @@ public class PravegaTablesStoreHelper {
      * @param tableName table name
      * @return AsyncIterator that can be used to iterate over keys in the table.
      */
-    public AsyncIterator<String> getAllKeys(String tableName) {
-        return new ContinuationTokenAsyncIterator<>(token -> getKeysPaginated(tableName, token, 1000)
+    public AsyncIterator<String> getAllKeys(String tableName, long requestId) {
+        return new ContinuationTokenAsyncIterator<>(token -> getKeysPaginated(tableName, token, 1000, requestId)
                 .thenApplyAsync(result -> {
                     token.release();
                     return new AbstractMap.SimpleEntry<>(result.getKey(), result.getValue());
@@ -582,8 +582,8 @@ public class PravegaTablesStoreHelper {
      * @param <T> Type of value
      * @return AsyncIterator that can be used to iterate over keys in the table.
      */
-    public <T> AsyncIterator<Map.Entry<String, VersionedMetadata<T>>> getAllEntries(String tableName, Function<byte[], T> fromBytes) {
-        return new ContinuationTokenAsyncIterator<>(token -> getEntriesPaginated(tableName, token, 1000, fromBytes)
+    public <T> AsyncIterator<Map.Entry<String, VersionedMetadata<T>>> getAllEntries(String tableName, Function<byte[], T> fromBytes, long requestId) {
+        return new ContinuationTokenAsyncIterator<>(token -> getEntriesPaginated(tableName, token, 1000, fromBytes, requestId)
                 .thenApplyAsync(result -> {
                     token.release();
                     return new AbstractMap.SimpleEntry<>(result.getKey(), result.getValue());

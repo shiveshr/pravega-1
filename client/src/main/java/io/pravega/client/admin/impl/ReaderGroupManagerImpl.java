@@ -33,6 +33,7 @@ import io.pravega.client.stream.impl.ReaderGroupImpl;
 import io.pravega.client.stream.impl.ReaderGroupState;
 import io.pravega.client.stream.impl.SegmentWithRange;
 import io.pravega.client.stream.impl.StreamImpl;
+import io.pravega.common.concurrent.Futures;
 import io.pravega.common.util.ByteArraySegment;
 import io.pravega.shared.NameUtils;
 import java.io.IOException;
@@ -107,8 +108,9 @@ public class ReaderGroupManagerImpl implements ReaderGroupManager {
         synchronizer.fetchUpdates();
         UUID groupId = synchronizer.getState().getConfig().getReaderGroupId();
         long generation = synchronizer.getState().getConfig().getGeneration();
-        getAndHandleExceptions(controller.deleteReaderGroup(scope, groupName, groupId, generation),
-                RuntimeException::new);
+
+        Futures.exceptionallyExpectingCompose(controller.deleteReaderGroup(scope, groupName, groupId, generation),
+                DeleteRGRejectedException, () -> synchronizeRG());
     }
 
     @Override

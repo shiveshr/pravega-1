@@ -32,6 +32,7 @@ import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.StreamCut;
 import io.pravega.client.stream.impl.ClientFactoryImpl;
 import io.pravega.client.stream.impl.JavaSerializer;
+import io.pravega.client.stream.impl.ReaderGroupImpl;
 import io.pravega.client.stream.impl.StreamCutImpl;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.server.eventProcessor.LocalController;
@@ -41,6 +42,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -230,16 +232,39 @@ public class EndToEndReaderGroupTest extends AbstractEndToEndTest {
         // Create a ReaderGroup
         groupManager.createReaderGroup("group", ReaderGroupConfig.builder().disableAutomaticCheckpoints()
                 .stream("test/test").build());
+        @Cleanup
+        ReaderGroupManager groupManager1 = new ReaderGroupManagerImpl("test", controller, clientFactory);
 
-        List<String> subs = controller.listSubscribers("test", "test").get();
-        assertFalse("Subscriber list contains required reader group", subs.contains("test/group"));
+        // Create a ReaderGroup
+        ReaderGroupConfig build = ReaderGroupConfig.builder().disableAutomaticCheckpoints().readerGroupId(UUID.randomUUID())
+                                                   .generation(0)
+                                                   .stream("test/test").build();
+        groupManager1.createReaderGroup("group", build);
 
-        ReaderGroup subGroup = groupManager.getReaderGroup("group");
-        subGroup.resetReaderGroup(ReaderGroupConfig.builder().disableAutomaticCheckpoints().stream("test/test")
-                .retentionType(ReaderGroupConfig.StreamDataRetention.MANUAL_RELEASE_AT_USER_STREAMCUT).build());
+        ReaderGroup rg1 = groupManager.getReaderGroup("group");
+        ReaderGroup rg2 = groupManager1.getReaderGroup("group");
+        build = ReaderGroupConfig.builder().disableAutomaticCheckpoints().readerGroupId(build.getReaderGroupId())
+                                                   .generation(0)
+                                                   .stream("test/test2").build();
 
-        subs = controller.listSubscribers("test", "test").get();
-        assertTrue("Subscriber list does not contain required reader group", subs.contains("test/group"));
+        controller.updateReaderGroup();
+        
+//        CompletableFuture.runAsync(() -> rg1.resetReaderGroup(ReaderGroupConfig.builder().disableAutomaticCheckpoints().stream("test/test").build()), executorService());
+//        ReaderGroupImpl.signal.join();
+        rg2.resetReaderGroup(ReaderGroupConfig.builder().disableAutomaticCheckpoints().stream("test/test").build());
+        
+//        ReaderGroupImpl.wait.complete(null);
+
+        
+//        List<String> subs = controller.listSubscribers("test", "test").get();
+//        assertFalse("Subscriber list contains required reader group", subs.contains("test/group"));
+//
+//        ReaderGroup subGroup = groupManager.getReaderGroup("group");
+//        subGroup.resetReaderGroup(ReaderGroupConfig.builder().disableAutomaticCheckpoints().stream("test/test")
+//                .retentionType(ReaderGroupConfig.StreamDataRetention.MANUAL_RELEASE_AT_USER_STREAMCUT).build());
+//
+//        subs = controller.listSubscribers("test", "test").get();
+//        assertTrue("Subscriber list does not contain required reader group", subs.contains("test/group"));
     }
 
     @Test(timeout = 30000)

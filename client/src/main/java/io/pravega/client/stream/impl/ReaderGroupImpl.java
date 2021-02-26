@@ -204,7 +204,7 @@ public class ReaderGroupImpl implements ReaderGroup, ReaderGroupMetrics {
     }
 
     @Override
-    public void resetReaderGroup(ReaderGroupConfig config) {
+    public void resetReaderGroup(ReaderGroupConfig config) throws InterruptedException {
         log.info("Reset ReaderGroup {} to {}", getGroupName(), config);
         synchronizer.fetchUpdates();
         while (true) {
