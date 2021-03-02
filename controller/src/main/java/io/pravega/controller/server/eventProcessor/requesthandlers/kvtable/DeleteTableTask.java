@@ -16,6 +16,7 @@ import io.pravega.controller.retryable.RetryableException;
 import io.pravega.controller.store.kvtable.KVTableMetadataStore;
 import io.pravega.controller.store.kvtable.KVTOperationContext;
 import io.pravega.controller.store.kvtable.KeyValueTable;
+import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.task.KeyValueTable.TableMetadataTasks;
 import io.pravega.controller.util.RetryHelper;
@@ -59,7 +60,7 @@ public class DeleteTableTask implements TableTask<DeleteTableEvent> {
                 log.debug("Skipped processing delete event for KeyValueTable {}/{} with Id:{} as UUIDs did not match.", scope, kvt, id);
                 return CompletableFuture.completedFuture(null);
             } else {
-                final KVTOperationContext context = kvtMetadataStore.createContext(scope, kvt);
+                final OperationContext context = kvtMetadataStore.createContext(scope, kvt, requestId);
                 return Futures.exceptionallyExpecting(kvtMetadataStore.getAllSegmentIds(scope, kvt, context, executor)
                         .thenComposeAsync(allSegments ->
                                         kvtMetadataTasks.deleteSegments(scope, kvt, allSegments, kvtMetadataTasks.retrieveDelegationToken(), requestId), executor),

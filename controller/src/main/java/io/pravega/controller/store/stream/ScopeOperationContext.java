@@ -9,9 +9,17 @@
  */
 package io.pravega.controller.store.stream;
 
-/**
- * Interface for defining an operation context. 
- */
-public interface OperationContext {
-    long getRequestId();
+import io.pravega.controller.store.Scope;
+import lombok.Getter;
+
+class ScopeOperationContext implements OperationContext {
+    @Getter
+    private final Scope scope;
+    @Getter
+    private final long requestId;
+
+    ScopeOperationContext(Scope scope, long requestId) {
+        this.scope = scope;
+        this.requestId = requestId;
+    }
 }

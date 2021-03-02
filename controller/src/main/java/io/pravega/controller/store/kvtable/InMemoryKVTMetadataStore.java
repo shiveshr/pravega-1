@@ -15,6 +15,7 @@ import io.pravega.controller.store.InMemoryScope;
 import io.pravega.controller.store.Scope;
 import io.pravega.controller.store.index.InMemoryHostIndex;
 import io.pravega.controller.store.stream.InMemoryStreamMetadataStore;
+import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StreamMetadataStore;
 import lombok.SneakyThrows;
 import lombok.Synchronized;
@@ -60,9 +61,9 @@ public class InMemoryKVTMetadataStore extends AbstractKVTableMetadataStore {
     @SneakyThrows
     @Override
     @Synchronized
-    public KeyValueTable getKVTable(String scope, final String name, KVTOperationContext context) {
+    public KeyValueTable getKVTable(String scope, final String name, OperationContext context) {
         if (this.streamStore.scopeExists(scope)) {
-            InMemoryScope kvtScope = (InMemoryScope) this.streamStore.getScope(scope);
+            InMemoryScope kvtScope = (InMemoryScope) this.streamStore.getScope(scope, context);
             if (kvtScope.checkTableExists(name)) {
                 return kvtScope.getKeyValueTable(name);
             }
@@ -73,14 +74,14 @@ public class InMemoryKVTMetadataStore extends AbstractKVTableMetadataStore {
     @Override
     public CompletableFuture<Void> deleteFromScope(final String scope,
                                                    final String name,
-                                                   final KVTOperationContext context,
+                                                   final OperationContext context,
                                                    final Executor executor) {
-        return Futures.completeOn(((InMemoryScope) getScope(scope)).removeKVTableFromScope(name),
+        return Futures.completeOn(((InMemoryScope) getScope(scope, context)).removeKVTableFromScope(name),
                 executor);
     }
 
     @Override
-    CompletableFuture<Void> recordLastKVTableSegment(String scope, String kvtable, int lastActiveSegment, KVTOperationContext context, Executor executor) {
+    CompletableFuture<Void> recordLastKVTableSegment(String scope, String kvtable, int lastActiveSegment, OperationContext context, Executor executor) {
         Integer oldLastActiveSegment = deletedKVTables.put(getScopedKVTName(scope, kvtable), lastActiveSegment);
         Preconditions.checkArgument(oldLastActiveSegment == null || lastActiveSegment >= oldLastActiveSegment);
         log.debug("Recording last segment {} for kvtable {}/{} on deletion.", lastActiveSegment, scope, kvtable);
@@ -89,7 +90,7 @@ public class InMemoryKVTMetadataStore extends AbstractKVTableMetadataStore {
 
     @Override
     @Synchronized
-    public CompletableFuture<Boolean> checkScopeExists(String scope) {
+    public CompletableFuture<Boolean> checkScopeExists(String scope, OperationContext context) {
         return Futures.completeOn(CompletableFuture.completedFuture(this.streamStore.scopeExists(scope)), executor);
     }
 

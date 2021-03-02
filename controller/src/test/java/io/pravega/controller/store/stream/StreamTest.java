@@ -76,7 +76,7 @@ public class StreamTest extends ThreadPooledTestSuite {
     public void testPravegaTablesCreateStream() throws ExecutionException, InterruptedException {
         PravegaTablesStoreHelper storeHelper = new PravegaTablesStoreHelper(
                 SegmentHelperMock.getSegmentHelperMockForTables(executorService()), GrpcAuthHelper.getDisabledAuthHelper(), executorService());
-        PravegaTablesScope scope = new PravegaTablesScope("test", storeHelper);
+        PravegaTablesScope scope = new PravegaTablesScope("test", storeHelper, requestId);
         scope.createScope().join();
         scope.addStreamToScope("test").join();
 
@@ -185,7 +185,7 @@ public class StreamTest extends ThreadPooledTestSuite {
 
             testConcurrentGetSuccessorScale(store, (x, y) -> {
                 PravegaTablesStoreHelper storeHelper = new PravegaTablesStoreHelper(segmentHelper, authHelper, executorService());
-                PravegaTablesScope scope = new PravegaTablesScope(x, storeHelper);
+                PravegaTablesScope scope = new PravegaTablesScope(x, storeHelper, requestId);
                 Futures.exceptionallyExpecting(scope.createScope(), e -> Exceptions.unwrap(e) instanceof StoreException.DataExistsException, null).join();
                 scope.addStreamToScope(y).join();
                 return new PravegaTablesStream(x, y, storeHelper, orderer, () -> 0, scope::getStreamsInScopeTableName, executorService());

@@ -338,19 +338,19 @@ public abstract class StreamMetadataTasksTest {
     @Test(timeout = 30000)
     public void readerGroupsTest() throws InterruptedException, ExecutionException {
         // no subscribers found for existing Stream
-        SubscribersResponse listSubscribersResponse = streamMetadataTasks.listSubscribers(SCOPE, stream1, null).get();
+        SubscribersResponse listSubscribersResponse = streamMetadataTasks.listSubscribers(SCOPE, stream1, 0L).get();
         assertEquals(SubscribersResponse.Status.SUCCESS, listSubscribersResponse.getStatus());
         assertEquals(0, listSubscribersResponse.getSubscribersList().size());
 
         // subscribers for non-existing stream
-        listSubscribersResponse = streamMetadataTasks.listSubscribers(SCOPE, "somestream", null).get();
+        listSubscribersResponse = streamMetadataTasks.listSubscribers(SCOPE, "somestream", 0L).get();
         assertEquals(SubscribersResponse.Status.STREAM_NOT_FOUND, listSubscribersResponse.getStatus());
         assertEquals(0, listSubscribersResponse.getSubscribersList().size());
 
         doReturn(CompletableFuture.completedFuture(Controller.CreateStreamStatus.Status.SUCCESS))
-                .when(streamMetadataTasks).createRGStream(anyString(), anyString(), any(), anyLong(), anyInt());
+                .when(streamMetadataTasks).createRGStream(anyString(), anyString(), any(), anyLong(), anyInt(), anyLong());
         doReturn(CompletableFuture.completedFuture(Controller.DeleteStreamStatus.Status.SUCCESS))
-                .when(streamMetadataTasks).deleteStream(anyString(), anyString(), any());
+                .when(streamMetadataTasks).deleteStream(anyString(), anyString(), anyLong());
         doReturn(CompletableFuture.completedFuture(Controller.UpdateStreamStatus.Status.SUCCESS))
                 .when(streamMetadataTasks).sealStream(anyString(), anyString(), any());
 
@@ -2279,7 +2279,7 @@ public abstract class StreamMetadataTasksTest {
                 newRanges, 30, null).get();
 
         assertEquals(ScaleStreamStatus.STARTED, scaleOpResult.getStatus());
-        OperationContext context = streamStorePartialMock.createContext(SCOPE, "test");
+        OperationContext context = streamStorePartialMock.createStreamContext(SCOPE, "test");
         assertEquals(streamStorePartialMock.getState(SCOPE, "test", false, context, executor).get(), State.ACTIVE);
 
         // Now when runScale runs even after that we should get the state as active.

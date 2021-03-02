@@ -14,7 +14,6 @@ import io.pravega.common.util.ByteArraySegment;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import org.apache.commons.lang3.tuple.Pair;
 
 /**
@@ -48,11 +47,9 @@ public interface Scope {
      * 
      * @param limit maximum number of streams to return
      * @param continuationToken continuation token from where to start.
-     * @param executor executor
      * @return A future, which upon completion, will hold a pair of list of stream names and a new continuation token. 
      */
-    CompletableFuture<Pair<List<String>, String>> listStreams(final int limit, final String continuationToken,
-                                                              final Executor executor);
+    CompletableFuture<Pair<List<String>, String>> listStreams(final int limit, final String continuationToken);
 
     /**
      * List existing streams in scopes.
@@ -60,26 +57,16 @@ public interface Scope {
      * @return List of streams in scope
      */
     CompletableFuture<List<String>> listStreamsInScope();
-
-    /**
-     * Refresh the scope object. Typically to be used to invalidate any caches.
-     * This allows us reuse of scope object without having to recreate a new scope object for each new operation
-     */
-    default void refresh() {
-        // no op
-    }
-
+    
     /**
      * A paginated api on the scope to get requested number of KeyValueTables from under the scope
      * starting from the continuation token.
      *
      * @param limit maximum number of kvtables to return
      * @param continuationToken continuation token from where to start.
-     * @param executor executor
      * @return A future, which upon completion, will hold a pair of list of kvtable names and a new continuation token.
      */
-    CompletableFuture<Pair<List<String>, String>> listKeyValueTables(final int limit, final String continuationToken,
-                                                              final Executor executor);
+    CompletableFuture<Pair<List<String>, String>> listKeyValueTables(final int limit, final String continuationToken);
 
     CompletableFuture<UUID> getReaderGroupId(String rgName);
 

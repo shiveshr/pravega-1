@@ -16,8 +16,8 @@ import io.pravega.controller.store.kvtable.KVTableMetadataStore;
 import io.pravega.controller.store.kvtable.CreateKVTableResponse;
 import io.pravega.controller.store.kvtable.KVTableState;
 import io.pravega.controller.store.kvtable.KeyValueTable;
-import io.pravega.controller.store.kvtable.KVTOperationContext;
 import io.pravega.client.tables.KeyValueTableConfiguration;
+import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.task.KeyValueTable.TableMetadataTasks;
 import io.pravega.controller.util.RetryHelper;
 import io.pravega.shared.NameUtils;
@@ -68,7 +68,9 @@ public class CreateTableTask implements TableTask<CreateTableEvent> {
                 log.debug("Skipped processing create event for KeyValueTable {}/{} with Id:{} as UUIDs did not match.", scope, kvt, id);
                 return CompletableFuture.completedFuture(null);
             } else {
-                return this.kvtMetadataStore.createKeyValueTable(scope, kvt, config, creationTime, null, executor)
+                final OperationContext context = kvtMetadataStore.createContext(scope, kvt, requestId);
+
+                return this.kvtMetadataStore.createKeyValueTable(scope, kvt, config, creationTime, context, executor)
                         .thenComposeAsync(response -> {
                             // only if its a new kvtable or an already existing non-active kvtable then we will create
                             // segments and change the state of the kvtable to active.
@@ -82,7 +84,6 @@ public class CreateTableTask implements TableTask<CreateTableEvent> {
                                         .collect(Collectors.toList());
                                 kvtMetadataTasks.createNewSegments(scope, kvt, newSegments, requestId)
                                         .thenCompose(y -> {
-                                            final KVTOperationContext context = kvtMetadataStore.createContext(scope, kvt);
                                             kvtMetadataStore.getVersionedState(scope, kvt, context, executor)
                                                     .thenCompose(state -> {
                                                         if (state.getObject().equals(KVTableState.CREATING)) {

@@ -489,7 +489,7 @@ public class PravegaTablesStreamMetadataStoreTest extends StreamMetadataStoreTes
         assertEquals(Controller.CreateScopeStatus.Status.SCOPE_EXISTS, status.getStatus());
 
         PravegaTablesStoreHelper spy = spy(storeHelper);
-        PravegaTablesScope scopeObj = new PravegaTablesScope("thirdScope", spy);
+        PravegaTablesScope scopeObj = new PravegaTablesScope("thirdScope", spy, requestId);
         StoreException unknown = StoreException.create(StoreException.Type.UNKNOWN, "unknown");
         doReturn(Futures.failedFuture(unknown)).when(spy).addNewEntry(anyString(), anyString(), any(), any());
         AssertExtensions.assertFutureThrows("Create scope should have thrown exception",
@@ -605,12 +605,12 @@ public class PravegaTablesStreamMetadataStoreTest extends StreamMetadataStoreTes
 
         @Override
         @Synchronized
-        PravegaTablesStream newStream(String scope, String name) {
+        PravegaTablesStream newStream(String scope, String name, long requestId) {
             String scopedStreamName = NameUtils.getScopedStreamName(scope, name);
             if (map.containsKey(scopedStreamName)) {
                 return map.get(scopedStreamName);
             } else {
-                return super.newStream(scope, name);
+                return super.newStream(scope, name, requestId);
             }
         }
 

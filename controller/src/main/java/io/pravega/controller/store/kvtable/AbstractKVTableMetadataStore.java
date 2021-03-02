@@ -9,9 +9,6 @@
  */
 package io.pravega.controller.store.kvtable;
 
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
 import io.pravega.client.tables.KeyValueTableConfiguration;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
@@ -19,89 +16,69 @@ import io.pravega.controller.store.Scope;
 import io.pravega.controller.store.VersionedMetadata;
 import io.pravega.controller.store.index.HostIndex;
 import io.pravega.controller.store.kvtable.records.KVTSegmentRecord;
+import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StoreException;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 
-import javax.annotation.ParametersAreNonnullByDefault;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 @Slf4j
 public abstract class AbstractKVTableMetadataStore implements KVTableMetadataStore {
     public static final Predicate<Throwable> DATA_NOT_FOUND_PREDICATE = e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException;
 
-    private final LoadingCache<String, Scope> scopeCache;
-    private final LoadingCache<Pair<String, String>, KeyValueTable> cache;
     @Getter
     private final HostIndex hostTaskIndex;
 
     protected AbstractKVTableMetadataStore(HostIndex hostTaskIndex) {
-        cache = CacheBuilder.newBuilder()
-                .maximumSize(10000)
-                .refreshAfterWrite(10, TimeUnit.MINUTES)
-                .expireAfterWrite(10, TimeUnit.MINUTES)
-                .build(
-                        new CacheLoader<Pair<String, String>, KeyValueTable>() {
-                            @Override
-                            @ParametersAreNonnullByDefault
-                            public KeyValueTable load(Pair<String, String> input) {
-                                try {
-                                    return newKeyValueTable(input.getKey(), input.getValue());
-                                } catch (Exception e) {
-                                    throw new RuntimeException(e);
-                                }
-                            }
-                        });
-
-        scopeCache = CacheBuilder.newBuilder()
-                .maximumSize(1000)
-                .refreshAfterWrite(10, TimeUnit.MINUTES)
-                .expireAfterWrite(10, TimeUnit.MINUTES)
-                .build(
-                        new CacheLoader<String, Scope>() {
-                            @Override
-                            @ParametersAreNonnullByDefault
-                            public Scope load(String scopeName) {
-                                try {
-                                    return newScope(scopeName);
-                                } catch (Exception e) {
-                                    throw new RuntimeException(e);
-                                }
-                            }
-                        });
         this.hostTaskIndex = hostTaskIndex;
     }
 
-    protected Scope getScope(final String scopeName) {
-        Scope scope = scopeCache.getUnchecked(scopeName);
-        scope.refresh();
-        return scope;
+    protected Scope getScope(final String scopeName, long requestId) {
+        return newScope(scopeName, requestId);
     }
 
-    abstract KeyValueTable newKeyValueTable(final String scope, final String kvTableName);
+    public Scope getScope(final String scopeName, final OperationContext context) {
+        if (context != null) {
+            if (context instanceof KVTOperationContext) {
+                return ((KVTOperationContext) context).getScope();
+            } else {
+                return newScope(scopeName, context.getRequestId());
+            }
+        } else {
+            // TODO: shivesh
+            long requestId = 0L;
+            return newScope(scopeName, requestId);
+        }
+    }
+
+    abstract KeyValueTable newKeyValueTable(final String scope, final String kvTableName, long requestId);
 
     @Override
-    public KVTOperationContext createContext(String scope, String name) {
-        return new KVTOperationContext(getKVTable(scope, name, null));
+    public KVTOperationContext createContext(String scopeName, String name, long requestId) {
+        Scope scope = newScope(scopeName, requestId);
+        KeyValueTable kvTable = newKeyValueTable(scopeName, name, requestId);
+        return new KVTOperationContext(scope, kvTable, requestId);
     }
 
-    public KeyValueTable getKVTable(String scope, final String name, KVTOperationContext context) {
+    public KeyValueTable getKVTable(String scope, final String name, OperationContext context) {
         KeyValueTable kvt;
         if (context != null) {
-            kvt = context.getKvTable();
-            assert kvt.getScopeName().equals(scope);
-            assert kvt.getName().equals(name);
+            if (context instanceof KVTOperationContext) {
+                kvt = ((KVTOperationContext) context).getKvTable();
+                assert kvt.getScopeName().equals(scope);
+                assert kvt.getName().equals(name);
+            } else {
+                kvt = newKeyValueTable(scope, name, context.getRequestId());
+            }
         } else {
-            kvt = cache.getUnchecked(new ImmutablePair<>(scope, name));
-            log.debug("Got KVTable from cache: {}/{}", kvt.getScopeName(), kvt.getName());
-            kvt.refresh();
+            // todo: shivesh
+            kvt = newKeyValueTable(scope, name, 0L);
         }
         return kvt;
     }
@@ -111,13 +88,15 @@ public abstract class AbstractKVTableMetadataStore implements KVTableMetadataSto
                                                                 final String name,
                                                                 final KeyValueTableConfiguration configuration,
                                                                 final long createTimestamp,
-                                                                final KVTOperationContext context,
+                                                                final OperationContext context,
                                                                 final Executor executor) {
-        return Futures.completeOn(checkScopeExists(scope)
+        long requestId = context != null ? context.getRequestId() : 0L; // TODO: shivesh
+
+        return Futures.completeOn(checkScopeExists(scope, context)
                 .thenCompose(exists -> {
                     if (exists) {
                         // Create kvtable may fail if scope is deleted as we attempt to create the table under scope.
-                        return getSafeStartingSegmentNumberFor(scope, name)
+                        return getSafeStartingSegmentNumberFor(scope, name, context, executor)
                                 .thenCompose(startingSegmentNumber -> getKVTable(scope, name, context)
                                                 .create(configuration, createTimestamp, startingSegmentNumber));
                     } else {
@@ -133,14 +112,14 @@ public abstract class AbstractKVTableMetadataStore implements KVTableMetadataSto
     @Override
     public CompletableFuture<Long> getCreationTime(final String scope,
                                                    final String name,
-                                                   final KVTOperationContext context,
+                                                   final OperationContext context,
                                                    final Executor executor) {
         return Futures.completeOn(getKVTable(scope, name, context).getCreationTime(), executor);
     }
 
     @Override
     public CompletableFuture<Void> setState(final String scope, final String name,
-                                            final KVTableState state, final KVTOperationContext context,
+                                            final KVTableState state, final OperationContext context,
                                             final Executor executor) {
         return Futures.completeOn(getKVTable(scope, name, context).updateState(state), executor);
     }
@@ -148,7 +127,7 @@ public abstract class AbstractKVTableMetadataStore implements KVTableMetadataSto
     @Override
     public CompletableFuture<KVTableState> getState(final String scope, final String name,
                                              final boolean ignoreCached,
-                                             final KVTOperationContext context,
+                                             final OperationContext context,
                                              final Executor executor) {
         return Futures.completeOn(getKVTable(scope, name, context).getState(ignoreCached), executor);
     }
@@ -156,47 +135,50 @@ public abstract class AbstractKVTableMetadataStore implements KVTableMetadataSto
     @Override
     public CompletableFuture<VersionedMetadata<KVTableState>> updateVersionedState(final String scope, final String name,
                                                                             final KVTableState state, final VersionedMetadata<KVTableState> previous,
-                                                                            final KVTOperationContext context,
+                                                                            final OperationContext context,
                                                                             final Executor executor) {
         return Futures.completeOn(getKVTable(scope, name, context).updateVersionedState(previous, state), executor);
     }
 
     @Override
     public CompletableFuture<VersionedMetadata<KVTableState>> getVersionedState(final String scope, final String name,
-                                                                         final KVTOperationContext context,
+                                                                         final OperationContext context,
                                                                          final Executor executor) {
         return Futures.completeOn(getKVTable(scope, name, context).getVersionedState(), executor);
     }
 
     @Override
-    public CompletableFuture<List<KVTSegmentRecord>> getActiveSegments(final String scope, final String name, final KVTOperationContext context, final Executor executor) {
+    public CompletableFuture<List<KVTSegmentRecord>> getActiveSegments(final String scope, final String name, final OperationContext context, final Executor executor) {
         return Futures.completeOn(getKVTable(scope, name, context).getActiveSegments(), executor);
     }
 
     @Override
     public CompletableFuture<KeyValueTableConfiguration> getConfiguration(final String scope,
-                                                                   final String name,
-                                                                   final KVTOperationContext context, final Executor executor) {
+                                                                          final String name,
+                                                                          final OperationContext context, 
+                                                                          final Executor executor) {
         return Futures.completeOn(getKVTable(scope, name, context).getConfiguration(), executor);
     }
 
     @Override
-    public CompletableFuture<Pair<List<String>, String>> listKeyValueTables(String scopeName, String continuationToken,
-                                                                    int limit, Executor executor) {
-        return getScope(scopeName).listKeyValueTables(limit, continuationToken, executor);
+    public CompletableFuture<Pair<List<String>, String>> listKeyValueTables(final String scopeName, final String continuationToken,
+                                                                            final int limit, final OperationContext context,
+                                                                            final Executor executor) {
+        return getScope(scopeName, context).listKeyValueTables(limit, continuationToken);
     }
 
     @Override
-    public CompletableFuture<Set<Long>> getAllSegmentIds(final String scope, final String name, final KVTOperationContext context, final Executor executor) {
+    public CompletableFuture<Set<Long>> getAllSegmentIds(final String scope, final String name, final OperationContext context,
+                                                         final Executor executor) {
         return Futures.completeOn(getKVTable(scope, name, context).getAllSegmentIds(), executor);
     }
 
     @Override
     public CompletableFuture<Void> deleteKeyValueTable(final String scope,
-                                                final String name,
-                                                final KVTOperationContext context,
-                                                final Executor executor) {
-        KVTOperationContext kvtContext = (context == null) ? createContext(scope, name) : context;
+                                                       final String name,
+                                                       final OperationContext context,
+                                                       final Executor executor) {
+        OperationContext kvtContext = context != null ? context : createContext(scope, name, 0L);
         return Futures.exceptionallyExpecting(CompletableFuture.completedFuture(getKVTable(scope, name, kvtContext))
                 .thenCompose(kvt -> kvt.getActiveEpochRecord(true))
                             .thenApply(epoch -> epoch.getSegments().stream().map(KVTSegmentRecord::getSegmentNumber)
@@ -204,8 +186,7 @@ public abstract class AbstractKVTableMetadataStore implements KVTableMetadataSto
                         .thenCompose(lastActiveSegment -> recordLastKVTableSegment(scope, name, lastActiveSegment, context, executor)),
                 DATA_NOT_FOUND_PREDICATE, null)
                 .thenCompose(v -> deleteFromScope(scope, name, context, executor))
-                .thenCompose(v -> Futures.completeOn(getKVTable(scope, name, kvtContext).delete(), executor))
-                .thenAccept(v -> cache.invalidate(new ImmutablePair<>(scope, name)));
+                .thenCompose(v -> Futures.completeOn(getKVTable(scope, name, kvtContext).delete(), executor));
     }
 
     /**
@@ -220,7 +201,7 @@ public abstract class AbstractKVTableMetadataStore implements KVTableMetadataSto
      * @return CompletableFuture which indicates the task completion related to persistently store lastActiveSegment.
      */
     abstract CompletableFuture<Void> recordLastKVTableSegment(final String scope, final String kvtable, int lastActiveSegment,
-                                                             KVTOperationContext context, final Executor executor);
+                                                              final OperationContext context, final Executor executor);
 
     /**
      * This method retrieves a safe base segment number from which a stream's segment ids may start. In the case of a
@@ -233,17 +214,20 @@ public abstract class AbstractKVTableMetadataStore implements KVTableMetadataSto
      * @param kvtName KeyValueTable name
      * @return CompletableFuture with a safe starting segment number for this stream.
      */
-    abstract CompletableFuture<Integer> getSafeStartingSegmentNumberFor(final String scopeName, final String kvtName);
+    abstract CompletableFuture<Integer> getSafeStartingSegmentNumberFor(final String scopeName, final String kvtName, 
+                                                                        final OperationContext context, final Executor executor);
 
-    public abstract CompletableFuture<Boolean> checkScopeExists(String scope);
+    public abstract CompletableFuture<Boolean> checkScopeExists(final String scope, final OperationContext context, 
+                                                                final Executor executor);
 
     public abstract CompletableFuture<Void> createEntryForKVTable(final String scopeName,
                                                                   final String kvtName,
                                                                   final byte[] id,
+                                                                  final OperationContext context, 
                                                                   final Executor executor);
 
     public abstract CompletableFuture<Void> deleteFromScope(final String scope,
-                                                                   final String name,
-                                                                   final KVTOperationContext context,
-                                                                   final Executor executor);
+                                                            final String name,
+                                                            final OperationContext context,
+                                                            final Executor executor);
 }

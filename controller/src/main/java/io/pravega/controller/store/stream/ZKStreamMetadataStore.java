@@ -15,7 +15,9 @@ import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.lang.Int96;
+import io.pravega.common.tracing.TagLogger;
 import io.pravega.common.util.BitConverter;
+import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.store.Version;
 import io.pravega.controller.store.ZKScope;
 import io.pravega.controller.store.ZKStoreHelper;
@@ -23,10 +25,10 @@ import io.pravega.controller.store.index.ZKHostIndex;
 import io.pravega.controller.util.Config;
 import lombok.AccessLevel;
 import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.utils.ZKPaths;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.List;
@@ -40,7 +42,6 @@ import java.util.stream.Collectors;
 /**
  * ZK stream metadata store.
  */
-@Slf4j
 public class ZKStreamMetadataStore extends AbstractStreamMetadataStore implements AutoCloseable {
     /**
      * This constant defines the size of the block of counter values that will be used by this controller instance.
@@ -61,6 +62,8 @@ public class ZKStreamMetadataStore extends AbstractStreamMetadataStore implement
     static final String COMPLETED_TX_ROOT_PATH = TRANSACTION_ROOT_PATH + "/completedTx";
     static final String COMPLETED_TX_BATCH_ROOT_PATH = COMPLETED_TX_ROOT_PATH + "/batches";
     static final String COMPLETED_TX_BATCH_PATH = COMPLETED_TX_BATCH_ROOT_PATH + "/%d";
+
+    private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(SegmentHelper.class));
 
     @VisibleForTesting
     @Getter(AccessLevel.PACKAGE)
@@ -111,7 +114,7 @@ public class ZKStreamMetadataStore extends AbstractStreamMetadataStore implement
     }
 
     @Override
-    ZKStream newStream(final String scopeName, final String name) {
+    ZKStream newStream(final String scopeName, final String name, long requestId) {
         return new ZKStream(scopeName, name, storeHelper, completedTxnGC::getLatestBatch, executor, orderer);
     }
 
@@ -121,7 +124,7 @@ public class ZKStreamMetadataStore extends AbstractStreamMetadataStore implement
     }
 
     @Override
-    public CompletableFuture<Boolean> checkScopeExists(String scope) {
+    public CompletableFuture<Boolean> checkScopeExists(String scope, OperationContext context) {
         String scopePath = ZKPaths.makePath(SCOPE_ROOT_PATH, scope);
         return storeHelper.checkExists(scopePath);
     }
@@ -137,17 +140,17 @@ public class ZKStreamMetadataStore extends AbstractStreamMetadataStore implement
     }
 
     @Override
-    ReaderGroup newReaderGroup(String scope, String name) {
+    ReaderGroup newReaderGroup(String scope, String name, long requestId) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    ZKScope newScope(final String scopeName) {
+    ZKScope newScope(final String scopeName, long requestId) {
         return new ZKScope(scopeName, storeHelper);
     }
 
     @Override
-    public CompletableFuture<String> getScopeConfiguration(final String scopeName) {
+    public CompletableFuture<String> getScopeConfiguration(final String scopeName, OperationContext context) {
         return storeHelper.checkExists(String.format("/store/%s", scopeName))
                 .thenApply(scopeExists -> {
                     if (scopeExists) {
@@ -159,32 +162,32 @@ public class ZKStreamMetadataStore extends AbstractStreamMetadataStore implement
     }
 
     @Override
-    public CompletableFuture<List<String>> listScopes() {
+    public CompletableFuture<List<String>> listScopes(long requestId) {
         return storeHelper.getChildren(SCOPE_ROOT_PATH)
                 .thenApply(children -> children.stream().filter(x -> !x.equals(ZKScope.STREAMS_IN_SCOPE)).collect(Collectors.toList()));
     }
 
     @Override
-    public CompletableFuture<Pair<List<String>, String>> listScopes(String continuationToken, int limit, Executor executor) {
+    public CompletableFuture<Pair<List<String>, String>> listScopes(String continuationToken, int limit, Executor executor, long requestId) {
         // Pagination not supported for zk based store. 
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public CompletableFuture<Void> addReaderGroupToScope(String scopeName, String rgName, UUID readerGroupId) {
+    public CompletableFuture<Void> addReaderGroupToScope(String scopeName, String rgName, UUID readerGroupId, RGOperationContext context, Executor executor) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public CompletableFuture<Boolean> checkReaderGroupExists(String scope, String rgName) {
+    public CompletableFuture<Boolean> checkReaderGroupExists(String scope, String rgName, RGOperationContext context, Executor executor) {
         throw new UnsupportedOperationException();
     }
 
     @Override
-    public CompletableFuture<UUID> getReaderGroupId(String scopeName, String rgName) {
+    public CompletableFuture<UUID> getReaderGroupId(String scopeName, String rgName, RGOperationContext context, Executor executor) {
         throw new UnsupportedOperationException();
     }
-
+    
     @Override
     public CompletableFuture<CreateStreamResponse> createStream(String scope, String name, StreamConfiguration configuration,
                                                                 long createTimestamp, OperationContext context, Executor executor) {
@@ -208,7 +211,8 @@ public class ZKStreamMetadataStore extends AbstractStreamMetadataStore implement
     }
 
     @Override
-    public CompletableFuture<Integer> getSafeStartingSegmentNumberFor(final String scopeName, final String streamName) {
+    public CompletableFuture<Integer> getSafeStartingSegmentNumberFor(final String scopeName, final String streamName, OperationContext context) {
+        long requestId = context != null ? context.getRequestId() : 0L; // TODO: shivesh
         return storeHelper.getData(String.format(DELETED_STREAMS_PATH, getScopedStreamName(scopeName, streamName)), x -> BitConverter.readInt(x, 0))
                           .handleAsync((data, ex) -> {
                               if (ex == null) {
@@ -216,7 +220,7 @@ public class ZKStreamMetadataStore extends AbstractStreamMetadataStore implement
                               } else if (ex instanceof StoreException.DataNotFoundException) {
                                   return 0;
                               } else {
-                                  log.error("Problem found while getting a safe starting segment number for {}.",
+                                  log.warn(requestId, "Problem found while getting a safe starting segment number for {}.",
                                           getScopedStreamName(scopeName, streamName), ex);
                                   throw new CompletionException(ex);
                               }

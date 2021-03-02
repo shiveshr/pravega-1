@@ -734,7 +734,7 @@ public class StreamTransactionMetadataTasksTest {
         txnTasks.initializeStreamWriters(commitWriter, abortWriter);
 
         UUID txnId = UUID.randomUUID();
-        txnTasks.writeAbortEvent(SCOPE, STREAM, 0, txnId, TxnStatus.ABORTING).join();
+        txnTasks.writeAbortEvent(SCOPE, STREAM, 0, txnId, TxnStatus.ABORTING, 0L).join();
         Pair<String, AbortEvent> request = abortWriter.requestsReceived.take();
         assertEquals(request.getKey(), request.getValue().getKey());
         txnTasks.writeAbortEvent(new AbortEvent(SCOPE, STREAM, 0, txnId)).join();
@@ -743,7 +743,7 @@ public class StreamTransactionMetadataTasksTest {
         // verify that both use the same key
         assertEquals(request.getKey(), request2.getKey());
 
-        txnTasks.writeCommitEvent(SCOPE, STREAM, 0, txnId, TxnStatus.COMMITTING).join();
+        txnTasks.writeCommitEvent(SCOPE, STREAM, 0, txnId, TxnStatus.COMMITTING, 0L).join();
         Pair<String, CommitEvent> request3 = commitWriter.requestsReceived.take();
         assertEquals(request3.getKey(), request3.getValue().getKey());
         txnTasks.writeCommitEvent(new CommitEvent(SCOPE, STREAM, 0)).join();

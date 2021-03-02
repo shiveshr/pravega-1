@@ -13,6 +13,7 @@ import io.pravega.client.tables.KeyValueTableConfiguration;
 import io.pravega.controller.store.Scope;
 import io.pravega.controller.store.VersionedMetadata;
 import io.pravega.controller.store.kvtable.records.KVTSegmentRecord;
+import io.pravega.controller.store.stream.OperationContext;
 import org.apache.commons.lang3.tuple.Pair;
 
 import java.util.List;
@@ -35,11 +36,11 @@ public interface KVTableMetadataStore extends AutoCloseable {
      * @param name  Stream name.
      * @return Return a streamContext
      */
-    KVTOperationContext createContext(final String scope, final String name);
+    KVTOperationContext createContext(final String scope, final String name, final long requestId);
 
-    CompletableFuture<Boolean> checkScopeExists(String scope);
+    CompletableFuture<Boolean> checkScopeExists(String scope, OperationContext context, Executor executor);
 
-    CompletableFuture<Boolean> checkTableExists(String scope, String kvt);
+    CompletableFuture<Boolean> checkTableExists(String scope, String kvt, OperationContext context, Executor executor);
 
     /**
      * Creates a new stream with the given name and configuration.
@@ -70,7 +71,7 @@ public interface KVTableMetadataStore extends AutoCloseable {
                                             final String kvtName,
                                             final KeyValueTableConfiguration configuration,
                                             final long createTimestamp,
-                                            final KVTOperationContext context,
+                                            final OperationContext context,
                                             final Executor executor);
 
     /**
@@ -84,7 +85,7 @@ public interface KVTableMetadataStore extends AutoCloseable {
      */
     CompletableFuture<Long> getCreationTime(final String scopeName,
                                             final String kvtName,
-                                            final KVTOperationContext context,
+                                            final OperationContext context,
                                             final Executor executor);
 
     /**
@@ -98,8 +99,8 @@ public interface KVTableMetadataStore extends AutoCloseable {
      */
 
     CompletableFuture<Void> setState(String scope, String name,
-                                     KVTableState state, KVTOperationContext context,
-                                        Executor executor);
+                                     KVTableState state, OperationContext context,
+                                     Executor executor);
 
 
     /**
@@ -112,7 +113,8 @@ public interface KVTableMetadataStore extends AutoCloseable {
      * @param executor callers executor
      * @return Future of boolean if state update succeeded.
      */
-    CompletableFuture<KVTableState> getState(final String scope, final String name, final boolean ignoreCached, final KVTOperationContext context, final Executor executor);
+    CompletableFuture<KVTableState> getState(final String scope, final String name, final boolean ignoreCached, 
+                                             final OperationContext context, final Executor executor);
 
     /**
      * Api to get the current state with its current version.
@@ -125,7 +127,7 @@ public interface KVTableMetadataStore extends AutoCloseable {
      */
 
     CompletableFuture<VersionedMetadata<KVTableState>> getVersionedState(final String scope, final String name,
-                                                                         final KVTOperationContext context, final Executor executor);
+                                                                         final OperationContext context, final Executor executor);
 
     /**
      * Api to update versioned state as a CAS operation.
@@ -141,10 +143,10 @@ public interface KVTableMetadataStore extends AutoCloseable {
 
     CompletableFuture<VersionedMetadata<KVTableState>> updateVersionedState(final String scope, final String name,
                                                     final KVTableState state, final VersionedMetadata<KVTableState> previous,
-                                                    final KVTOperationContext context,
+                                                    final OperationContext context,
                                                     final Executor executor);
 
-    KeyValueTable getKVTable(String scope, final String name, KVTOperationContext context);
+    KeyValueTable getKVTable(String scope, final String name, OperationContext context);
 
     /**
      * Get active segments.
@@ -155,7 +157,8 @@ public interface KVTableMetadataStore extends AutoCloseable {
      * @param context  operation context
      * @return currently active segments
      */
-    CompletableFuture<List<KVTSegmentRecord>> getActiveSegments(final String scope, final String name, final KVTOperationContext context, final Executor executor);
+    CompletableFuture<List<KVTSegmentRecord>> getActiveSegments(final String scope, final String name, final OperationContext context,
+                                                                final Executor executor);
 
     /**
      * Fetches the current stream configuration.
@@ -167,8 +170,8 @@ public interface KVTableMetadataStore extends AutoCloseable {
      * @return current stream configuration.
      */
     CompletableFuture<KeyValueTableConfiguration> getConfiguration(final String scope, final String name,
-                                                            final KVTOperationContext context,
-                                                            final Executor executor);
+                                                                   final OperationContext context,
+                                                                   final Executor executor);
 
     /**
      * List existing KeyValueTables in scopes with pagination.
@@ -182,7 +185,8 @@ public interface KVTableMetadataStore extends AutoCloseable {
      * @return A pair of list of KeyValueTables in scope with the continuation token.
      */
     CompletableFuture<Pair<List<String>, String>> listKeyValueTables(final String scopeName, final String continuationToken,
-                                                             final int limit, final Executor executor);
+                                                                     final int limit, final OperationContext context, 
+                                                                     final Executor executor);
 
     /**
      * Returns a Scope object from scope identifier.
@@ -190,7 +194,7 @@ public interface KVTableMetadataStore extends AutoCloseable {
      * @param scopeName scope identifier is scopeName.
      * @return Scope object.
      */
-    Scope newScope(final String scopeName);
+    Scope newScope(final String scopeName, long requestId);
 
     /**
      * Api to get all segments in the stream.
@@ -203,7 +207,7 @@ public interface KVTableMetadataStore extends AutoCloseable {
      * @return Future, which when complete will contain a list of all segments in the stream.
      */
     CompletableFuture<Set<Long>> getAllSegmentIds(final String scope, final String name,
-                                                  final KVTOperationContext context, final Executor executor);
+                                                  final OperationContext context, final Executor executor);
 
 
     /**
@@ -216,7 +220,7 @@ public interface KVTableMetadataStore extends AutoCloseable {
      * @return future
      */
     CompletableFuture<Void> deleteKeyValueTable(final String scopeName,
-                                         final String kvtName,
-                                         final KVTOperationContext context,
-                                         final Executor executor);
+                                                final String kvtName,
+                                                final OperationContext context,
+                                                final Executor executor);
 }

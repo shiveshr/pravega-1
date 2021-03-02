@@ -9,11 +9,15 @@
  */
 package io.pravega.controller.store.kvtable;
 
+import io.pravega.controller.store.Scope;
+import io.pravega.controller.store.stream.OperationContext;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
 @AllArgsConstructor
 @Getter
-public class KVTOperationContext {
+class KVTOperationContext implements OperationContext {
+    private final Scope scope;
     private final KeyValueTable kvTable;
+    private final long requestId;
 }

@@ -12,8 +12,8 @@ package io.pravega.controller.store.stream;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import io.pravega.client.stream.ReaderGroupConfig;
+import io.pravega.common.Exceptions;
 import io.pravega.common.concurrent.Futures;
-import io.pravega.common.util.BitConverter;
 import io.pravega.controller.store.PravegaTablesStoreHelper;
 import io.pravega.controller.store.Version;
 import io.pravega.controller.store.VersionedMetadata;
@@ -24,8 +24,9 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
+import static io.pravega.controller.store.PravegaTablesStoreHelper.BYTES_TO_UUID_FUNCTION;
 import static io.pravega.shared.NameUtils.INTERNAL_SCOPE_NAME;
 import static io.pravega.shared.NameUtils.getQualifiedTableName;
 
@@ -47,19 +48,21 @@ class PravegaTablesReaderGroup extends AbstractReaderGroup {
     private static final String STATE_KEY = "state";
 
     private final PravegaTablesStoreHelper storeHelper;
-    private final Supplier<CompletableFuture<String>> readerGroupsInScopeTableNameSupplier;
-    private AtomicReference<String> idRef;
-    private final ScheduledExecutorService executor;
+    private final Function<Boolean, CompletableFuture<String>> readerGroupsInScopeTableNameSupplier;
+    private final AtomicReference<String> idRef;
+    private final long operationStartTime;
+    private final long requestId;
 
     @VisibleForTesting
     PravegaTablesReaderGroup(final String scopeName, final String rgName, PravegaTablesStoreHelper storeHelper,
-                        Supplier<CompletableFuture<String>> rgInScopeTableNameSupplier,
-                        ScheduledExecutorService executor) {
+                             Function<Boolean, CompletableFuture<String>> rgInScopeTableNameSupplier,
+                             ScheduledExecutorService executor, long requestId) {
         super(scopeName, rgName);
         this.storeHelper = storeHelper;
         this.readerGroupsInScopeTableNameSupplier = rgInScopeTableNameSupplier;
+        this.operationStartTime = System.currentTimeMillis();
+        this.requestId = requestId;
         this.idRef = new AtomicReference<>(null);
-        this.executor = executor;
     }
 
     private CompletableFuture<String> getId() {
@@ -67,10 +70,17 @@ class PravegaTablesReaderGroup extends AbstractReaderGroup {
         if (!Strings.isNullOrEmpty(id)) {
             return CompletableFuture.completedFuture(id);
         } else {
-            return readerGroupsInScopeTableNameSupplier.get()
-                    .thenCompose(readerGroupsInScopeTable ->
-                            storeHelper.getEntry(readerGroupsInScopeTable, getName(),
-                                    x -> BitConverter.readUUID(x, 0)))
+            // first get the scope id from the cache.
+            // if the cache does not contain scope id then we load it from the supplier. 
+            // if cache contains the scope id then we load the streamid. if not found, we load the whole shit
+            return Futures.exceptionallyComposeExpecting(
+                    readerGroupsInScopeTableNameSupplier.apply(false).thenCompose(streamsInScopeTable ->
+                            storeHelper.getCachedOrLoad(streamsInScopeTable, getName(),
+                                    BYTES_TO_UUID_FUNCTION, operationStartTime, requestId)),
+                    e -> Exceptions.unwrap(e) instanceof StoreException.DataContainerNotFoundException,
+                    () -> readerGroupsInScopeTableNameSupplier.apply(true).thenCompose(streamsInScopeTable ->
+                            storeHelper.getCachedOrLoad(streamsInScopeTable, getName(),
+                                    BYTES_TO_UUID_FUNCTION, operationStartTime, requestId)))
                     .thenComposeAsync(data -> {
                         idRef.compareAndSet(null, data.getObject().toString());
                         return getId();
@@ -90,32 +100,32 @@ class PravegaTablesReaderGroup extends AbstractReaderGroup {
     CompletableFuture<Void> createMetadataTables() {
         return getId().thenCompose(id -> {
             String metadataTable = getMetadataTableName(id);
-            return storeHelper.createTable(metadataTable)
+            return storeHelper.createTable(metadataTable, requestId)
                     .thenAccept(v -> log.debug("reader group {}/{} metadata table {} created", getScope(), getName(), metadataTable));
         });
     }
 
     @Override
     CompletableFuture<Void> storeCreationTimeIfAbsent(final long creationTime) {
-        return getMetadataTable()
-                .thenCompose(metadataTable -> storeHelper.addNewEntryIfAbsent(metadataTable, CREATION_TIME_KEY, PravegaTablesStoreHelper.LONG_TO_BYTES_FUNCTION, creationTime)
-                        .thenAccept(v -> storeHelper.invalidateCache(metadataTable, CREATION_TIME_KEY)));
+        return Futures.toVoid(getMetadataTable()
+                .thenCompose(metadataTable -> storeHelper.addNewEntryIfAbsent(metadataTable, CREATION_TIME_KEY,
+                        creationTime, PravegaTablesStoreHelper.LONG_TO_BYTES_FUNCTION, requestId)));
     }
 
     @Override
     public CompletableFuture<Void> createConfigurationIfAbsent(final ReaderGroupConfig configuration) {
         ReaderGroupConfigRecord configRecord = ReaderGroupConfigRecord.update(configuration, 0L, false);
-        return getMetadataTable()
+        return Futures.toVoid(getMetadataTable()
                 .thenCompose(metadataTable -> storeHelper.addNewEntryIfAbsent(metadataTable, CONFIGURATION_KEY,
-                        ReaderGroupConfigRecord::toBytes, configRecord)
-                        .thenAccept(v -> storeHelper.invalidateCache(metadataTable, CONFIGURATION_KEY)));
+                        configRecord, ReaderGroupConfigRecord::toBytes, requestId)));
     }
 
     @Override
     CompletableFuture<Void> createStateIfAbsent() {
         return getMetadataTable()
                 .thenCompose(metadataTable -> Futures.toVoid(storeHelper.addNewEntryIfAbsent(metadataTable, STATE_KEY,
-                        ReaderGroupStateRecord::toBytes, ReaderGroupStateRecord.builder().state(ReaderGroupState.CREATING).build())));
+                        ReaderGroupStateRecord.builder().state(ReaderGroupState.CREATING).build(), 
+                        ReaderGroupStateRecord::toBytes, requestId)));
 
     }
 
@@ -123,11 +133,7 @@ class PravegaTablesReaderGroup extends AbstractReaderGroup {
     CompletableFuture<Version> setStateData(final VersionedMetadata<ReaderGroupStateRecord> state) {
         return getMetadataTable()
                 .thenCompose(metadataTable -> storeHelper.updateEntry(metadataTable, STATE_KEY, ReaderGroupStateRecord::toBytes, 
-                        state.getObject(), state.getVersion())
-                        .thenApply(r -> {
-                            storeHelper.invalidateCache(metadataTable, STATE_KEY);
-                            return r;
-                        }));
+                        state.getObject(), state.getVersion(), requestId));
     }
 
     @Override
@@ -135,9 +141,10 @@ class PravegaTablesReaderGroup extends AbstractReaderGroup {
         return getMetadataTable()
                 .thenCompose(metadataTable -> {
                     if (ignoreCached) {
-                        return storeHelper.getEntry(metadataTable, STATE_KEY, ReaderGroupStateRecord::fromBytes);
+                        storeHelper.invalidateCache(metadataTable, STATE_KEY);
                     }
-                    return storeHelper.getCachedOrLoad(metadataTable, STATE_KEY, ReaderGroupStateRecord::fromBytes, 0L);
+                    return storeHelper.getCachedOrLoad(metadataTable, STATE_KEY, ReaderGroupStateRecord::fromBytes, 
+                            ignoreCached ? operationStartTime : 0L, requestId);
                 });
     }
 
@@ -146,15 +153,16 @@ class PravegaTablesReaderGroup extends AbstractReaderGroup {
         return getMetadataTable()
                 .thenCompose(metadataTable -> {
                     if (ignoreCached) {
-                        return storeHelper.getEntry(metadataTable, CONFIGURATION_KEY, ReaderGroupConfigRecord::fromBytes);
+                        storeHelper.invalidateCache(metadataTable, CONFIGURATION_KEY);
                     }
-                    return storeHelper.getCachedOrLoad(metadataTable, CONFIGURATION_KEY, ReaderGroupConfigRecord::fromBytes, 0L);
+                    return storeHelper.getCachedOrLoad(metadataTable, CONFIGURATION_KEY, ReaderGroupConfigRecord::fromBytes,
+                            ignoreCached ? operationStartTime : 0L, requestId);
                 });
     }
 
     @Override
     public CompletableFuture<Void> delete() {
-        return getId().thenCompose(id -> storeHelper.deleteTable(getMetadataTableName(id), false)
+        return getId().thenCompose(id -> storeHelper.deleteTable(getMetadataTableName(id), false, requestId)
         .thenCompose(v -> {
             this.idRef.set(null);
             return CompletableFuture.completedFuture(null);
@@ -165,15 +173,6 @@ class PravegaTablesReaderGroup extends AbstractReaderGroup {
     CompletableFuture<Version> setConfigurationData(final VersionedMetadata<ReaderGroupConfigRecord> configuration) {
         return getMetadataTable()
                 .thenCompose(metadataTable -> storeHelper.updateEntry(metadataTable, CONFIGURATION_KEY, ReaderGroupConfigRecord::toBytes, 
-                        configuration.getObject(), configuration.getVersion())
-                        .thenApply(r -> {
-                            storeHelper.invalidateCache(metadataTable, CONFIGURATION_KEY);
-                            return r;
-                        }));
-    }
-
-    @Override
-    public void refresh() {
-        idRef.set(null);
+                        configuration.getObject(), configuration.getVersion(), requestId));
     }
 }

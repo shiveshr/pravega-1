@@ -25,7 +25,6 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -46,16 +45,18 @@ import static io.pravega.shared.NameUtils.getQualifiedTableName;
  */
 @Slf4j
 public class PravegaTablesScope implements Scope {
-    private static final String STREAMS_IN_SCOPE_TABLE_FORMAT = "streamsInScope" + SEPARATOR + "%s";
     private static final String KVTABLES_IN_SCOPE_TABLE_FORMAT = "kvTablesInScope" + SEPARATOR + "%s";
     private static final String READER_GROUPS_IN_SCOPE_TABLE_FORMAT = "readerGroupsInScope" + SEPARATOR + "%s";
+    public static final String STREAMS_IN_SCOPE_TABLE_FORMAT = "streamsInScope" + SEPARATOR + "%s";
     private final String scopeName;
     private final PravegaTablesStoreHelper storeHelper;
     private final AtomicReference<UUID> idRef;
+    private final long requestId;
 
-    public PravegaTablesScope(final String scopeName, PravegaTablesStoreHelper storeHelper) {
+    public PravegaTablesScope(final String scopeName, PravegaTablesStoreHelper storeHelper, long requestId) {
         this.scopeName = scopeName;
         this.storeHelper = storeHelper;
+        this.requestId = requestId;
         this.idRef = new AtomicReference<>(null);
     }
 
@@ -73,10 +74,10 @@ public class PravegaTablesScope implements Scope {
         // This unique id is used to create scope specific table with unique id.
         // If scope entry exists in Scopes table, create the streamsInScope table before throwing DataExists exception
         return Futures.handleCompose(withCreateTableIfAbsent(() -> storeHelper.addNewEntry(
-                SCOPES_TABLE, scopeName, UUID_TO_BYTES_FUNCTION, newId()), SCOPES_TABLE), (r, e) -> {
+                SCOPES_TABLE, scopeName, UUID_TO_BYTES_FUNCTION, newId(), requestId), SCOPES_TABLE), (r, e) -> {
             if (e == null || Exceptions.unwrap(e) instanceof StoreException.DataExistsException) {
                 return CompletableFuture.allOf(getStreamsInScopeTableName()
-                        .thenCompose(streamsTableName -> storeHelper.createTable(streamsTableName)
+                        .thenCompose(streamsTableName -> storeHelper.createTable(streamsTableName, requestId)
                                                              .thenAccept(v -> {
                                                                  log.debug("table for streams created {}", streamsTableName);
                                                                  if (e != null) {
@@ -84,7 +85,7 @@ public class PravegaTablesScope implements Scope {
                                                                  }
                                                              })),
                         getKVTablesInScopeTableName()
-                        .thenCompose(kvtsTableName -> storeHelper.createTable(kvtsTableName)
+                        .thenCompose(kvtsTableName -> storeHelper.createTable(kvtsTableName, requestId)
                                 .thenAccept(v -> {
                                     log.debug("table for kvts created {}", kvtsTableName);
                                     if (e != null) {
@@ -92,7 +93,7 @@ public class PravegaTablesScope implements Scope {
                                     }
                                 })),
                         getReaderGroupsInScopeTableName()
-                        .thenCompose(rgTableName -> storeHelper.createTable(rgTableName)
+                        .thenCompose(rgTableName -> storeHelper.createTable(rgTableName, requestId)
                                 .thenAccept(v -> {
                                     log.debug("table for reader groups created {}", rgTableName);
                                     if (e != null) {
@@ -107,16 +108,37 @@ public class PravegaTablesScope implements Scope {
     }
 
     public CompletableFuture<String> getStreamsInScopeTableName() {
+        return getStreamsInScopeTableName(true);
+    }
+    
+    public CompletableFuture<String> getStreamsInScopeTableName(boolean ignoreCached) {
+        if (ignoreCached) {
+            storeHelper.invalidateCache(SCOPES_TABLE, scopeName);
+        }
         return getId().thenApply(id ->
                 getQualifiedTableName(INTERNAL_SCOPE_NAME, scopeName, String.format(STREAMS_IN_SCOPE_TABLE_FORMAT, id.toString())));
     }
 
     public CompletableFuture<String> getKVTablesInScopeTableName() {
+        return getKVTablesInScopeTableName(true);
+    }
+    
+    public CompletableFuture<String> getKVTablesInScopeTableName(boolean ignoreCached) {
+        if (ignoreCached) {
+            storeHelper.invalidateCache(SCOPES_TABLE, scopeName);
+        }
         return getId().thenApply(id ->
                 getQualifiedTableName(INTERNAL_SCOPE_NAME, scopeName, String.format(KVTABLES_IN_SCOPE_TABLE_FORMAT, id.toString())));
     }
 
     public CompletableFuture<String> getReaderGroupsInScopeTableName() {
+        return getReaderGroupsInScopeTableName(true);
+    }
+    
+    public CompletableFuture<String> getReaderGroupsInScopeTableName(boolean ignoreCached) {
+        if (ignoreCached) {
+            storeHelper.invalidateCache(SCOPES_TABLE, scopeName);
+        }
         return getId().thenApply(id ->
                 getQualifiedTableName(INTERNAL_SCOPE_NAME, scopeName, String.format(READER_GROUPS_IN_SCOPE_TABLE_FORMAT, id.toString())));
     }
@@ -124,7 +146,7 @@ public class PravegaTablesScope implements Scope {
     CompletableFuture<UUID> getId() {
         UUID id = idRef.get();
         if (Objects.isNull(id)) {
-            return storeHelper.getEntry(SCOPES_TABLE, scopeName, BYTES_TO_UUID_FUNCTION)
+            return storeHelper.getCachedOrLoad(SCOPES_TABLE, scopeName, BYTES_TO_UUID_FUNCTION, 0L, requestId)
                               .thenCompose(entry -> {
                                   UUID uuid = entry.getObject();
                                   idRef.compareAndSet(null, uuid);
@@ -137,7 +159,7 @@ public class PravegaTablesScope implements Scope {
 
     @Override
     public CompletableFuture<Void> deleteScope() {
-        CompletableFuture<String> streamsInScopeTableNameFuture = getStreamsInScopeTableName();
+        CompletableFuture<String> streamsInScopeTableNameFuture = getStreamsInScopeTableName(true);
         CompletableFuture<String> rgsInScopeTableNameFuture = getReaderGroupsInScopeTableName();
         CompletableFuture<String> kvtsInScopeTableNameFuture = getKVTablesInScopeTableName();
         return CompletableFuture.allOf(streamsInScopeTableNameFuture, rgsInScopeTableNameFuture, kvtsInScopeTableNameFuture)
@@ -145,17 +167,17 @@ public class PravegaTablesScope implements Scope {
                     String streamsInScopeTableName = streamsInScopeTableNameFuture.join();
                     String kvtsInScopeTableName = kvtsInScopeTableNameFuture.join();
                     String rgsInScopeTableName = rgsInScopeTableNameFuture.join();
-                    return CompletableFuture.allOf(storeHelper.deleteTable(streamsInScopeTableName, true),
-                            storeHelper.deleteTable(kvtsInScopeTableName, true), 
-                            storeHelper.deleteTable(rgsInScopeTableName, true))
+                    return CompletableFuture.allOf(storeHelper.deleteTable(streamsInScopeTableName, true, requestId),
+                            storeHelper.deleteTable(kvtsInScopeTableName, true, requestId), 
+                            storeHelper.deleteTable(rgsInScopeTableName, true, requestId))
                                      .thenAccept(v -> log.debug("tables deleted {} {} {}", streamsInScopeTableName,
                                              kvtsInScopeTableName, rgsInScopeTableName));
                 })
-                .thenCompose(deleted -> storeHelper.removeEntry(SCOPES_TABLE, scopeName));
+                .thenCompose(deleted -> storeHelper.removeEntry(SCOPES_TABLE, scopeName, requestId));
     }
 
     @Override
-    public CompletableFuture<Pair<List<String>, String>> listStreams(int limit, String continuationToken, Executor executor) {
+    public CompletableFuture<Pair<List<String>, String>> listStreams(int limit, String continuationToken) {
         return getStreamsInScopeTableName()
                 .thenCompose(streamsInScopeTable -> readAll(limit, continuationToken, streamsInScopeTable));
     }
@@ -164,84 +186,78 @@ public class PravegaTablesScope implements Scope {
     public CompletableFuture<List<String>> listStreamsInScope() {
         List<String> result = new ArrayList<>();
         return getStreamsInScopeTableName()
-                .thenCompose(tableName -> Futures.exceptionallyExpecting(storeHelper.getAllKeys(tableName).collectRemaining(result::add)
+                .thenCompose(tableName -> Futures.exceptionallyExpecting(storeHelper.getAllKeys(tableName, requestId).collectRemaining(result::add)
                                                      .thenApply(v -> result), DATA_NOT_FOUND_PREDICATE, Collections.emptyList()));
     }
-
-    @Override
-    public void refresh() {
-        idRef.set(null);
-    }
-
+    
     public CompletableFuture<Void> addStreamToScope(String stream) {
         return getStreamsInScopeTableName()
                 .thenCompose(tableName -> Futures.toVoid(
-                        withCreateTableIfAbsent(() -> storeHelper.addNewEntryIfAbsent(tableName, stream, UUID_TO_BYTES_FUNCTION, newId()), 
+                        withCreateTableIfAbsent(() -> storeHelper.addNewEntryIfAbsent(tableName, stream, newId(), UUID_TO_BYTES_FUNCTION, requestId), 
                         tableName)));
     }
 
     public CompletableFuture<Void> removeStreamFromScope(String stream) {
         return getStreamsInScopeTableName()
-                .thenCompose(tableName -> Futures.toVoid(storeHelper.removeEntry(tableName, stream)));
+                .thenCompose(tableName -> Futures.toVoid(storeHelper.removeEntry(tableName, stream, requestId)));
     }
 
     public CompletableFuture<Boolean> checkStreamExistsInScope(String stream) {
         return getStreamsInScopeTableName()
                 .thenCompose(tableName -> storeHelper.expectingDataNotFound(
-                        storeHelper.getEntry(tableName, stream, x -> x).thenApply(v -> true), false));
+                        storeHelper.getEntry(tableName, stream, x -> x, requestId).thenApply(v -> true), false));
     }
 
     public CompletableFuture<Boolean> checkKeyValueTableExistsInScope(String kvt) {
         return getKVTablesInScopeTableName()
                 .thenCompose(tableName -> storeHelper.expectingDataNotFound(
-                        storeHelper.getEntry(tableName, kvt, x -> x).thenApply(v -> true), false));
+                        storeHelper.getEntry(tableName, kvt, x -> x, requestId).thenApply(v -> true), false));
     }
 
     public CompletableFuture<Boolean> checkReaderGroupExistsInScope(String readerGroupName) {
         return getReaderGroupsInScopeTableName()
                 .thenCompose(tableName -> storeHelper.expectingDataNotFound(
-                        storeHelper.getEntry(tableName, readerGroupName, x -> x).thenApply(v -> true), false));
+                        storeHelper.getEntry(tableName, readerGroupName, x -> x, requestId).thenApply(v -> true), false));
     }
 
     public CompletableFuture<Void> addKVTableToScope(String kvt, byte[] id) {
         return getKVTablesInScopeTableName()
                 .thenCompose(tableName -> Futures.toVoid(
-                        withCreateTableIfAbsent(() -> storeHelper.addNewEntryIfAbsent(tableName, kvt, x -> x, id), tableName)));
+                        withCreateTableIfAbsent(() -> storeHelper.addNewEntryIfAbsent(tableName, kvt, id, x -> x, requestId), tableName)));
     }
 
     public CompletableFuture<Void> removeKVTableFromScope(String kvt) {
         return getKVTablesInScopeTableName()
-                .thenCompose(tableName -> Futures.toVoid(storeHelper.removeEntry(tableName, kvt)));
+                .thenCompose(tableName -> Futures.toVoid(storeHelper.removeEntry(tableName, kvt, requestId)));
     }
 
     public CompletableFuture<Void> addReaderGroupToScope(String readerGroupName, UUID readerGroupId) {
         return getReaderGroupsInScopeTableName()
                 .thenCompose(tableName -> Futures.toVoid(withCreateTableIfAbsent(
-                        () -> storeHelper.addNewEntryIfAbsent(tableName, readerGroupName, UUID_TO_BYTES_FUNCTION, readerGroupId),
+                        () -> storeHelper.addNewEntryIfAbsent(tableName, readerGroupName, readerGroupId, UUID_TO_BYTES_FUNCTION, requestId),
                         tableName)));
     }
 
     public CompletableFuture<Void> removeReaderGroupFromScope(String readerGroup) {
         return getReaderGroupsInScopeTableName()
-                .thenCompose(tableName -> Futures.toVoid(storeHelper.removeEntry(tableName, readerGroup)));
+                .thenCompose(tableName -> Futures.toVoid(storeHelper.removeEntry(tableName, readerGroup, requestId)));
     }
 
     public CompletableFuture<UUID> getReaderGroupId(String readerGroupName) {
         return getReaderGroupsInScopeTableName()
-                .thenCompose(tableName -> storeHelper.getEntry(tableName, readerGroupName, BYTES_TO_UUID_FUNCTION)
+                .thenCompose(tableName -> storeHelper.getEntry(tableName, readerGroupName, BYTES_TO_UUID_FUNCTION, requestId)
                         .thenApply(VersionedMetadata::getObject));
     }
 
     @Override
-    public CompletableFuture<Pair<List<String>, String>> listKeyValueTables(int limit, String continuationToken,
-                                                                            Executor executor) {
+    public CompletableFuture<Pair<List<String>, String>> listKeyValueTables(int limit, String continuationToken) {
         return getKVTablesInScopeTableName()
                 .thenCompose(kvtablesInScopeTable -> readAll(limit, continuationToken, kvtablesInScopeTable));
     }
 
     private <T> CompletableFuture<T> withCreateTableIfAbsent(Supplier<CompletableFuture<T>> futureSupplier, String tableName) {
         return Futures.exceptionallyComposeExpecting(futureSupplier.get(), 
-                DATA_NOT_FOUND_PREDICATE, () -> storeHelper.createTable(tableName).thenCompose(v -> futureSupplier.get()));
+                DATA_NOT_FOUND_PREDICATE, () -> storeHelper.createTable(tableName, requestId).thenCompose(v -> futureSupplier.get()));
     } 
     
     private CompletableFuture<Pair<List<String>, String>> readAll(int limit, String continuationToken, String tableName) {
@@ -250,7 +266,7 @@ public class PravegaTablesScope implements Scope {
         AtomicBoolean canContinue = new AtomicBoolean(true);
 
         return Futures.exceptionallyExpecting(storeHelper.getKeysPaginated(tableName,
-                Unpooled.wrappedBuffer(Base64.getDecoder().decode(token.get())), limit)
+                Unpooled.wrappedBuffer(Base64.getDecoder().decode(token.get())), limit, requestId)
                           .thenApply(result -> {
                               if (result.getValue().isEmpty()) {
                                   canContinue.set(false);

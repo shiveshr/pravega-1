@@ -130,7 +130,7 @@ public class PeriodicWatermarking implements AutoCloseable {
     public CompletableFuture<Void> watermark(Stream stream) {
         String scope = stream.getScope();
         String streamName = stream.getStreamName();
-        OperationContext context = streamMetadataStore.createContext(scope, streamName);
+        OperationContext context = streamMetadataStore.createStreamContext(scope, streamName);
 
         if (scope.equals(NameUtils.INTERNAL_SCOPE_NAME)) {
             return CompletableFuture.completedFuture(null); 

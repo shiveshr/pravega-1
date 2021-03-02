@@ -437,7 +437,7 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
         AssertExtensions.assertThrows(UnsupportedOperationException.class,
                 () -> store.getReaderGroupId("scope", "readergroup").get());
         AssertExtensions.assertThrows(UnsupportedOperationException.class,
-                () -> store.checkReaderGroupExists("scope", "readergroup").get());
+                () -> store.checkReaderGroupExists("scope", "readergroup", requestId).get());
     }
     
     private CompletableFuture<TxnStatus> createAndCommitTxn(UUID txnId, String scope, String stream) {
@@ -479,12 +479,12 @@ public class ZKStreamMetadataStoreTest extends StreamMetadataStoreTest {
 
         @Override
         @Synchronized
-        ZKStream newStream(String scope, String name) {
+        ZKStream newStream(String scope, String name, long requestId) {
             String scopedStreamName = NameUtils.getScopedStreamName(scope, name);
             if (map.containsKey(scopedStreamName)) {
                 return map.get(scopedStreamName);
             } else {
-                return super.newStream(scope, name);
+                return super.newStream(scope, name, requestId);
             }
         }
 

@@ -239,7 +239,7 @@ public class ZkStreamTest {
 
         store.createStream(SCOPE, streamName, streamConfig, System.currentTimeMillis(), null, executor).get();
         store.setState(SCOPE, streamName, State.ACTIVE, null, executor).get();
-        OperationContext context = store.createContext(SCOPE, streamName);
+        OperationContext context = store.createStreamContext(SCOPE, streamName);
 
         // set minimum number of segments to 1 so that we can also test scale downs
         streamConfig = StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build();
@@ -457,7 +457,7 @@ public class ZkStreamTest {
         store.createStream(SCOPE, streamName, streamConfig, System.currentTimeMillis(), null, executor).get();
         store.setState(SCOPE, streamName, State.ACTIVE, null, executor).get();
 
-        OperationContext context = store.createContext(ZkStreamTest.SCOPE, streamName);
+        OperationContext context = store.createStreamContext(ZkStreamTest.SCOPE, streamName);
 
         UUID txnId1 = store.generateTransactionId(SCOPE, streamName, null, executor).join();
         VersionedTransactionData tx = store.createTransaction(SCOPE, streamName, txnId1, 10000, 600000,

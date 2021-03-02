@@ -12,6 +12,7 @@ package io.pravega.controller.server.eventProcessor.requesthandlers;
 import com.google.common.annotations.VisibleForTesting;
 import io.pravega.common.Timer;
 import io.pravega.common.concurrent.Futures;
+import io.pravega.common.tracing.TagLogger;
 import io.pravega.controller.eventProcessor.impl.SerializedRequestHandler;
 import io.pravega.controller.metrics.TransactionMetrics;
 import io.pravega.controller.store.stream.OperationContext;
@@ -26,6 +27,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.stream.Collectors;
 
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.LoggerFactory;
 
 /**
  * This actor processes commit txn events.
@@ -35,6 +37,8 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Slf4j
 public class AbortRequestHandler extends SerializedRequestHandler<AbortEvent> {
+    private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(AbortRequestHandler.class));
+
     private final StreamMetadataStore streamMetadataStore;
     private final StreamMetadataTasks streamMetadataTasks;
     private final ScheduledExecutorService executor;
@@ -70,8 +74,9 @@ public class AbortRequestHandler extends SerializedRequestHandler<AbortEvent> {
         int epoch = event.getEpoch();
         UUID txId = event.getTxid();
         Timer timer = new Timer();
-        OperationContext context = streamMetadataStore.createContext(scope, stream);
-        log.debug("Aborting transaction {} on stream {}/{}", event.getTxid(), event.getScope(), event.getStream());
+        long requestId = streamMetadataTasks.getRequestId(scope, stream, txId.toString(), "abortTxn");
+        OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
+        log.debug(requestId, "Aborting transaction {} on stream {}/{}", event.getTxid(), event.getScope(), event.getStream());
 
         return Futures.toVoid(streamMetadataStore.getSegmentsInEpoch(event.getScope(), event.getStream(), epoch, context, executor)
                                                  .thenApply(segments -> segments.stream().map(StreamSegmentRecord::segmentId)
@@ -80,11 +85,11 @@ public class AbortRequestHandler extends SerializedRequestHandler<AbortEvent> {
                 .thenCompose(x -> streamMetadataStore.abortTransaction(scope, stream, txId, context, executor))
                 .whenComplete((result, error) -> {
                     if (error != null) {
-                        log.error("Failed aborting transaction {} on stream {}/{}", event.getTxid(),
+                        log.warn(requestId, "Failed aborting transaction {} on stream {}/{}", event.getTxid(),
                                 event.getScope(), event.getStream());
                         TransactionMetrics.getInstance().abortTransactionFailed(scope, stream, event.getTxid().toString());
                     } else {
-                        log.debug("Successfully aborted transaction {} on stream {}/{}", event.getTxid(),
+                        log.info(requestId, "Successfully aborted transaction {} on stream {}/{}", event.getTxid(),
                                 event.getScope(), event.getStream());
                         if (processedEvents != null) {
                             processedEvents.offer(event);

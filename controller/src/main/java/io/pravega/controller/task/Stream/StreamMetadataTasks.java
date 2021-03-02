@@ -43,7 +43,6 @@ import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.State;
 import io.pravega.controller.store.stream.StoreException;
 import io.pravega.controller.store.stream.StreamMetadataStore;
-import io.pravega.controller.store.stream.RGOperationContext;
 import io.pravega.controller.store.stream.ReaderGroupState;
 import io.pravega.controller.store.VersionedMetadata;
 import io.pravega.controller.store.stream.records.EpochRecord;
@@ -214,12 +213,13 @@ public class StreamMetadataTasks extends TaskBase {
      * @return CompletableFuture which when completed will have creation status for the stream.
      */
     public CompletableFuture<CreateStreamStatus.Status> createRGStream(String scope, String stream, StreamConfiguration config,
-                                                                                       long createTimestamp, int numOfRetries) {
+                                                                       long createTimestamp, int numOfRetries, long requestId) {
         Preconditions.checkNotNull(config, "streamConfig");
         Preconditions.checkArgument(createTimestamp >= 0);
         NameUtils.validateStreamName(stream);
+        OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
 
-        return Futures.exceptionallyExpecting(streamMetadataStore.getState(scope, stream, true, null, executor),
+        return Futures.exceptionallyExpecting(streamMetadataStore.getState(scope, stream, true, context, executor),
                 e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, State.UNKNOWN)
                 .thenCompose(state -> {
                     log.debug("CREATING RG Stream...{}", state.toString());
@@ -227,7 +227,9 @@ public class StreamMetadataTasks extends TaskBase {
                         return createStreamRetryOnLockFailure(scope,
                                 stream,
                                 config,
-                                createTimestamp, 10);
+                                createTimestamp, 
+                                numOfRetries, 
+                                requestId);
                     } else {
                         return CompletableFuture.completedFuture(CreateStreamStatus.Status.STREAM_EXISTS);
                     }
@@ -245,8 +247,11 @@ public class StreamMetadataTasks extends TaskBase {
     * @return CompletableFuture which when completed will have creation status for the stream.
     */
     public CompletableFuture<CreateStreamStatus.Status> createStreamRetryOnLockFailure(String scope, String stream, StreamConfiguration config,
-                                                                                       long createTimestamp, int numOfRetries) {
-        return RetryHelper.withRetriesAsync(() ->  createStream(scope, stream, config, createTimestamp),
+                                                                                       long createTimestamp, int numOfRetries, 
+                                                                                       long requestId) {
+        OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
+
+        return RetryHelper.withRetriesAsync(() ->  createStream(scope, stream, config, createTimestamp, context),
                 e -> Exceptions.unwrap(e) instanceof LockFailedException, numOfRetries, executor)
                 .exceptionally(e -> {
                     log.warn("createStream threw exception {}", e.getCause().getMessage());
@@ -264,23 +269,22 @@ public class StreamMetadataTasks extends TaskBase {
      *
      * @param scope  Reader Group scope.
      * @param rgName Reader Group name.
-     * @param contextOpt Reader Group context.
+     * @param requestId requestid.
      * @return creation status.
      */
     public CompletableFuture<ReaderGroupConfigResponse> getReaderGroupConfig(final String scope, final String rgName,
-                                                                             RGOperationContext contextOpt) {
-        final long requestId = requestTracker.getRequestIdFor("getReaderGroupConfig", scope, rgName);
+                                                                             long requestId) {
+        OperationContext context = streamMetadataStore.createRGContext(scope, rgName, requestId);
         return RetryHelper.withRetriesAsync(() -> {
           // 1. check if RG with this name exists...
-          return streamMetadataStore.checkReaderGroupExists(scope, rgName)
+          return streamMetadataStore.checkReaderGroupExists(scope, rgName, context, executor)
              .thenCompose(exists -> {
                if (!exists) {
                   return CompletableFuture.completedFuture(ReaderGroupConfigResponse.newBuilder()
                                     .setConfig(ReaderGroupConfiguration.getDefaultInstance())
                                     .setStatus(ReaderGroupConfigResponse.Status.RG_NOT_FOUND).build());
                }
-               final RGOperationContext context = contextOpt == null ? streamMetadataStore.createRGContext(scope, rgName) : contextOpt;
-               return streamMetadataStore.getReaderGroupId(scope, rgName)
+               return streamMetadataStore.getReaderGroupId(scope, rgName, context, executor)
                     .thenCompose(rgId -> streamMetadataStore.getReaderGroupConfigRecord(scope, rgName, context, executor)
                             .thenApply(configRecord -> ReaderGroupConfigResponse.newBuilder()
                                 .setConfig(getRGConfigurationFromRecord(scope, rgName, configRecord.getObject(), rgId.toString()))
@@ -323,34 +327,35 @@ public class StreamMetadataTasks extends TaskBase {
      * @return creation status.
      */
     public CompletableFuture<CreateReaderGroupResponse> createReaderGroup(final String scope, final String rgName,
-                                                                               final ReaderGroupConfig config, long createTimestamp) {
-    final long requestId = requestTracker.getRequestIdFor("createReaderGroup", scope, rgName);
+                                                                          final ReaderGroupConfig config, long createTimestamp, 
+                                                                          final long requestId) {
+    OperationContext context = streamMetadataStore.createRGContext(scope, rgName, requestId);
     return RetryHelper.withRetriesAsync(() -> {
       // 1. check if scope with this name exists...
-      return streamMetadataStore.checkScopeExists(scope)
+      return streamMetadataStore.checkScopeExists(scope, context)
          .thenCompose(exists -> {
          if (!exists) {
                   return CompletableFuture.completedFuture(Controller.CreateReaderGroupResponse.newBuilder()
                                   .setStatus(CreateReaderGroupResponse.Status.SCOPE_NOT_FOUND).build());
          }
          //2. check state of the ReaderGroup, if found
-         return isRGCreationComplete(scope, rgName)
+         return isRGCreationComplete(scope, rgName, context)
                  .thenCompose(complete -> {
                      if (!complete) {
                          //3. Create Reader Group Metadata inside Scope and submit the event
                          return eventHelper.addIndexAndSubmitTask(buildCreateRGEvent(scope, rgName, config, requestId, createTimestamp),
-                                 () -> streamMetadataStore.addReaderGroupToScope(scope, rgName, config.getReaderGroupId()))
-                                         .thenCompose(x -> eventHelper.checkDone(() -> isRGCreated(scope, rgName, executor))
-                                         .thenCompose(done -> buildCreateSuccessResponse(scope, rgName)));
+                                 () -> streamMetadataStore.addReaderGroupToScope(scope, rgName, config.getReaderGroupId(), context, executor))
+                                         .thenCompose(x -> eventHelper.checkDone(() -> isRGCreated(scope, rgName, context))
+                                         .thenCompose(done -> buildCreateSuccessResponse(scope, rgName, context)));
                      }
-                     return buildCreateSuccessResponse(scope, rgName);
+                     return buildCreateSuccessResponse(scope, rgName, context);
                  });
          });
         }, e -> Exceptions.unwrap(e) instanceof RetryableException, READER_GROUP_OPERATION_MAX_RETRIES, executor);
     }
 
-    public CompletableFuture<Boolean> isRGCreationComplete(String scope, String rgName) {
-        return Futures.exceptionallyExpecting(streamMetadataStore.getReaderGroupState(scope, rgName, true, null, executor),
+    public CompletableFuture<Boolean> isRGCreationComplete(String scope, String rgName, OperationContext context) {
+        return Futures.exceptionallyExpecting(streamMetadataStore.getReaderGroupState(scope, rgName, true, context, executor),
         e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, ReaderGroupState.UNKNOWN)
         .thenCompose(state -> {
         if (state.equals(ReaderGroupState.UNKNOWN) || state.equals(ReaderGroupState.CREATING)) {
@@ -360,9 +365,9 @@ public class StreamMetadataTasks extends TaskBase {
         });
     }
 
-    private CompletableFuture<CreateReaderGroupResponse> buildCreateSuccessResponse(final String scope, final String rgName) {
-        return streamMetadataStore.getReaderGroupId(scope, rgName)
-                .thenCompose(rgId -> streamMetadataStore.getReaderGroupConfigRecord(scope, rgName, null, executor)
+    private CompletableFuture<CreateReaderGroupResponse> buildCreateSuccessResponse(final String scope, final String rgName, OperationContext context) {
+        return streamMetadataStore.getReaderGroupId(scope, rgName, context, executor)
+                .thenCompose(rgId -> streamMetadataStore.getReaderGroupConfigRecord(scope, rgName, context, executor)
                         .thenApply(cfgRecord -> Controller.CreateReaderGroupResponse.newBuilder()
                                 .setConfig(io.pravega.controller.server.rest.ModelHelper.encodeReaderGroupConfigRecord(scope, rgName, cfgRecord.getObject(), rgId))
                                 .setStatus(CreateReaderGroupResponse.Status.SUCCESS)
@@ -384,36 +389,50 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     public CompletableFuture<CreateReaderGroupResponse.Status> createReaderGroupTasks(final String scope, final String readerGroup,
-                                                                             final ReaderGroupConfig config, final long createTimestamp) {
-        final RGOperationContext context = streamMetadataStore.createRGContext(scope, readerGroup);
+                                                                                      final ReaderGroupConfig config, 
+                                                                                      final long createTimestamp,
+                                                                                      final long requestId) {
+        OperationContext context = streamMetadataStore.createRGContext(scope, readerGroup, requestId);
+        return createReaderGroupTasks(scope, readerGroup, config, createTimestamp, requestId);
+    }
+    
+    public CompletableFuture<CreateReaderGroupResponse.Status> createReaderGroupTasks(final String scope, final String readerGroup,
+                                                                                      final ReaderGroupConfig config, 
+                                                                                      final long createTimestamp,
+                                                                                      final OperationContext context) {
+        Preconditions.checkNotNull(context, "operation context not null");
         return streamMetadataStore.createReaderGroup(scope, readerGroup, config, createTimestamp, context, executor)
                 .thenCompose(v -> {
                     if (!ReaderGroupConfig.StreamDataRetention.NONE.equals(config.getRetentionType())) {
                         String scopedRGName = NameUtils.getScopedReaderGroupName(scope, readerGroup);
                         // update Stream metadata tables, only if RG is a Subscriber
                         Iterator<String> streamIter = config.getStartingStreamCuts().keySet().stream()
-                                .map(s -> s.getScopedName()).iterator();
-                        return Futures.loop(() -> streamIter.hasNext(), () -> {
+                                                            .map(Stream::getScopedName).iterator();
+                        return Futures.loop(streamIter::hasNext, () -> {
                             Stream stream = Stream.of(streamIter.next());
+                            
                             return streamMetadataStore.addSubscriber(stream.getScope(),
                                     stream.getStreamName(), scopedRGName, config.getGeneration(), null, executor);
                         }, executor);
                     }
                     return CompletableFuture.completedFuture(null);
-                }).thenCompose(x -> createRGStream(scope, NameUtils.getStreamForReaderGroup(readerGroup),
-                StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build(),
-                System.currentTimeMillis(), 10)
-                .thenCompose(createStatus -> {
-                    if (createStatus.equals(Controller.CreateStreamStatus.Status.STREAM_EXISTS)
-                            || createStatus.equals(Controller.CreateStreamStatus.Status.SUCCESS)) {
-                        return streamMetadataStore.getVersionedReaderGroupState(scope, readerGroup, true, null, executor)
-                                .thenCompose(newstate -> streamMetadataStore.updateReaderGroupVersionedState(scope, readerGroup,
-                                        ReaderGroupState.ACTIVE, newstate, context, executor))
-                                .thenApply(v1 -> CreateReaderGroupResponse.Status.SUCCESS);
-                    }
-                    return Futures.failedFuture(new IllegalStateException(String.format("Error creating StateSynchronizer Stream for Reader Group %s: %s",
-                            readerGroup, createStatus.toString())));
-                })).exceptionally(ex -> {
+                }).thenCompose(x -> {
+                    String streamForReaderGroup = NameUtils.getStreamForReaderGroup(readerGroup);
+                    return createRGStream(scope, streamForReaderGroup,
+                            StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build(),
+                            System.currentTimeMillis(), Integer.MAX_VALUE, context.getRequestId())
+                            .thenCompose(createStatus -> {
+                                if (createStatus.equals(CreateStreamStatus.Status.STREAM_EXISTS)
+                                        || createStatus.equals(CreateStreamStatus.Status.SUCCESS)) {
+                                    return streamMetadataStore.getVersionedReaderGroupState(scope, readerGroup, true, context, executor)
+                                                              .thenCompose(newstate -> streamMetadataStore.updateReaderGroupVersionedState(scope, readerGroup,
+                                                                      ReaderGroupState.ACTIVE, newstate, context, executor))
+                                                              .thenApply(v1 -> CreateReaderGroupResponse.Status.SUCCESS);
+                                }
+                                return Futures.failedFuture(new IllegalStateException(String.format("Error creating StateSynchronizer Stream for Reader Group %s: %s",
+                                        readerGroup, createStatus.toString())));
+                            });
+                }).exceptionally(ex -> {
             log.debug("RG Stream Create failed with error: " + ex.getMessage());
             Throwable cause = Exceptions.unwrap(ex);
             throw new CompletionException(cause);
@@ -422,7 +441,7 @@ public class StreamMetadataTasks extends TaskBase {
 
     public CompletableFuture<CreateReaderGroupResponse> createReaderGroupInternal(final String scope, final String rgName,
                                                                                        final ReaderGroupConfig config,
-                                                                                       final long createTimestamp) {
+                                                                                       final long createTimestamp, long requestId) {
         Preconditions.checkNotNull(scope, "ReaderGroup scope is null");
         Preconditions.checkNotNull(rgName, "ReaderGroup name is null");
         Preconditions.checkNotNull(config, "ReaderGroup config is null");
@@ -434,37 +453,39 @@ public class StreamMetadataTasks extends TaskBase {
             return CompletableFuture.completedFuture(CreateReaderGroupResponse.newBuilder()
                     .setStatus(CreateReaderGroupResponse.Status.INVALID_RG_NAME).build());
         }
+        OperationContext context = streamMetadataStore.createRGContext(scope, rgName, requestId);
         return RetryHelper.withRetriesAsync(() -> {
             // 1. check if scope with this name exists...
-            return streamMetadataStore.checkScopeExists(scope)
+            return streamMetadataStore.checkScopeExists(scope, context)
                     .thenCompose(exists -> {
                         if (!exists) {
                             return CompletableFuture.completedFuture(CreateReaderGroupResponse.newBuilder()
                                     .setStatus(CreateReaderGroupResponse.Status.SCOPE_NOT_FOUND).build());
                         }
                         //2. check state of the ReaderGroup
-                        return isRGCreationComplete(scope, rgName)
+                        return isRGCreationComplete(scope, rgName, context)
                                 .thenCompose(complete -> {
                                     if (!complete) {
-                                        return streamMetadataStore.addReaderGroupToScope(scope, rgName, config.getReaderGroupId())
-                                                .thenCompose(x -> createReaderGroupTasks(scope, rgName, config, createTimestamp))
+                                        return streamMetadataStore.addReaderGroupToScope(scope, rgName, config.getReaderGroupId(),
+                                                context, executor)
+                                                .thenCompose(x -> createReaderGroupTasks(scope, rgName, config, createTimestamp, context))
                                                 .thenCompose(status -> {
                                                     if (CreateReaderGroupResponse.Status.SUCCESS.equals(status)) {
-                                                        return buildCreateSuccessResponse(scope, rgName);
+                                                        return buildCreateSuccessResponse(scope, rgName, context);
                                                     } else {
                                                         return CompletableFuture.completedFuture(CreateReaderGroupResponse.newBuilder()
                                                                 .setStatus(status).build());
                                                     }
                                                 });
                                     }
-                                    return buildCreateSuccessResponse(scope, rgName);
+                                    return buildCreateSuccessResponse(scope, rgName, context);
                                 });
                     });
         }, e -> Exceptions.unwrap(e) instanceof RetryableException, 10, executor);
     }
 
-    private CompletableFuture<Boolean> isRGCreated(String scope, String rgName, Executor executor) {
-        return Futures.exceptionallyExpecting(streamMetadataStore.getReaderGroupState(scope, rgName, true, null, executor),
+    private CompletableFuture<Boolean> isRGCreated(String scope, String rgName, OperationContext context) {
+        return Futures.exceptionallyExpecting(streamMetadataStore.getReaderGroupState(scope, rgName, true, context, executor),
                 e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, ReaderGroupState.UNKNOWN)
                 .thenApply(state -> {
                     log.debug("ReaderGroup State is {}", state.toString());
@@ -478,16 +499,15 @@ public class StreamMetadataTasks extends TaskBase {
      * @param scope           Reader Group scope.
      * @param rgName          Reader Group name.
      * @param config          New Reader Group config.
-     * @param contextOpt      Reader Group context.
+     * @param requestId       request id.
      * @return updation status.
      */
     public CompletableFuture<UpdateReaderGroupResponse> updateReaderGroup(final String scope, final String rgName,
-                                                                               final ReaderGroupConfig config, RGOperationContext contextOpt) {
-        final RGOperationContext context = contextOpt == null ? streamMetadataStore.createRGContext(scope, rgName) : contextOpt;
-        final long requestId = requestTracker.getRequestIdFor("updateReaderGroup", scope, rgName);
+                                                                               final ReaderGroupConfig config, long requestId) {
+        final OperationContext context = streamMetadataStore.createRGContext(scope, rgName, requestId);
         return RetryHelper.withRetriesAsync(() -> {
             // 1. check if Reader Group exists...
-            return streamMetadataStore.checkReaderGroupExists(scope, rgName)
+            return streamMetadataStore.checkReaderGroupExists(scope, rgName, context, executor)
                .thenCompose(exists -> {
                if (!exists) {
                    UpdateReaderGroupResponse response = UpdateReaderGroupResponse.newBuilder()
@@ -505,7 +525,7 @@ public class StreamMetadataTasks extends TaskBase {
                             return CompletableFuture.completedFuture(response);
                         }
                         if (!rgConfigRecord.getObject().isUpdating()) {
-                          return streamMetadataStore.getReaderGroupId(scope, rgName)
+                          return streamMetadataStore.getReaderGroupId(scope, rgName, context, executor)
                              .thenCompose(rgId -> {
                              if (!config.getReaderGroupId().equals(rgId)) {
                                  UpdateReaderGroupResponse response = UpdateReaderGroupResponse.newBuilder()
@@ -563,14 +583,14 @@ public class StreamMetadataTasks extends TaskBase {
             // changing from subscriber to non-subscriber
             // unsubscribe from all streams from current config
             ImmutableSet.Builder<String> streamsToBeUnsubscribedBuilder = ImmutableSet.builder();
-            currentConfig.getStartingStreamCuts().keySet().forEach(s -> streamsToBeUnsubscribedBuilder.add(s));
+            currentConfig.getStartingStreamCuts().keySet().forEach(streamsToBeUnsubscribedBuilder::add);
             return streamsToBeUnsubscribedBuilder.build();
         } else {
             final Set<String> currentConfigStreams = currentConfig.getStartingStreamCuts().keySet();
-            final Set<String> newConfigStreams = newConfig.getStartingStreamCuts().keySet().stream().map(s -> s.getScopedName()).collect(Collectors.toSet());
+            final Set<String> newConfigStreams = newConfig.getStartingStreamCuts().keySet().stream().map(Stream::getScopedName).collect(Collectors.toSet());
             ImmutableSet.Builder<String> setBuilder = ImmutableSet.builder();
             currentConfigStreams.stream()
-                    .filter(s -> !newConfigStreams.contains(s)).forEach(s -> setBuilder.add(s));
+                    .filter(s -> !newConfigStreams.contains(s)).forEach(setBuilder::add);
             return setBuilder.build();
         }
 
@@ -609,22 +629,21 @@ public class StreamMetadataTasks extends TaskBase {
      * @param rgName          Reader Group name.
      * @param readerGroupId   Reader Group unique identifier.
      * @param generation      Reader Group generation.
-     * @param contextOpt      Reader Group context.
+     * @param requestId       request id.
      * @return deletion status.
      */
     public CompletableFuture<DeleteReaderGroupStatus.Status> deleteReaderGroup(final String scope, final String rgName,
                                                                                final String readerGroupId,
                                                                                final long generation,
-                                                                               RGOperationContext contextOpt) {
-        final RGOperationContext context = contextOpt == null ? streamMetadataStore.createRGContext(scope, rgName) : contextOpt;
-        final long requestId = requestTracker.getRequestIdFor("deleteReaderGroup", scope, rgName);
+                                                                               final long requestId) {
+        final OperationContext context = streamMetadataStore.createRGContext(scope, rgName, requestId);
         return RetryHelper.withRetriesAsync(() ->
-                streamMetadataStore.checkReaderGroupExists(scope, rgName)
+                streamMetadataStore.checkReaderGroupExists(scope, rgName, context, executor)
                    .thenCompose(exists -> {
                     if (!exists) {
                        return CompletableFuture.completedFuture(DeleteReaderGroupStatus.Status.RG_NOT_FOUND);
                     }
-                    return streamMetadataStore.getReaderGroupId(scope, rgName)
+                    return streamMetadataStore.getReaderGroupId(scope, rgName, context, executor)
                            .thenCompose(rgId -> {
                                if (!rgId.equals(UUID.fromString(readerGroupId))) {
                                    return CompletableFuture.completedFuture(DeleteReaderGroupStatus.Status.RG_NOT_FOUND);
@@ -637,19 +656,19 @@ public class StreamMetadataTasks extends TaskBase {
                                            return streamMetadataStore.getVersionedReaderGroupState(scope, rgName, true, context, executor)
                                                    .thenCompose(versionedState -> eventHelper.addIndexAndSubmitTask(new DeleteReaderGroupEvent(scope, rgName, requestId, rgId, generation),
                                                            () -> startReaderGroupDelete(scope, rgName, versionedState, context))
-                                                           .thenCompose(x -> eventHelper.checkDone(() -> isRGDeleted(scope, rgName))
+                                                           .thenCompose(x -> eventHelper.checkDone(() -> isRGDeleted(scope, rgName, context))
                                                                    .thenApply(done -> DeleteReaderGroupStatus.Status.SUCCESS)));
                                        });
                            });
                 }), e -> Exceptions.unwrap(e) instanceof RetryableException, READER_GROUP_OPERATION_MAX_RETRIES, executor);
     }
 
-    private CompletableFuture<Boolean> isRGDeleted(String scope, String rgName) {
-        return streamMetadataStore.checkReaderGroupExists(scope, rgName).thenApply(exists -> !exists);
+    private CompletableFuture<Boolean> isRGDeleted(String scope, String rgName, OperationContext context) {
+        return streamMetadataStore.checkReaderGroupExists(scope, rgName, context, executor).thenApply(exists -> !exists);
     }
 
     private CompletableFuture<Void> startReaderGroupDelete(final String scope, final String rgName, VersionedMetadata<ReaderGroupState> currentState,
-                                                           RGOperationContext context) {
+                                                           OperationContext context) {
         return Futures.toVoid(streamMetadataStore.updateReaderGroupVersionedState(scope, rgName,
            ReaderGroupState.DELETING, currentState, context, executor));
     }
@@ -664,12 +683,13 @@ public class StreamMetadataTasks extends TaskBase {
      * @return creation status.
      */
     @Task(name = "createStream", version = "1.0", resource = "{scope}/{stream}")
-    public CompletableFuture<CreateStreamStatus.Status> createStream(String scope, String stream, StreamConfiguration config, long createTimestamp) {
+    public CompletableFuture<CreateStreamStatus.Status> createStream(String scope, String stream, StreamConfiguration config, long createTimestamp, 
+                                                                     OperationContext context) {
         log.debug("createStream with resource called.");
         return execute(
                 new Resource(scope, stream),
                 new Serializable[]{scope, stream, config, createTimestamp},
-                () -> createStreamBody(scope, stream, config, createTimestamp));
+                () -> createStreamBody(scope, stream, config, createTimestamp, context));
     }
 
     /**
@@ -677,14 +697,13 @@ public class StreamMetadataTasks extends TaskBase {
      *
      * @param scope      scope.
      * @param stream     stream name.
-     * @param newConfig     modified stream configuration.
-     * @param contextOpt optional context
+     * @param newConfig  modified stream configuration.
+     * @param requestId  requestId
      * @return update status.
      */
     public CompletableFuture<UpdateStreamStatus.Status> updateStream(String scope, String stream, StreamConfiguration newConfig,
-                                                                     OperationContext contextOpt) {
-        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("updateStream", scope, stream);
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
+                                                                     long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
 
         // 1. get configuration
         return streamMetadataStore.getConfigurationRecord(scope, stream, context, executor)
@@ -738,13 +757,12 @@ public class StreamMetadataTasks extends TaskBase {
      * Subscribers are ReaderGroups reading from a Stream such that their reads impact data retention in the Stream.
      * @param scope      scope.
      * @param stream     stream name.
-     * @param contextOpt optional context
+     * @param requestId  request id
      * @return update status.
      */
-    public CompletableFuture<SubscribersResponse> listSubscribers(String scope, String stream, OperationContext contextOpt) {
-        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("listSubscribers", scope, stream);
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
-        return streamMetadataStore.checkStreamExists(scope, stream, context)
+    public CompletableFuture<SubscribersResponse> listSubscribers(String scope, String stream, long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
+        return streamMetadataStore.checkStreamExists(scope, stream, context, executor)
                .thenCompose(exists -> {
                if (!exists) {
                         return CompletableFuture.completedFuture(SubscribersResponse.newBuilder()
@@ -780,56 +798,60 @@ public class StreamMetadataTasks extends TaskBase {
      * @param readerGroupId  Unique Id (UUID) of Reader Group.
      * @param generation  Generation of Subscriber publishing the StreamCut.
      * @param truncationStreamCut  Truncation StreamCut.
-     * @param contextOpt optional context
+     * @param requestId  request id
      * @return update status.
      */
     public CompletableFuture<UpdateSubscriberStatus.Status> updateSubscriberStreamCut(String scope, String stream,
                                                                              String subscriber, String readerGroupId, long generation, ImmutableMap<Long, Long> truncationStreamCut,
-                                                                             OperationContext contextOpt) {
-        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("updateSubscriberStreamCut", scope, stream);
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
+                                                                             long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
 
-        return RetryHelper.withRetriesAsync(() -> streamMetadataStore.checkStreamExists(scope, stream, context)
+        return RetryHelper.withRetriesAsync(() -> streamMetadataStore.checkStreamExists(scope, stream, context, executor)
                 .thenCompose(exists -> {
                 // 1. Check Stream exists.
                 if (!exists) {
                    return CompletableFuture.completedFuture(UpdateSubscriberStatus.Status.STREAM_NOT_FOUND);
                 }
-                return Futures.exceptionallyExpecting(streamMetadataStore.getSubscriber(scope, stream, subscriber, contextOpt, executor),
+                return Futures.exceptionallyExpecting(streamMetadataStore.getSubscriber(scope, stream, subscriber, context, executor),
                        e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, null)
                        .thenCompose(subscriberRecord -> {
-                       // 2. Check Subscriber exists in Stream metadata.
-                       if (subscriberRecord == null) {
-                           return CompletableFuture.completedFuture(UpdateSubscriberStatus.Status.SUBSCRIBER_NOT_FOUND);
-                       }
-                       final List<String> subscriberScopedName = NameUtils.extractScopedNameTokens(subscriber);
-                       return streamMetadataStore.getReaderGroupId(subscriberScopedName.get(0), subscriberScopedName.get(1))
-                               .thenCompose(rgId -> {
-                                 // 3. Check if subscriber Id matches
-                                 if (!rgId.equals(UUID.fromString(readerGroupId))) {
-                                       return CompletableFuture.completedFuture(UpdateSubscriberStatus.Status.SUBSCRIBER_NOT_FOUND);
-                                 }
-                                 if (subscriberRecord.getObject().getGeneration() != generation) {
-                                       return CompletableFuture.completedFuture(UpdateSubscriberStatus.Status.GENERATION_MISMATCH);
-                                 }
-                                 // 4. Update streamcut
-                                 return streamMetadataStore.updateSubscriberStreamCut(scope, stream, subscriber, generation, truncationStreamCut,
-                                                                                        subscriberRecord, context, executor)
-                                          .thenApply(x -> UpdateSubscriberStatus.Status.SUCCESS)
-                                          .exceptionally(ex -> {
-                                              log.warn(requestId, "Exception when trying to update StreamCut for subscriber {}", ex.getMessage());
-                                              Throwable cause = Exceptions.unwrap(ex);
-                                              if (cause instanceof StoreException.OperationNotAllowedException) {
-                                                    log.warn(requestId, "Exception when trying to update StreamCut for subscriber ", cause);
-                                                    return UpdateSubscriberStatus.Status.STREAM_CUT_NOT_VALID;
-                                              } else if (cause instanceof TimeoutException) {
-                                                   throw new CompletionException(cause);
-                                              } else {
-                                                   log.warn(requestId, "Exception when trying to update StreamCut for subscriber ", cause);
-                                                   return UpdateSubscriberStatus.Status.FAILURE;
-                                              }
-                                          });
-                                   });
+                           // 2. Check Subscriber exists in Stream metadata.
+                           if (subscriberRecord == null) {
+                               return CompletableFuture.completedFuture(UpdateSubscriberStatus.Status.SUBSCRIBER_NOT_FOUND);
+                           }
+                           final List<String> subscriberScopedName = NameUtils.extractScopedNameTokens(subscriber);
+                           OperationContext rgContext = streamMetadataStore.createRGContext(subscriberScopedName.get(0), 
+                                   subscriberScopedName.get(1), requestId);
+                           return streamMetadataStore.getReaderGroupId(subscriberScopedName.get(0), subscriberScopedName.get(1), rgContext, executor)
+                                 .thenCompose(rgId -> {
+                                     // 3. Check if subscriber Id matches
+                                     if (!rgId.equals(UUID.fromString(readerGroupId))) {
+                                         return CompletableFuture.completedFuture(UpdateSubscriberStatus.Status.SUBSCRIBER_NOT_FOUND);
+                                     }
+                                     if (subscriberRecord.getObject().getGeneration() != generation) {
+                                         return CompletableFuture.completedFuture(UpdateSubscriberStatus.Status.GENERATION_MISMATCH);
+                                     }
+                                     // 4. Update streamcut
+                                     return streamMetadataStore.updateSubscriberStreamCut(scope, stream, subscriber, generation, truncationStreamCut,
+                                             subscriberRecord, context, executor)
+                                                   .thenApply(x -> UpdateSubscriberStatus.Status.SUCCESS)
+                                                   .exceptionally(ex -> {
+                                                       log.warn(requestId, "Exception when trying to update StreamCut for subscriber {}", 
+                                                               ex.getMessage());
+                                                       Throwable cause = Exceptions.unwrap(ex);
+                                                       if (cause instanceof StoreException.OperationNotAllowedException) {
+                                                           log.warn(requestId, "Exception when trying to update StreamCut for subscriber ", 
+                                                                   cause);
+                                                           return UpdateSubscriberStatus.Status.STREAM_CUT_NOT_VALID;
+                                                       } else if (cause instanceof TimeoutException) {
+                                                           throw new CompletionException(cause);
+                                                       } else {
+                                                           log.warn(requestId, "Exception when trying to update StreamCut for subscriber ", 
+                                                                   cause);
+                                                           return UpdateSubscriberStatus.Status.FAILURE;
+                                                       }
+                                                   });
+                                 });
                         });
         }), e -> Exceptions.unwrap(e) instanceof RetryableException, SUBSCRIBER_OPERATION_RETRIES, executor);
     }
@@ -849,7 +871,7 @@ public class StreamMetadataTasks extends TaskBase {
                                              final long recordingTime, final OperationContext contextOpt, final String delegationToken) {
         Preconditions.checkNotNull(policy);
         final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("truncateStream", scope, stream);
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createStreamContext(scope, stream, requestId) : contextOpt;
 
         return streamMetadataStore.getRetentionSet(scope, stream, context, executor)
                 .thenCompose(retentionSet -> {
@@ -1222,7 +1244,7 @@ public class StreamMetadataTasks extends TaskBase {
                                                                 final OperationContext contextOpt, String delegationToken) {
         final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("generateStreamCut", scope, stream);
 
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createStreamContext(scope, stream, requestId) : contextOpt;
 
         return streamMetadataStore.getActiveSegments(scope, stream, context, executor)
                 .thenCompose(activeSegments -> Futures.allOfWithResults(activeSegments
@@ -1245,14 +1267,13 @@ public class StreamMetadataTasks extends TaskBase {
      * @param scope      scope.
      * @param stream     stream name.
      * @param streamCut  stream cut.
-     * @param contextOpt optional context
+     * @param requestId  requestId
      * @return update status.
      */
     public CompletableFuture<UpdateStreamStatus.Status> truncateStream(final String scope, final String stream,
                                                                        final Map<Long, Long> streamCut,
-                                                                       final OperationContext contextOpt) {
-        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("truncateStream", scope, stream);
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
+                                                                       final long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
 
         // 1. get stream cut
         return startTruncation(scope, stream, streamCut, context, requestId)
@@ -1274,7 +1295,7 @@ public class StreamMetadataTasks extends TaskBase {
 
     public CompletableFuture<Boolean> startTruncation(String scope, String stream, Map<Long, Long> streamCut,
                                                        OperationContext contextOpt, long requestId) {
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
+        final OperationContext context = contextOpt == null ? streamMetadataStore.createStreamContext(scope, stream, requestId) : contextOpt;
 
         return streamMetadataStore.getTruncationRecord(scope, stream, context, executor)
                 .thenCompose(property -> {
@@ -1321,18 +1342,21 @@ public class StreamMetadataTasks extends TaskBase {
      *
      * @param scope      scope.
      * @param stream     stream name.
-     * @param contextOpt optional context
+     * @param requestId  requestId 
      * @return update status.
      */
-    public CompletableFuture<UpdateStreamStatus.Status> sealStream(String scope, String stream, OperationContext contextOpt) {
-        return sealStream(scope, stream, contextOpt, 10);
+    public CompletableFuture<UpdateStreamStatus.Status> sealStream(String scope, String stream, long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
+        return sealStream(scope, stream, context);
+    }
+
+    public CompletableFuture<UpdateStreamStatus.Status> sealStream(String scope, String stream, OperationContext context) {
+        return sealStream(scope, stream, context, 10);
     }
 
     @VisibleForTesting
-    CompletableFuture<UpdateStreamStatus.Status> sealStream(String scope, String stream, OperationContext contextOpt, int retryCount) {
-        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("sealStream", scope, stream);
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
-
+    CompletableFuture<UpdateStreamStatus.Status> sealStream(String scope, String stream, OperationContext context, int retryCount) {
+        long requestId = context.getRequestId();
         // 1. post event for seal.
         SealStreamEvent event = new SealStreamEvent(scope, stream, requestId);
         return eventHelper.addIndexAndSubmitTask(event,
@@ -1370,14 +1394,18 @@ public class StreamMetadataTasks extends TaskBase {
      *
      * @param scope      scope.
      * @param stream     stream name.
-     * @param contextOpt optional context
+     * @param requestId  requestid
      * @return delete status.
      */
     public CompletableFuture<DeleteStreamStatus.Status> deleteStream(final String scope, final String stream,
-                                                                     final OperationContext contextOpt) {
-        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("deleteStream", scope, stream);
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
-
+                                                                     final long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
+        return deleteStream(scope, stream, context);
+    }
+    
+    public CompletableFuture<DeleteStreamStatus.Status> deleteStream(final String scope, final String stream,
+                                                                     final OperationContext context) {
+        Preconditions.checkNotNull(context, "Operation Context is null");
         // We can delete streams only if they are sealed. However, for partially created streams, they could be in different
         // stages of partial creation and we should be able to clean them up. 
         // Case 1: A partially created stream may just have some initial metadata created, in which case the Stream's state may not
@@ -1386,6 +1414,7 @@ public class StreamMetadataTasks extends TaskBase {
         // Case 2: A partially created stream could be in state CREATING, in which case it would definitely have metadata created 
         // and possibly segments too. This requires same clean up as for a sealed stream - metadata + segments. 
         // So we will submit delete workflow.  
+        long requestId = context.getRequestId();
         return Futures.exceptionallyExpecting(
                 streamMetadataStore.getState(scope, stream, false, context, executor), 
                 e -> Exceptions.unwrap(e) instanceof StoreException.DataNotFoundException, State.UNKNOWN)
@@ -1424,7 +1453,7 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     private CompletableFuture<Boolean> isDeleted(String scope, String stream, OperationContext context) {
-        return streamMetadataStore.checkStreamExists(scope, stream, context)
+        return streamMetadataStore.checkStreamExists(scope, stream, context, executor)
                 .thenApply(x -> !x);
     }
 
@@ -1438,14 +1467,13 @@ public class StreamMetadataTasks extends TaskBase {
      * @param segmentsToSeal segments to be sealed.
      * @param newRanges      key ranges for new segments.
      * @param scaleTimestamp scaling time stamp.
-     * @param contextOpt        optional context
+     * @param requestId      request id
      * @return returns the newly created segments.
      */
     public CompletableFuture<ScaleResponse> manualScale(String scope, String stream, List<Long> segmentsToSeal,
                                                         List<Map.Entry<Double, Double>> newRanges, long scaleTimestamp,
-                                                        OperationContext contextOpt) {
-        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor("scaleStream", scope, stream, String.valueOf(scaleTimestamp));
-        final OperationContext context = contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
+                                                        long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
 
         ScaleOpEvent event = new ScaleOpEvent(scope, stream, segmentsToSeal, newRanges, true, scaleTimestamp, requestId);
 
@@ -1483,11 +1511,13 @@ public class StreamMetadataTasks extends TaskBase {
      * @param scope          scope.
      * @param stream         stream name.
      * @param epoch          stream epoch.
-     * @param context        optional context
+     * @param requestId      request id.
      * @return returns the newly created segments.
      */
     public CompletableFuture<ScaleStatusResponse> checkScale(String scope, String stream, int epoch,
-                                                                        OperationContext context) {
+                                                                        long requestId) {
+        OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
+
         CompletableFuture<EpochRecord> activeEpochFuture =
                 streamMetadataStore.getActiveEpoch(scope, stream, context, true, executor);
         CompletableFuture<State> stateFuture =
@@ -1547,9 +1577,9 @@ public class StreamMetadataTasks extends TaskBase {
     }
 
     @VisibleForTesting
-    CompletableFuture<CreateStreamStatus.Status> createStreamBody(String scope, String stream, StreamConfiguration config, long timestamp) {
-        final long requestId = requestTracker.getRequestIdFor("createStream", scope, stream);
-        final OperationContext context = streamMetadataStore.createContext(scope, stream, requestId);
+    CompletableFuture<CreateStreamStatus.Status> createStreamBody(String scope, String stream, StreamConfiguration config, 
+                                                                  long timestamp, OperationContext context) {
+        long requestId = context != null ? context.getRequestId() : requestTracker.getRequestIdFor("createStream", scope, stream);
 
         return this.streamMetadataStore.createStream(scope, stream, config, timestamp, context, executor)
                 .thenComposeAsync(response -> {
@@ -1619,15 +1649,14 @@ public class StreamMetadataTasks extends TaskBase {
     private CompletableFuture<Void> createMarkStream(String scope, String baseStream, long timestamp, long requestId) {
         String markStream = NameUtils.getMarkStreamForStream(baseStream);
         StreamConfiguration config = StreamConfiguration.builder().scalingPolicy(ScalingPolicy.fixed(1)).build();
-        return this.streamMetadataStore.createStream(scope, markStream, config, timestamp, null, executor)
+        OperationContext context = streamMetadataStore.createStreamContext(scope, markStream, requestId);
+        return this.streamMetadataStore.createStream(scope, markStream, config, timestamp, context, executor)
                                 .thenCompose(response -> {
                                     final long segmentId = NameUtils.computeSegmentId(response.getStartingSegmentNumber(), 0);
                                     return notifyNewSegment(scope, markStream, segmentId, response.getConfiguration().getScalingPolicy(),
                                             this.retrieveDelegationToken(), requestId);
                                 })
                                 .thenCompose(v -> {
-                                    final OperationContext context = streamMetadataStore.createContext(scope, markStream, requestId);
-
                                     return streamMetadataStore.getVersionedState(scope, markStream, context, executor)
                                                        .thenCompose(state -> 
                                                                Futures.toVoid(streamMetadataStore.updateVersionedState(scope, markStream, State.ACTIVE,
@@ -1876,5 +1905,9 @@ public class StreamMetadataTasks extends TaskBase {
     @VisibleForTesting
     void setRetentionClock(Supplier<Long> clock) {
         retentionClock.set(clock);
+    }
+
+    public long getRequestId(String ... requestTokens) {
+        return requestTracker.getRequestIdFor(requestTokens);
     }
 }

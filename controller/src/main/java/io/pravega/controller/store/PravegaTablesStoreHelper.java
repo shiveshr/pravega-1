@@ -113,7 +113,7 @@ public class PravegaTablesStoreHelper {
      * @param key key to cache
      * @param <T> Type of object to deserialize the response into.
      */
-    private <T> void putInCache(String table, String key, VersionedMetadata<T> value, long time) {
+    private  <T> void putInCache(String table, String key, VersionedMetadata<T> value, long time) {
         TableCacheKey<T> cacheKey = new TableCacheKey<>(table, key);
         cache.put(cacheKey, value, time);
     }
@@ -134,7 +134,7 @@ public class PravegaTablesStoreHelper {
         }
         return getVersionedMetadata(cachedData);
     }
-
+    
     /**
      * Method to invalidate cached value in the cache for the specified table.
      * @param table table name
@@ -208,6 +208,8 @@ public class PravegaTablesStoreHelper {
                 errorMessage, true)
                 .exceptionally(e -> {
                     Throwable unwrap = Exceptions.unwrap(e);
+                    invalidateCache(tableName, key);
+
                     if (unwrap instanceof StoreException.WriteConflictException) {
                         throw StoreException.create(StoreException.Type.DATA_EXISTS, errorMessage.get());
                     } else {
@@ -234,7 +236,7 @@ public class PravegaTablesStoreHelper {
      * @param <T> Type of value to be added
      * @return CompletableFuture which when completed will have added entry to the table if it did not exist.
      */
-    public <T> CompletableFuture<Version> addNewEntryIfAbsent(String tableName, String key, Function<T, byte[]> toBytes, T val, long requestId) {
+    public <T> CompletableFuture<Version> addNewEntryIfAbsent(String tableName, String key, T val, Function<T, byte[]> toBytes, long requestId) {
         // if entry exists, we will get write conflict in attempting to create it again.
         return expectingDataExists(addNewEntry(tableName, key, toBytes, val, requestId), null);
     }
@@ -252,17 +254,20 @@ public class PravegaTablesStoreHelper {
      * @param toAdd map of keys and values to add.
      * @return CompletableFuture which when completed successfully will indicate that all entries have been added successfully.
      */
-    public CompletableFuture<Void> addNewEntriesIfAbsent(String tableName, Map<String, byte[]> toAdd, long requestId) {
-        List<TableSegmentEntry> entries = toAdd.entrySet().stream().map(x ->
-                TableSegmentEntry.notExists(x.getKey().getBytes(Charsets.UTF_8), x.getValue()))
+    public <T> CompletableFuture<Void> addNewEntriesIfAbsent(String tableName, List<Map.Entry<String, T>> toAdd, Function<T, byte[]> toBytes, 
+                                                             long requestId) {
+        List<TableSegmentEntry> entries = toAdd.stream().map(x ->
+                TableSegmentEntry.notExists(x.getKey().getBytes(Charsets.UTF_8), toBytes.apply(x.getValue())))
                                                .collect(Collectors.toList());
         Supplier<String> errorMessage = () -> String.format("addNewEntriesIfAbsent: table: %s", tableName);
+        long time = System.currentTimeMillis();
         return expectingDataExists(withRetries(() -> segmentHelper.updateTableEntries(tableName, entries, authToken.get(),
                 requestId), errorMessage)
                 .handle((r, e) -> {
                     releaseEntries(entries);
                     if (e != null) {
                         Throwable unwrap = Exceptions.unwrap(e);
+                        toAdd.forEach(entry -> invalidateCache(tableName, entry.getKey()));
                         if (unwrap instanceof StoreException.WriteConflictException) {
                             throw StoreException.create(StoreException.Type.DATA_EXISTS, errorMessage.get());
                         } else {
@@ -271,6 +276,11 @@ public class PravegaTablesStoreHelper {
                         }
                     } else {
                         log.trace("entries added to table {}", tableName);
+                        for (int i = 0; i < r.size(); i++) {
+                            putInCache(tableName, toAdd.get(i).getKey(), 
+                                    new VersionedMetadata<>(toAdd.get(i).getValue(),
+                                            new Version.LongVersion(r.get(i).getSegmentVersion())), time);
+                        }
                         return null;
                     }
                 }), null);
@@ -302,6 +312,10 @@ public class PravegaTablesStoreHelper {
                     putInCache(tableName, key, new VersionedMetadata<>(val, newVersion), time);
                     return newVersion;
                 }, executor)
+                .exceptionally(e -> {
+                    invalidateCache(tableName, key);
+                    throw new CompletionException(e);
+                })
                 .whenComplete((r, ex) -> releaseEntries(entries));
     }
 
@@ -625,7 +639,7 @@ public class PravegaTablesStoreHelper {
                         toThrow = StoreException.create(StoreException.Type.CONNECTION_ERROR, wcfe, errorMessage);
                         break;
                     case SegmentDoesNotExist:
-                        toThrow = StoreException.create(StoreException.Type.DATA_NOT_FOUND, wcfe, errorMessage);
+                        toThrow = StoreException.create(StoreException.Type.DATA_CONTAINER_NOT_FOUND, wcfe, errorMessage);
                         break;
                     case TableSegmentNotEmpty:
                         toThrow = StoreException.create(StoreException.Type.DATA_CONTAINS_ELEMENTS, wcfe, errorMessage);

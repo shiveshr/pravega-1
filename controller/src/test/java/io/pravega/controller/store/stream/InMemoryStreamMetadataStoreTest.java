@@ -44,12 +44,12 @@ public class InMemoryStreamMetadataStoreTest extends StreamMetadataStoreTest {
 
         @Override
         @Synchronized
-        Stream newStream(String scope, String name) {
+        Stream newStream(String scope, String name, long requestId) {
             String scopedStreamName = NameUtils.getScopedStreamName(scope, name);
             if (map.containsKey(scopedStreamName)) {
                 return map.get(scopedStreamName);
             } else {
-                return super.newStream(scope, name);
+                return super.newStream(scope, name, requestId);
             }
         }
 

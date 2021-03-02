@@ -136,11 +136,11 @@ public class ControllerServiceTest {
 
         // region createStream
         startTs = System.currentTimeMillis();
-        OperationContext context = streamStore.createContext(SCOPE, stream1);
+        OperationContext context = streamStore.createStreamContext(SCOPE, stream1);
         streamStore.createStream(SCOPE, stream1, configuration1, startTs, context, executor).get();
         streamStore.setState(SCOPE, stream1, State.ACTIVE, context, executor);
 
-        OperationContext context2 = streamStore.createContext(SCOPE, stream2);
+        OperationContext context2 = streamStore.createStreamContext(SCOPE, stream2);
         streamStore.createStream(SCOPE, stream2, configuration2, startTs, context2, executor).get();
         streamStore.setState(SCOPE, stream2, State.ACTIVE, context2, executor);
 

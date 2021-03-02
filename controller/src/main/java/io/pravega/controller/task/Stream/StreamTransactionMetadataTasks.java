@@ -10,6 +10,7 @@
 package io.pravega.controller.task.Stream;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import io.pravega.client.EventStreamClientFactory;
 import io.pravega.client.stream.EventStreamWriter;
 import io.pravega.client.stream.EventWriterConfig;
@@ -17,6 +18,7 @@ import io.pravega.common.Exceptions;
 import io.pravega.common.Timer;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.tracing.RequestTracker;
+import io.pravega.common.tracing.TagLogger;
 import io.pravega.controller.metrics.TransactionMetrics;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.server.eventProcessor.ControllerEventProcessorConfig;
@@ -58,6 +60,7 @@ import lombok.Synchronized;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
+import org.slf4j.LoggerFactory;
 
 import static io.pravega.controller.util.RetryHelper.RETRYABLE_PREDICATE;
 import static io.pravega.controller.util.RetryHelper.withRetriesAsync;
@@ -69,8 +72,9 @@ import static io.pravega.controller.util.RetryHelper.withRetriesAsync;
  * Any update to the task method signature should be avoided, since it can cause problems during upgrade.
  * Instead, a new overloaded method may be created with the same task annotation name but a new version.
  */
-@Slf4j
 public class StreamTransactionMetadataTasks implements AutoCloseable {
+    private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(StreamTransactionMetadataTasks.class));
+
     /**
      * We derive the maximum execution timeout from the lease time. We assume
      * a maximum number of renewals for the txn and compute the maximum execution
@@ -211,14 +215,14 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      * @param stream             stream name.
      * @param lease              Time for which transaction shall remain open with sending any heartbeat.
      *                           the scaling operation is initiated on the txn stream.
-     * @param contextOpt         operational context
+     * @param requestId          request id.
      * @return transaction id.
      */
     public CompletableFuture<Pair<VersionedTransactionData, List<StreamSegmentRecord>>> createTxn(final String scope,
                                                                                       final String stream,
                                                                                       final long lease,
-                                                                                      final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "createTxn", UUID.randomUUID().toString());
+                                                                                      final long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
         return createTxnBody(scope, stream, lease, context);
     }
 
@@ -229,15 +233,16 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      * @param stream Stream name.
      * @param txId Transaction identifier.
      * @param lease Amount of time in milliseconds by which to extend the transaction lease.
-     * @param contextOpt       operational context
+     * @param requestId requestId
      * @return Transaction metadata along with the version of it record in the store.
      */
     public CompletableFuture<PingTxnStatus> pingTxn(final String scope,
                                                     final String stream,
                                                     final UUID txId,
                                                     final long lease,
-                                                    final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "pingTxn", txId.toString());
+                                                    final long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, 
+                requestId == 0L ? requestTracker.getRequestIdFor(scope, stream, txId.toString(), "abort") : requestId);
         return pingTxnBody(scope, stream, txId, lease, context);
     }
 
@@ -248,15 +253,33 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      * @param stream stream name.
      * @param txId   transaction id.
      * @param version Expected version of the transaction record in the store.
-     * @param contextOpt       operational context
+     * @param requestId request id.
      * @return true/false.
      */
     public CompletableFuture<TxnStatus> abortTxn(final String scope,
                                                  final String stream,
                                                  final UUID txId,
                                                  final Version version,
-                                                 final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "abortTxn", txId.toString());
+                                                 final long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
+        return abortTxn(scope, stream, txId, version, context);
+    }
+
+    /**
+     * Abort transaction.
+     *
+     * @param scope  stream scope.
+     * @param stream stream name.
+     * @param txId   transaction id.
+     * @param version Expected version of the transaction record in the store.
+     * @param context operation context.
+     * @return true/false.
+     */
+    public CompletableFuture<TxnStatus> abortTxn(final String scope,
+                                                 final String stream,
+                                                 final UUID txId,
+                                                 final Version version,
+                                                 final OperationContext context) {
         return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, false, txId, version, context),
                 RETRYABLE_PREDICATE, 3, executor);
     }
@@ -267,12 +290,12 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      * @param scope      stream scope.
      * @param stream     stream name.
      * @param txId       transaction id.
-     * @param contextOpt optional context
+     * @param requestId  request id.
      * @return true/false.
      */
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
-                                                  final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "commitTxn", txId.toString());
+                                                  final long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
         return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, "", Long.MIN_VALUE, context),
                 RETRYABLE_PREDICATE, 3, executor);
     }
@@ -285,13 +308,13 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      * @param txId       transaction id.
      * @param writerId   writer id
      * @param timestamp  commit time as recorded by writer
-     * @param contextOpt optional context
+     * @param requestId  requestid
      * @return true/false.
      */
     public CompletableFuture<TxnStatus> commitTxn(final String scope, final String stream, final UUID txId,
                                                   final String writerId, final long timestamp,
-                                                  final OperationContext contextOpt) {
-        final OperationContext context = getNonNullOperationContext(scope, stream, contextOpt, "commitTxn", txId.toString());
+                                                  final long requestId) {
+        final OperationContext context = streamMetadataStore.createStreamContext(scope, stream, requestId);
         return withRetriesAsync(() -> sealTxnBody(hostId, scope, stream, true, txId, null, writerId, timestamp, context),
                 RETRYABLE_PREDICATE, 3, executor);
     }
@@ -327,6 +350,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                                                                    final String stream,
                                                                                    final long lease,
                                                                                    final OperationContext ctx) {
+        Preconditions.checkNotNull(ctx, "Operation context is null");
         // Step 1. Validate parameters.
         CompletableFuture<Void> validate = validate(lease);
         long maxExecutionPeriod = Math.min(MAX_EXECUTION_TIME_MULTIPLIER * lease, maxTransactionExecutionTimeBound.get());
@@ -344,11 +368,11 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         return validate.thenCompose(validated -> RetryHelper.withRetriesAsync(() ->
                 streamMetadataStore.generateTransactionId(scope, stream, ctx, executor)
                 .thenCompose(txnId -> {
-                    CompletableFuture<Void> addIndex = addTxnToIndex(scope, stream, txnId);
+                    CompletableFuture<Void> addIndex = addTxnToIndex(scope, stream, txnId, ctx.getRequestId());
 
                     // Step 3. Create txn node in the store.
                     CompletableFuture<VersionedTransactionData> txnFuture = createTxnInStore(scope, stream, lease,
-                            ctx, maxExecutionPeriod, txnId, addIndex);
+                            ctx, maxExecutionPeriod, txnId, addIndex, ctx.getRequestId());
 
                     // Step 4. Notify segment stores about new txn.
                     CompletableFuture<List<StreamSegmentRecord>> segmentsFuture = txnFuture.thenComposeAsync(txnData ->
@@ -358,11 +382,11 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                             notifyTxnCreation(scope, stream, activeSegments, txnId), executor).whenComplete((v, e) ->
                             // Method notifyTxnCreation ensures that notification completes
                             // even in the presence of n/w or segment store failures.
-                            log.trace("Txn={}, notified segments stores", txnId));
+                            log.trace(ctx.getRequestId(), "Txn={}, notified segments stores", txnId));
 
                     // Step 5. Start tracking txn in timeout service
                     return notify.whenCompleteAsync((result, ex) -> {
-                        addTxnToTimeoutService(scope, stream, lease, maxExecutionPeriod, txnId, txnFuture);
+                        addTxnToTimeoutService(scope, stream, lease, maxExecutionPeriod, txnId, txnFuture, ctx.getRequestId());
                     }, executor).thenApplyAsync(v -> {
                         List<StreamSegmentRecord> segments = segmentsFuture.join().stream().map(x -> {
                             long generalizedSegmentId = RecordHelper.generalizedSegmentId(x.segmentId(), txnId);
@@ -381,7 +405,7 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
     }
 
     private void addTxnToTimeoutService(String scope, String stream, long lease, long maxExecutionPeriod, UUID txnId,
-                                        CompletableFuture<VersionedTransactionData> txnFuture) {
+                                        CompletableFuture<VersionedTransactionData> txnFuture, long requestId) {
         Version version = null;
         long executionExpiryTime = System.currentTimeMillis() + maxExecutionPeriod;
         if (!txnFuture.isCompletedExceptionally()) {
@@ -389,32 +413,32 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
             executionExpiryTime = txnFuture.join().getMaxExecutionExpiryTime();
         }
         timeoutService.addTxn(scope, stream, txnId, version, lease, executionExpiryTime);
-        log.trace("Txn={}, added to timeout service on host={}", txnId, hostId);
+        log.trace(requestId, "Txn={}, added to timeout service on host={}", txnId, hostId);
     }
 
     private CompletableFuture<VersionedTransactionData> createTxnInStore(String scope, String stream, long lease,
                                                                          OperationContext ctx, long maxExecutionPeriod, UUID txnId,
-                                                                         CompletableFuture<Void> addIndex) {
+                                                                         CompletableFuture<Void> addIndex, long requestId) {
         return addIndex.thenComposeAsync(ignore ->
                                 streamMetadataStore.createTransaction(scope, stream, txnId, lease, maxExecutionPeriod,
                                         ctx, executor), executor).whenComplete((v, e) -> {
                             if (e != null) {
-                                log.debug("Txn={}, failed creating txn in store", txnId);
+                                log.debug(requestId, "Txn={}, failed creating txn in store", txnId);
                             } else {
-                                log.debug("Txn={}, created in store", txnId);
+                                log.debug(requestId, "Txn={}, created in store", txnId);
                             }
                         });
     }
 
-    private CompletableFuture<Void> addTxnToIndex(String scope, String stream, UUID txnId) {
+    private CompletableFuture<Void> addTxnToIndex(String scope, String stream, UUID txnId, long requestId) {
         TxnResource resource = new TxnResource(scope, stream, txnId);
         // Step 2. Add txn to host-transaction index.
         return streamMetadataStore.addTxnToIndex(hostId, resource, null)
                 .whenComplete((v, e) -> {
                     if (e != null) {
-                        log.debug("Txn={}, failed adding txn to host-txn index of host={}", txnId, hostId);
+                        log.debug(requestId, "Txn={}, failed adding txn to host-txn index of host={}", txnId, hostId);
                     } else {
-                        log.debug("Txn={}, added txn to host-txn index of host={}", txnId, hostId);
+                        log.debug(requestId, "Txn={}, added txn to host-txn index of host={}", txnId, hostId);
                     }
                 });
     }
@@ -457,16 +481,17 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
      * @param ctx        context.
      * @return           ping status.
      */
-    CompletableFuture<PingTxnStatus> pingTxnBody(final String scope,
+    private CompletableFuture<PingTxnStatus> pingTxnBody(final String scope,
                                                  final String stream,
                                                  final UUID txnId,
                                                  final long lease,
                                                  final OperationContext ctx) {
+        Preconditions.checkNotNull(ctx, "operation context is null");
         if (!timeoutService.isRunning()) {
             return CompletableFuture.completedFuture(createStatus(Status.DISCONNECTED));
         }
 
-        log.debug("Txn={}, updating txn node in store and extending lease", txnId);
+        log.debug(ctx.getRequestId(), "Txn={}, updating txn node in store and extending lease", txnId);
         return fenceTxnUpdateLease(scope, stream, txnId, lease, ctx);
     }
 
@@ -504,20 +529,21 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
 
                 addIndex.whenComplete((v, e) -> {
                     if (e != null) {
-                        log.debug("Txn={}, failed adding txn to host-txn index of host={}", txnId, hostId);
+                        log.debug(ctx.getRequestId(), "Txn={}, failed adding txn to host-txn index of host={}", txnId, hostId);
                     } else {
-                        log.debug("Txn={}, added txn to host-txn index of host={}", txnId, hostId);
+                        log.debug(ctx.getRequestId(), "Txn={}, added txn to host-txn index of host={}", txnId, hostId);
                     }
                 });
 
                 return addIndex.thenComposeAsync(x -> {
                     // Step 3. Update txn node data in the store.
+                    long requestId = ctx.getRequestId();
                     CompletableFuture<VersionedTransactionData> pingTxn = streamMetadataStore.pingTransaction(
                             scope, stream, txnData, lease, ctx, executor).whenComplete((v, e) -> {
                         if (e != null) {
-                            log.debug("Txn={}, failed updating txn node in store", txnId);
+                            log.debug(requestId, "Txn={}, failed updating txn node in store", txnId);
                         } else {
-                            log.debug("Txn={}, updated txn node in store", txnId);
+                            log.debug(requestId, "Txn={}, updated txn node in store", txnId);
                         }
                     });
 
@@ -530,10 +556,10 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                         // Hence explicitly add a new timeout task.
                         if (timeoutService.containsTxn(scope, stream, txnId)) {
                             // If timeout service knows about this transaction, attempt to increase its lease.
-                            log.debug("Txn={}, extending lease in timeout service", txnId);
+                            log.debug(requestId, "Txn={}, extending lease in timeout service", txnId);
                             timeoutService.pingTxn(scope, stream, txnId, version, lease);
                         } else {
-                            log.debug("Txn={}, adding in timeout service", txnId);
+                            log.debug(requestId, "Txn={}, adding in timeout service", txnId);
                             timeoutService.addTxn(scope, stream, txnId, version, lease, expiryTime);
                         }
                         return createStatus(Status.OK);
@@ -602,6 +628,8 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                                              final String writerId,
                                              final long timestamp,
                                              final OperationContext ctx) {
+        Preconditions.checkNotNull(ctx, "Operation context cannot be null");
+        long requestId = ctx.getRequestId();
         TxnResource resource = new TxnResource(scope, stream, txnId);
         Optional<Version> versionOpt = Optional.ofNullable(version);
 
@@ -614,9 +642,9 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
 
         addIndex.whenComplete((v, e) -> {
             if (e != null) {
-                log.debug("Txn={}, already present/newly added to host-txn index of host={}", txnId, hostId);
+                log.debug(requestId, "Txn={}, already present/newly added to host-txn index of host={}", txnId, hostId);
             } else {
-                log.debug("Txn={}, added txn to host-txn index of host={}", txnId, hostId);
+                log.debug(requestId, "Txn={}, added txn to host-txn index of host={}", txnId, hostId);
             }
         });
 
@@ -625,9 +653,9 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 streamMetadataStore.sealTransaction(scope, stream, txnId, commit, versionOpt, writerId, timestamp, ctx, executor), executor)
                 .whenComplete((v, e) -> {
                     if (e != null) {
-                        log.debug("Txn={}, failed sealing txn", txnId);
+                        log.debug(requestId, "Txn={}, failed sealing txn", txnId);
                     } else {
-                        log.debug("Txn={}, sealed successfully, commit={}", txnId, commit);
+                        log.debug(requestId, "Txn={}, sealed successfully, commit={}", txnId, commit);
                     }
                 });
 
@@ -636,9 +664,9 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
             TxnStatus status = pair.getKey();
             switch (status) {
                 case COMMITTING:
-                    return writeCommitEvent(scope, stream, pair.getValue(), txnId, status);
+                    return writeCommitEvent(scope, stream, pair.getValue(), txnId, status, requestId);
                 case ABORTING:
-                    return writeAbortEvent(scope, stream, pair.getValue(), txnId, status);
+                    return writeAbortEvent(scope, stream, pair.getValue(), txnId, status, requestId);
                 case ABORTED:
                 case COMMITTED:
                     return CompletableFuture.completedFuture(status);
@@ -652,12 +680,12 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
         }, executor).thenComposeAsync(status -> {
             // Step 4. Remove txn from timeoutService, and from the index.
             timeoutService.removeTxn(scope, stream, txnId);
-            log.debug("Txn={}, removed from timeout service", txnId);
+            log.debug(requestId, "Txn={}, removed from timeout service", txnId);
             return streamMetadataStore.removeTxnFromIndex(host, resource, true).whenComplete((v, e) -> {
                 if (e != null) {
-                    log.debug("Txn={}, failed removing txn from host-txn index of host={}", txnId, hostId);
+                    log.debug(requestId, "Txn={}, failed removing txn from host-txn index of host={}", txnId, hostId);
                 } else {
-                    log.debug("Txn={}, removed txn from host-txn index of host={}", txnId, hostId);
+                    log.debug(requestId, "Txn={}, removed txn from host-txn index of host={}", txnId, hostId);
                 }
             }).thenApply(x -> status);
         }, executor);
@@ -668,15 +696,16 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 .thenComposeAsync(commitWriter -> commitWriter.writeEvent(event.getKey(), event), eventExecutor);
     }
 
-    CompletableFuture<TxnStatus> writeCommitEvent(String scope, String stream, int epoch, UUID txnId, TxnStatus status) {
+    CompletableFuture<TxnStatus> writeCommitEvent(String scope, String stream, int epoch, UUID txnId, TxnStatus status, 
+                                                  long requestId) {
         CommitEvent event = new CommitEvent(scope, stream, epoch);
         return TaskStepsRetryHelper.withRetries(() -> writeCommitEvent(event)
                 .handle((r, e) -> {
                     if (e != null) {
-                        log.debug("Transaction {}, failed posting commit event. Retrying...", txnId);
+                        log.debug(requestId, "Transaction {}, failed posting commit event. Retrying...", txnId);
                         throw new WriteFailedException(e);
                     } else {
-                        log.debug("Transaction {} commit event posted", txnId);
+                        log.debug(requestId, "Transaction {} commit event posted", txnId);
                         return status;
                     }
                 }), executor);
@@ -687,15 +716,15 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 .thenComposeAsync(abortWriter -> abortWriter.writeEvent(event.getKey(), event), eventExecutor);
     }
 
-    CompletableFuture<TxnStatus> writeAbortEvent(String scope, String stream, int epoch, UUID txnId, TxnStatus status) {
+    CompletableFuture<TxnStatus> writeAbortEvent(String scope, String stream, int epoch, UUID txnId, TxnStatus status, long requestId) {
         AbortEvent event = new AbortEvent(scope, stream, epoch, txnId);
         return TaskStepsRetryHelper.withRetries(() -> writeAbortEvent(event)
                 .handle((r, e) -> {
                     if (e != null) {
-                        log.debug("Transaction {}, failed posting abort event. Retrying...", txnId);
+                        log.debug(requestId, "Transaction {}, failed posting abort event. Retrying...", txnId);
                         throw new WriteFailedException(e);
                     } else {
-                        log.debug("Transaction {} abort event posted", txnId);
+                        log.debug(requestId, "Transaction {} abort event posted", txnId);
                         return status;
                     }
                 }), executor);
@@ -718,15 +747,6 @@ public class StreamTransactionMetadataTasks implements AutoCloseable {
                 segmentId,
                 txnId,
                 this.retrieveDelegationToken()), executor);
-    }
-
-    private OperationContext getNonNullOperationContext(final String scope,
-                                                        final String stream,
-                                                        final OperationContext contextOpt,
-                                                        final String method, 
-                                                        final String txnId) {
-        final long requestId = contextOpt != null ? contextOpt.getRequestId() : requestTracker.getRequestIdFor(scope, stream, method, txnId);
-        return contextOpt == null ? streamMetadataStore.createContext(scope, stream, requestId) : contextOpt;
     }
 
     public String retrieveDelegationToken() {

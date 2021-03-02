@@ -593,7 +593,7 @@ public abstract class StreamMetadataStoreTest {
 
         doAnswer(x -> streamObj.getEpochTransitionNode()).when(streamObjSpied).getEpochTransitionNode();
 
-        OperationContext context = new OperationContextImpl(null, streamObjSpied, 0L);
+        OperationContext context = new StreamOperationContext(null, () -> streamObjSpied, 0L);
 
         // the following should be stuck at createEpochTransition
         CompletableFuture<VersionedMetadata<EpochTransitionRecord>> resp = store.submitScale(scope, stream, scale3SealedSegments,
@@ -655,7 +655,7 @@ public abstract class StreamMetadataStoreTest {
         }).thenCompose(v -> streamObj.updateEpochTransitionNode(x.getArgument(0))))
                 .when(streamObjSpied).updateEpochTransitionNode(any());
 
-        OperationContextImpl context = new OperationContextImpl(null, streamObjSpied, 0L);
+        StreamOperationContext context = new StreamOperationContext(null, () -> streamObjSpied, 0L);
 
         // the following should be stuck at createEpochTransition
         CompletableFuture<VersionedMetadata<EpochTransitionRecord>> response = store.submitScale(scope, stream, segmentsToSeal,

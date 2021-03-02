@@ -60,7 +60,7 @@ public class PravegaTablesStreamTest extends StreamTestBase {
 
     @Override
     PersistentStreamBase getStream(String scope, String stream, int chunkSize, int shardSize) {
-        PravegaTablesScope pravegaTableScope = new PravegaTablesScope(scope, storeHelper);
+        PravegaTablesScope pravegaTableScope = new PravegaTablesScope(scope, storeHelper, requestId);
         pravegaTableScope.addStreamToScope(stream).join();
         
         return new PravegaTablesStream(scope, stream, storeHelper, orderer,  

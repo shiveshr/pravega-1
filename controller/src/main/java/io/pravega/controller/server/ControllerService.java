@@ -21,6 +21,7 @@ import io.pravega.common.cluster.Cluster;
 import io.pravega.common.cluster.ClusterException;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.common.tracing.RequestTracker;
+import io.pravega.common.tracing.TagLogger;
 import io.pravega.common.util.RetriesExhaustedException;
 import io.pravega.controller.metrics.StreamMetrics;
 import io.pravega.controller.metrics.TransactionMetrics;
@@ -77,14 +78,16 @@ import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.apache.commons.lang3.tuple.Pair;
+import org.slf4j.LoggerFactory;
 
 /**
  * Stream controller RPC server implementation.
  */
 @Getter
 @AllArgsConstructor
-@Slf4j
 public class ControllerService {
+    private static final TagLogger log = new TagLogger(LoggerFactory.getLogger(ControllerService.class));
+
     private final KVTableMetadataStore kvtMetadataStore;
     private final TableMetadataTasks kvtMetadataTasks;
     private final StreamMetadataStore streamStore;
@@ -115,7 +118,8 @@ public class ControllerService {
 
     public CompletableFuture<CreateKeyValueTableStatus> createKeyValueTable(String scope, String kvtName,
                                                                             final KeyValueTableConfiguration kvtConfig,
-                                                                            final long createTimestamp) {
+                                                                            final long createTimestamp, 
+                                                                            final long requestId) {
         Preconditions.checkNotNull(kvtConfig, "kvTableConfig");
         Preconditions.checkArgument(createTimestamp >= 0);
         Preconditions.checkArgument(kvtConfig.getPartitionCount() > 0);
@@ -134,7 +138,8 @@ public class ControllerService {
                 }, executor);
     }
 
-    public CompletableFuture<List<SegmentRange>> getCurrentSegmentsKeyValueTable(final String scope, final String kvtName) {
+    public CompletableFuture<List<SegmentRange>> getCurrentSegmentsKeyValueTable(final String scope, final String kvtName, 
+                                                                                 final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(kvtName, "KeyValueTable");
 
@@ -151,13 +156,15 @@ public class ControllerService {
      * @param limit limit for number of KeyValueTables to return.
      * @return List of KeyValueTables in scope.
      */
-    public CompletableFuture<Pair<List<String>, String>> listKeyValueTables(final String scope, final String token, final int limit) {
+    public CompletableFuture<Pair<List<String>, String>> listKeyValueTables(final String scope, final String token, final int limit,
+                                                                            final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         return kvtMetadataStore.listKeyValueTables(scope, token, limit, executor);
     }
 
 
-    public CompletableFuture<DeleteKVTableStatus> deleteKeyValueTable(final String scope, final String kvtName) {
+    public CompletableFuture<DeleteKVTableStatus> deleteKeyValueTable(final String scope, final String kvtName,
+                                                                      final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "Scope Name");
         Exceptions.checkNotNullOrEmpty(kvtName, "KeyValueTable Name");
         Timer timer = new Timer();
@@ -170,7 +177,8 @@ public class ControllerService {
 
     public CompletableFuture<CreateReaderGroupResponse> createReaderGroup(String scope, String rgName,
                                                                             final ReaderGroupConfig rgConfig,
-                                                                            final long createTimestamp) {
+                                                                            final long createTimestamp,
+                                                                          final long requestId) {
         Preconditions.checkNotNull(scope, "ReaderGroup scope is null");
         Preconditions.checkNotNull(rgName, "ReaderGroup name is null");
         Preconditions.checkNotNull(rgConfig, "ReaderGroup config is null");
@@ -183,7 +191,7 @@ public class ControllerService {
             return CompletableFuture.completedFuture(
                     CreateReaderGroupResponse.newBuilder().setStatus(CreateReaderGroupResponse.Status.INVALID_RG_NAME).build());
         }
-        return streamMetadataTasks.createReaderGroup(scope, rgName, rgConfig, createTimestamp)
+        return streamMetadataTasks.createReaderGroup(scope, rgName, rgConfig, createTimestamp, requestId)
                 .thenApplyAsync(response -> {
                     reportCreateReaderGroupMetrics(scope, rgName, response.getStatus(), timer.getElapsed());
                     return response;
@@ -191,42 +199,45 @@ public class ControllerService {
     }
 
     public CompletableFuture<UpdateReaderGroupResponse> updateReaderGroup(String scope, String rgName,
-                                                                        final ReaderGroupConfig rgConfig) {
+                                                                        final ReaderGroupConfig rgConfig,
+                                                                          final long requestId) {
         Preconditions.checkNotNull(scope, "ReaderGroup scope is null");
         Preconditions.checkNotNull(rgName, "ReaderGroup name is null");
         Preconditions.checkNotNull(rgConfig, "ReaderGroup config is null");
         Timer timer = new Timer();
-        return streamMetadataTasks.updateReaderGroup(scope, rgName, rgConfig, null)
+        return streamMetadataTasks.updateReaderGroup(scope, rgName, rgConfig, requestId)
                 .thenApplyAsync(response -> {
                             reportUpdateReaderGroupMetrics(scope, rgName, response.getStatus(), timer.getElapsed());
                             return response;
                 }, executor);
     }
 
-    public CompletableFuture<ReaderGroupConfigResponse> getReaderGroupConfig(String scope, String rgName) {
+    public CompletableFuture<ReaderGroupConfigResponse> getReaderGroupConfig(String scope, String rgName,
+                                                                             final long requestId) {
         Preconditions.checkNotNull(scope, "ReaderGroup scope is null");
         Preconditions.checkNotNull(rgName, "ReaderGroup name is null");
-        return streamMetadataTasks.getReaderGroupConfig(scope, rgName, null);
+        return streamMetadataTasks.getReaderGroupConfig(scope, rgName, requestId);
     }
 
-    public CompletableFuture<DeleteReaderGroupStatus> deleteReaderGroup(String scope, String rgName, String readerGroupId, final long generation) {
+    public CompletableFuture<DeleteReaderGroupStatus> deleteReaderGroup(String scope, String rgName, String readerGroupId, final long generation,
+                                                                        final long requestId) {
         Preconditions.checkNotNull(scope, "ReaderGroup scope is null");
         Preconditions.checkNotNull(rgName, "ReaderGroup name is null");
         Preconditions.checkNotNull(readerGroupId, "ReaderGroup Id is null");
         Preconditions.checkArgument(generation >= 0 );
         Timer timer = new Timer();
-        return streamMetadataTasks.deleteReaderGroup(scope, rgName, readerGroupId, generation, null)
+        return streamMetadataTasks.deleteReaderGroup(scope, rgName, readerGroupId, generation, requestId)
                 .thenApplyAsync(status -> {
                     reportDeleteReaderGroupMetrics(scope, rgName, status, timer.getElapsed());
                     return DeleteReaderGroupStatus.newBuilder().setStatus(status).build();
                 }, executor);
     }
 
-    public CompletableFuture<SubscribersResponse> listSubscribers(String scope, String stream) {
+    public CompletableFuture<SubscribersResponse> listSubscribers(String scope, String stream,
+                                                                  final long requestId) {
         Preconditions.checkNotNull(scope, "scopeName is null");
         Preconditions.checkNotNull(stream, "streamName is null");
-        return streamMetadataTasks.listSubscribers(scope, stream, 
-                streamStore.createContext(scope, stream, requestTracker.getRequestIdFor(scope, stream, "listSubscribers")));
+        return streamMetadataTasks.listSubscribers(scope, stream, requestId);
 
     }
 
@@ -234,7 +245,8 @@ public class ControllerService {
                                                                                final String subscriber,
                                                                                final String readerGroupId,
                                                                                final long generation,
-                                                                               final ImmutableMap<Long, Long> truncationStreamCut) {
+                                                                               final ImmutableMap<Long, Long> truncationStreamCut,
+                                                                               final long requestId) {
         Preconditions.checkNotNull(scope, "scopeName is null");
         Preconditions.checkNotNull(stream, "streamName is null");
         Preconditions.checkNotNull(subscriber, "subscriber is null");
@@ -242,7 +254,7 @@ public class ControllerService {
         Preconditions.checkNotNull(truncationStreamCut, "Truncation StreamCut is null");
         Timer timer = new Timer();
         return streamMetadataTasks.updateSubscriberStreamCut(scope, stream, subscriber, readerGroupId, generation, truncationStreamCut,
-                streamStore.createContext(scope, stream, requestTracker.getRequestIdFor(scope, stream, "updateSubscriberStreamCut", subscriber)))
+                requestId)
                             .thenApplyAsync(status -> {
                                 reportUpdateTruncationSCMetrics(scope, stream, status, timer.getElapsed());
                                 return UpdateSubscriberStatus.newBuilder().setStatus(status).build();
@@ -250,7 +262,7 @@ public class ControllerService {
     }
 
     public CompletableFuture<CreateStreamStatus> createStream(String scope, String stream, final StreamConfiguration streamConfig,
-            final long createTimestamp) {
+            final long createTimestamp, long requestId) {
         Preconditions.checkNotNull(streamConfig, "streamConfig");
         Preconditions.checkArgument(createTimestamp >= 0);
         Timer timer = new Timer();
@@ -269,7 +281,8 @@ public class ControllerService {
                               return streamMetadataTasks.createStreamRetryOnLockFailure(scope,
                                       stream,
                                       streamConfig,
-                                      createTimestamp, 10).thenApplyAsync(status -> {
+                                      createTimestamp, 10, 
+                                      requestId).thenApplyAsync(status -> {
                                   reportCreateStreamMetrics(scope, stream, streamConfig.getScalingPolicy().getMinNumSegments(), status,
                                           timer.getElapsed());
                                   return CreateStreamStatus.newBuilder().setStatus(status).build();
@@ -281,10 +294,11 @@ public class ControllerService {
                       });
     }
 
-    public CompletableFuture<UpdateStreamStatus> updateStream(String scope, String stream, final StreamConfiguration streamConfig) {
+    public CompletableFuture<UpdateStreamStatus> updateStream(String scope, String stream, final StreamConfiguration streamConfig, 
+                                                              long requestId) {
         Preconditions.checkNotNull(streamConfig, "streamConfig");
         Timer timer = new Timer();
-        return streamMetadataTasks.updateStream(scope, stream, streamConfig, null)
+        return streamMetadataTasks.updateStream(scope, stream, streamConfig, requestId)
                   .thenApplyAsync(status -> {
                       reportUpdateStreamMetrics(scope, stream, status, timer.getElapsed());
                       return UpdateStreamStatus.newBuilder().setStatus(status).build();
@@ -292,81 +306,86 @@ public class ControllerService {
     }
 
     public CompletableFuture<UpdateStreamStatus> truncateStream(final String scope, final String stream,
-                                                                final Map<Long, Long> streamCut) {
+                                                                final Map<Long, Long> streamCut, long requestId) {
         Preconditions.checkNotNull(scope, "scope");
         Preconditions.checkNotNull(stream, "stream");
         Preconditions.checkNotNull(streamCut, "streamCut");
         Timer timer = new Timer();
-        return streamMetadataTasks.truncateStream(scope, stream, streamCut, null)
+        return streamMetadataTasks.truncateStream(scope, stream, streamCut, requestId)
                 .thenApplyAsync(status -> {
                     reportTruncateStreamMetrics(scope, stream, status, timer.getElapsed());
                     return UpdateStreamStatus.newBuilder().setStatus(status).build();
                 }, executor);
     }
 
-    public CompletableFuture<StreamConfiguration> getStream(final String scopeName, final String streamName) {
-        return streamStore.getConfiguration(scopeName, streamName, null, executor);
+    public CompletableFuture<StreamConfiguration> getStream(final String scopeName, final String streamName, long requestId) {
+        OperationContext context = streamStore.createStreamContext(scopeName, streamName, requestId);
+        return streamStore.getConfiguration(scopeName, streamName, context, executor);
     }
 
-    public CompletableFuture<UpdateStreamStatus> sealStream(final String scope, final String stream) {
+    public CompletableFuture<UpdateStreamStatus> sealStream(final String scope, final String stream, long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Timer timer = new Timer();
-        return streamMetadataTasks.sealStream(scope, stream, null)
+        return streamMetadataTasks.sealStream(scope, stream, requestId)
                 .thenApplyAsync(status -> {
                     reportSealStreamMetrics(scope, stream, status, timer.getElapsed());
                     return UpdateStreamStatus.newBuilder().setStatus(status).build();
                 }, executor);
     }
 
-    public CompletableFuture<DeleteStreamStatus> deleteStream(final String scope, final String stream) {
+    public CompletableFuture<DeleteStreamStatus> deleteStream(final String scope, final String stream, long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Timer timer = new Timer();
-        return streamMetadataTasks.deleteStream(scope, stream, null)
+        return streamMetadataTasks.deleteStream(scope, stream, requestId)
                 .thenApplyAsync(status -> {
                     reportDeleteStreamMetrics(scope, stream, status, timer.getElapsed());
                     return DeleteStreamStatus.newBuilder().setStatus(status).build();
                 }, executor);
     }
 
-    public CompletableFuture<List<SegmentRange>> getCurrentSegments(final String scope, final String stream) {
+    public CompletableFuture<List<SegmentRange>> getCurrentSegments(final String scope, final String stream, long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
 
         // Fetch active segments from segment store.
-        return streamStore.getActiveSegments(scope, stream, null, executor)
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
+
+        return streamStore.getActiveSegments(scope, stream, context, executor)
                 .thenApplyAsync(activeSegments -> getSegmentRanges(activeSegments, scope, stream), executor);
     }
 
-    public CompletableFuture<List<SegmentRange>> getEpochSegments(final String scope, final String stream, int epoch) {
+    public CompletableFuture<List<SegmentRange>> getEpochSegments(final String scope, final String stream, int epoch, long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Exceptions.checkArgument(epoch >= 0, "epoch", "Epoch cannot be less than 0");
-        return streamStore.getEpoch(scope, stream, epoch, null, executor)
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
+
+        return streamStore.getEpoch(scope, stream, epoch, context, executor)
                           .thenApplyAsync(epochRecord -> getSegmentRanges(epochRecord.getSegments(), scope, stream), executor);
     }
 
-    public CompletableFuture<Map<SegmentId, Long>> getSegmentsAtHead(final String scope, final String stream) {
+    public CompletableFuture<Map<SegmentId, Long>> getSegmentsAtHead(final String scope, final String stream, long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
 
         // First fetch segments active at specified timestamp from the specified stream.
         // Divide current segments in segmentFutures into at most count positions.
-        return streamStore.getSegmentsAtHead(scope, stream, null, executor).thenApply(segments -> {
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
+
+        return streamStore.getSegmentsAtHead(scope, stream, context, executor).thenApply(segments -> {
             return segments.entrySet().stream()
                            .collect(Collectors.toMap(entry -> ModelHelper.createSegmentId(scope, stream, entry.getKey().segmentId()),
                                    Map.Entry::getValue));
         });
     }
 
-    public CompletableFuture<Map<SegmentRange, List<Long>>> getSegmentsImmediatelyFollowing(SegmentId segment) {
+    public CompletableFuture<Map<SegmentRange, List<Long>>> getSegmentsImmediatelyFollowing(SegmentId segment, long requestId) {
         Preconditions.checkNotNull(segment, "segment");
         String scope = segment.getStreamInfo().getScope();
         String stream = segment.getStreamInfo().getStream();
-        long requestId = requestTracker.getRequestIdFor(scope, stream, "getSegmentsImmediatelyFollowing", 
-                Long.toString(segment.getSegmentId()));
-        OperationContext context = streamStore.createContext(scope, stream, requestId);
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
         return streamStore.getSuccessors(scope,
                 stream,
                 segment.getSegmentId(),
@@ -381,13 +400,13 @@ public class ControllerService {
                                 Map.Entry::getValue)));
     }
 
-    public CompletableFuture<List<StreamSegmentRecord>> getSegmentsBetweenStreamCuts(Controller.StreamCutRange range) {
+    public CompletableFuture<List<StreamSegmentRecord>> getSegmentsBetweenStreamCuts(Controller.StreamCutRange range, long requestId) {
         Preconditions.checkNotNull(range, "segment");
         Preconditions.checkArgument(!(range.getFromMap().isEmpty() && range.getToMap().isEmpty()));
 
         String scope = range.getStreamInfo().getScope();
         String stream = range.getStreamInfo().getStream();
-        OperationContext context = streamStore.createContext(scope, stream);
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
         return streamStore.getSegmentsBetweenStreamCuts(scope,
                 stream,
                 range.getFromMap(),
@@ -400,7 +419,7 @@ public class ControllerService {
                                                   final String stream,
                                                   final List<Long> segmentsToSeal,
                                                   final Map<Double, Double> newKeyRanges,
-                                                  final long scaleTimestamp) {
+                                                  final long scaleTimestamp, final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Preconditions.checkNotNull(segmentsToSeal, "sealedSegments");
@@ -411,24 +430,27 @@ public class ControllerService {
                                          segmentsToSeal,
                                          new ArrayList<>(ModelHelper.encode(newKeyRanges)),
                                          scaleTimestamp,
-                                         null);
+                                         requestId);
     }
 
-    public CompletableFuture<ScaleStatusResponse> checkScale(final String scope, final String stream, final int epoch) {
+    public CompletableFuture<ScaleStatusResponse> checkScale(final String scope, final String stream, final int epoch, 
+                                                             final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Exceptions.checkArgument(epoch >= 0, "epoch", "Epoch cannot be less than 0");
 
-        return streamMetadataTasks.checkScale(scope, stream, epoch, null);
+        return streamMetadataTasks.checkScale(scope, stream, epoch, requestId);
     }
 
-    public CompletableFuture<List<ScaleMetadata>> getScaleRecords(final String scope, final String stream, final long from, final long to) {
+    public CompletableFuture<List<ScaleMetadata>> getScaleRecords(final String scope, final String stream, final long from, 
+                                                                  final long to, final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
-        return streamStore.getScaleMetadata(scope, stream, from, to, null, executor);
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
+        return streamStore.getScaleMetadata(scope, stream, from, to, context, executor);
     }
 
-    public CompletableFuture<NodeUri> getURI(final SegmentId segment) {
+    public CompletableFuture<NodeUri> getURI(final SegmentId segment, final long requestId) {
         Preconditions.checkNotNull(segment, "segment");
 
         return CompletableFuture.completedFuture(
@@ -449,28 +471,34 @@ public class ControllerService {
 
     public CompletableFuture<Boolean> isSegmentValid(final String scope,
                                                      final String stream,
-                                                     final long segmentId) {
+                                                     final long segmentId,
+                                                     final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
-        return streamStore.getActiveSegments(scope, stream, null, executor)
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
+
+        return streamStore.getActiveSegments(scope, stream, context, executor)
                 .thenApplyAsync(x -> x.stream().anyMatch(z -> z.segmentId() == segmentId), executor);
     }
 
     public CompletableFuture<Boolean> isStreamCutValid(final String scope,
                                                      final String stream,
-                                                     final Map<Long, Long> streamCut) {
+                                                     final Map<Long, Long> streamCut, final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
-        return streamStore.isStreamCutValid(scope, stream, streamCut, null, executor);
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
+
+        return streamStore.isStreamCutValid(scope, stream, streamCut, context, executor);
     }
 
     @SuppressWarnings("ReturnCount")
     public CompletableFuture<Pair<UUID, List<SegmentRange>>> createTransaction(final String scope, final String stream,
-                                                                               final long lease) {
+                                                                               final long lease, final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Timer timer = new Timer();
-        return streamTransactionMetadataTasks.createTxn(scope, stream, lease, null)
+
+        return streamTransactionMetadataTasks.createTxn(scope, stream, lease, requestId)
                 .thenApply(pair -> {
                     VersionedTransactionData data = pair.getKey();
                     List<StreamSegmentRecord> segments = pair.getValue();
@@ -495,12 +523,12 @@ public class ControllerService {
     }
 
     public CompletableFuture<TxnStatus> commitTransaction(final String scope, final String stream, final UUID txId,
-                                                          final String writerId, final long timestamp) {
+                                                          final String writerId, final long timestamp, final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Preconditions.checkNotNull(txId, "txnId");
         Timer timer = new Timer();
-        return streamTransactionMetadataTasks.commitTxn(scope, stream, txId, writerId, timestamp, null)
+        return streamTransactionMetadataTasks.commitTxn(scope, stream, txId, writerId, timestamp, requestId)
                 .handle((ok, ex) -> {
                     if (ex != null) {
                         log.warn("Transaction commit failed", ex);
@@ -528,12 +556,12 @@ public class ControllerService {
         return unwrap;
     }
 
-    public CompletableFuture<TxnStatus> abortTransaction(final String scope, final String stream, final UUID txId) {
+    public CompletableFuture<TxnStatus> abortTransaction(final String scope, final String stream, final UUID txId, long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Preconditions.checkNotNull(txId, "txnId");
         Timer timer = new Timer();
-        return streamTransactionMetadataTasks.abortTxn(scope, stream, txId, null, null)
+        return streamTransactionMetadataTasks.abortTxn(scope, stream, txId, null, requestId)
                 .handle((ok, ex) -> {
                     if (ex != null) {
                         log.warn("Transaction abort failed", ex);
@@ -556,20 +584,23 @@ public class ControllerService {
     public CompletableFuture<PingTxnStatus> pingTransaction(final String scope,
                                                             final String stream,
                                                             final UUID txId,
-                                                            final long lease) {
+                                                            final long lease, 
+                                                            final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Preconditions.checkNotNull(txId, "txnId");
 
-        return streamTransactionMetadataTasks.pingTxn(scope, stream, txId, lease, null);
+        return streamTransactionMetadataTasks.pingTxn(scope, stream, txId, lease, requestId);
     }
 
     public CompletableFuture<TxnState> checkTransactionStatus(final String scope, final String stream,
-            final UUID txnId) {
+            final UUID txnId, final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Exceptions.checkNotNullOrEmpty(stream, "stream");
         Preconditions.checkNotNull(txnId, "txnId");
-        return streamStore.transactionStatus(scope, stream, txnId, null, executor)
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
+
+        return streamStore.transactionStatus(scope, stream, txnId, context, executor)
                 .thenApplyAsync(res -> TxnState.newBuilder().setState(TxnState.State.valueOf(res.name())).build(), executor);
     }
 
@@ -579,17 +610,19 @@ public class ControllerService {
      * @param scope Name of scope to be created.
      * @return Status of create scope.
      */
-    public CompletableFuture<CreateScopeStatus> createScope(final String scope) {
+    public CompletableFuture<CreateScopeStatus> createScope(final String scope, final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Timer timer = new Timer();
         try {
             NameUtils.validateScopeName(scope);
         } catch (IllegalArgumentException | NullPointerException e) {
-            log.warn("Create scope failed due to invalid scope name {}", scope);
+            log.warn(requestId, "Create scope failed due to invalid scope name {}", scope);
             return CompletableFuture.completedFuture(CreateScopeStatus.newBuilder().setStatus(
                     CreateScopeStatus.Status.INVALID_SCOPE_NAME).build());
         }
-        return streamStore.createScope(scope).thenApply(r -> reportCreateScopeMetrics(scope, r, timer.getElapsed()));
+        OperationContext context = streamStore.createScopeContext(scope, requestId);
+
+        return streamStore.createScope(scope, context).thenApply(r -> reportCreateScopeMetrics(scope, r, timer.getElapsed()));
     }
 
     /**
@@ -598,10 +631,12 @@ public class ControllerService {
      * @param scope Name of scope to be deleted.
      * @return Status of delete scope.
      */
-    public CompletableFuture<DeleteScopeStatus> deleteScope(final String scope) {
+    public CompletableFuture<DeleteScopeStatus> deleteScope(final String scope, final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         Timer timer = new Timer();
-        return streamStore.deleteScope(scope).thenApply(r -> reportDeleteScopeMetrics(scope, r, timer.getElapsed()));
+        OperationContext context = streamStore.createScopeContext(scope, requestId);
+
+        return streamStore.deleteScope(scope, context).thenApply(r -> reportDeleteScopeMetrics(scope, r, timer.getElapsed()));
     }
 
     /**
@@ -610,9 +645,11 @@ public class ControllerService {
      * @param scope Name of the scope.
      * @return List of streams in scope.
      */
-    public CompletableFuture<Map<String, StreamConfiguration>> listStreamsInScope(final String scope) {
+    public CompletableFuture<Map<String, StreamConfiguration>> listStreamsInScope(final String scope, final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
-        return streamStore.listStreamsInScope(scope);
+        OperationContext context = streamStore.createScopeContext(scope, requestId);
+
+        return streamStore.listStreamsInScope(scope, context);
     }
 
     /**
@@ -623,9 +660,12 @@ public class ControllerService {
      * @param limit limit for number of streams to return.
      * @return List of streams in scope.
      */
-    public CompletableFuture<Pair<List<String>, String>> listStreams(final String scope, final String token, final int limit) {
+    public CompletableFuture<Pair<List<String>, String>> listStreams(final String scope, final String token, final int limit, 
+                                                                     final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
-        return streamStore.listStream(scope, token, limit, executor);
+        OperationContext context = streamStore.createScopeContext(scope, requestId);
+
+        return streamStore.listStream(scope, token, limit, executor, context);
     }
 
     /**
@@ -633,8 +673,8 @@ public class ControllerService {
      *
      * @return List of scopes.
      */
-    public CompletableFuture<List<String>> listScopes() {
-        return streamStore.listScopes();
+    public CompletableFuture<List<String>> listScopes(long requestId) {
+        return streamStore.listScopes(requestId);
     }
 
     /**
@@ -644,8 +684,8 @@ public class ControllerService {
      * @param limit number of elements to return.
      * @return List of scopes.
      */
-    public CompletableFuture<Pair<List<String>, String>> listScopes(final String token, final int limit) {
-        return streamStore.listScopes(token, limit, executor);
+    public CompletableFuture<Pair<List<String>, String>> listScopes(final String token, final int limit, long requestId) {
+        return streamStore.listScopes(token, limit, executor, requestId);
     }
 
     /**
@@ -654,9 +694,11 @@ public class ControllerService {
      * @param scopeName Name of Scope.
      * @return Scope if it exists.
      */
-    public CompletableFuture<String> getScope(final String scopeName) {
+    public CompletableFuture<String> getScope(final String scopeName, long requestId) {
         Preconditions.checkNotNull(scopeName);
-        return streamStore.getScopeConfiguration(scopeName);
+        OperationContext context = streamStore.createScopeContext(scopeName, requestId);
+
+        return streamStore.getScopeConfiguration(scopeName, context);
     }
 
     // Metrics reporting region
@@ -768,9 +810,13 @@ public class ControllerService {
         return status;
     }
 
-    public CompletableFuture<Controller.TimestampResponse> noteTimestampFromWriter(String scope, String stream, String writerId, long timestamp, Map<Long, Long> streamCut) {
+    public CompletableFuture<Controller.TimestampResponse> noteTimestampFromWriter(String scope, String stream, String writerId, 
+                                                                                   long timestamp, Map<Long, Long> streamCut,
+                                                                                   long requestId) {
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
+
         return bucketStore.addStreamToBucketStore(BucketStore.ServiceType.WatermarkingService, scope, stream, executor)
-                          .thenCompose(v -> streamStore.noteWriterMark(scope, stream, writerId, timestamp, streamCut, null, executor))
+                          .thenCompose(v -> streamStore.noteWriterMark(scope, stream, writerId, timestamp, streamCut, context, executor))
                 .thenApply(r -> {
                         Controller.TimestampResponse.Builder response = Controller.TimestampResponse.newBuilder();
                         switch (r) {
@@ -791,8 +837,11 @@ public class ControllerService {
                 });
     }
 
-    public CompletableFuture<Controller.RemoveWriterResponse> removeWriter(String scope, String stream, String writer) {
-        return streamStore.shutdownWriter(scope, stream, writer, null, executor)
+    public CompletableFuture<Controller.RemoveWriterResponse> removeWriter(String scope, String stream, String writer, 
+                                                                           long requestId) {
+        OperationContext context = streamStore.createStreamContext(scope, stream, requestId);
+
+        return streamStore.shutdownWriter(scope, stream, writer, context, executor)
                 .handle((r, e) -> {
                     Controller.RemoveWriterResponse.Builder response = Controller.RemoveWriterResponse.newBuilder();
                     if (e != null) {

@@ -16,9 +16,9 @@ import io.pravega.controller.server.security.auth.GrpcAuthHelper;
 import io.pravega.controller.store.PravegaTablesStoreHelper;
 import io.pravega.controller.store.PravegaTablesScope;
 import io.pravega.common.Exceptions;
-import io.pravega.common.util.BitConverter;
 import io.pravega.controller.server.SegmentHelper;
 import io.pravega.controller.store.index.ZKHostIndex;
+import io.pravega.controller.store.stream.OperationContext;
 import io.pravega.controller.store.stream.StoreException;
 
 import static io.pravega.controller.store.PravegaTablesStoreHelper.INTEGER_TO_BYTES_FUNCTION;
@@ -57,28 +57,29 @@ public class PravegaTablesKVTMetadataStore extends AbstractKVTableMetadataStore 
     }
 
     @Override
-    PravegaTablesKVTable newKeyValueTable(final String scope, final String name) {
+    PravegaTablesKVTable newKeyValueTable(final String scope, final String name, final long requestId) {
         log.info("Fetching KV Table from PravegaTables store {}/{}", scope, name);
         return new PravegaTablesKVTable(scope, name, storeHelper,
-                () -> ((PravegaTablesScope) getScope(scope)).getKVTablesInScopeTableName(), executor);
+                x -> ((PravegaTablesScope) getScope(scope, requestId)).getKVTablesInScopeTableName(x), executor, requestId);
     }
 
     @Override
     public CompletableFuture<Void> deleteFromScope(final String scope,
-                                                       final String name,
-                                                       final KVTOperationContext context,
-                                                       final Executor executor) {
-        return Futures.completeOn(((PravegaTablesScope) getScope(scope)).removeKVTableFromScope(name),
+                                                   final String name,
+                                                   final OperationContext context,
+                                                   final Executor executor) {
+        return Futures.completeOn(((PravegaTablesScope) getScope(scope, context)).removeKVTableFromScope(name),
                 executor);
     }
 
     CompletableFuture<Void> recordLastKVTableSegment(final String scope, final String kvtable, int lastActiveSegment,
-                                                     KVTOperationContext context, final Executor executor) {
+                                                     OperationContext context, final Executor executor) {
+        long requestId = context != null ? context.getRequestId() : 0L; // TODO: shivesh
         final String key = getScopedKVTName(scope, kvtable);
-        return Futures.completeOn(storeHelper.createTable(DELETED_KVTABLES_TABLE)
+        return Futures.completeOn(storeHelper.createTable(DELETED_KVTABLES_TABLE, context.getRequestId())
                 .thenCompose(created -> {
                     return storeHelper.expectingDataNotFound(storeHelper.getCachedOrLoad(
-                            DELETED_KVTABLES_TABLE, key, BYTES_TO_INTEGER_FUNCTION, System.currentTimeMillis()),
+                            DELETED_KVTABLES_TABLE, key, BYTES_TO_INTEGER_FUNCTION, System.currentTimeMillis(), requestId),
                             null)
                             .thenCompose(existing -> {
                                 log.debug("Recording last segment {} for KeyValueTable {}/{} on deletion.", lastActiveSegment, scope, kvtable);
@@ -88,43 +89,50 @@ public class PravegaTablesKVTMetadataStore extends AbstractKVTableMetadataStore 
                                             "Old last active segment ({}) for {}/{} is higher than current one {}.",
                                             oldLastActiveSegment, scope, kvtable, lastActiveSegment);
                                     return Futures.toVoid(storeHelper.updateEntry(DELETED_KVTABLES_TABLE,
-                                            key, INTEGER_TO_BYTES_FUNCTION, lastActiveSegment, existing.getVersion()));
+                                            key, INTEGER_TO_BYTES_FUNCTION, lastActiveSegment, existing.getVersion(), requestId));
                                 } else {
                                     return Futures.toVoid(storeHelper.addNewEntryIfAbsent(DELETED_KVTABLES_TABLE,
-                                            key, INTEGER_TO_BYTES_FUNCTION, lastActiveSegment));
+                                            key, lastActiveSegment, INTEGER_TO_BYTES_FUNCTION, requestId));
                                 }
                             });
                 }), executor);
     }
 
     @Override
-    public PravegaTablesScope newScope(final String scopeName) {
-        return new PravegaTablesScope(scopeName, storeHelper);
+    public PravegaTablesScope newScope(final String scopeName, long requestId) {
+        return new PravegaTablesScope(scopeName, storeHelper, requestId);
     }
 
     @Override
-    public CompletableFuture<Boolean> checkScopeExists(String scope) {
+    public CompletableFuture<Boolean> checkScopeExists(String scope, OperationContext context, Executor executor) {
+        long requestId = context != null ? context.getRequestId() : 0L; // TODO: shivesh
+
         return Futures.completeOn(storeHelper.expectingDataNotFound(
-                storeHelper.getEntry(SCOPES_TABLE, scope, x -> x).thenApply(v -> true),
+                storeHelper.getEntry(SCOPES_TABLE, scope, x -> x, requestId).thenApply(v -> true),
                 false), executor);
     }
 
     @Override
-    public CompletableFuture<Boolean> checkTableExists(String scopeName, String kvt) {
-        return Futures.completeOn(((PravegaTablesScope) getScope(scopeName)).checkKeyValueTableExistsInScope(kvt), executor);
-    }
-
-    public CompletableFuture<Void> createEntryForKVTable(final String scopeName,
-                                                         final String kvtName,
-                                                         final byte[] id,
-                                                         final Executor executor) {
-        return Futures.completeOn(((PravegaTablesScope) getScope(scopeName)).addKVTableToScope(kvtName, id), executor);
+    public CompletableFuture<Boolean> checkTableExists(String scopeName, String kvt, OperationContext context, Executor executor) {
+        return Futures.completeOn(((PravegaTablesScope) getScope(scopeName, context)).checkKeyValueTableExistsInScope(kvt), executor);
     }
 
     @Override
-    public CompletableFuture<Integer> getSafeStartingSegmentNumberFor(final String scopeName, final String kvtName) {
+    public CompletableFuture<Void> createEntryForKVTable(final String scopeName,
+                                                         final String kvtName,
+                                                         final byte[] id,
+                                                         final OperationContext context, 
+                                                         final Executor executor) {
+        return Futures.completeOn(((PravegaTablesScope) getScope(scopeName, context)).addKVTableToScope(kvtName, id), executor);
+    }
+
+    @Override
+    public CompletableFuture<Integer> getSafeStartingSegmentNumberFor(final String scopeName, final String kvtName, 
+                                                                      OperationContext context, Executor executor) {
+        long requestId = context != null ? context.getRequestId() : 0L; // TODO: shivesh
+
         return Futures.completeOn(storeHelper.getEntry(DELETED_KVTABLES_TABLE, getScopedKVTName(scopeName, kvtName),
-                x -> BitConverter.readInt(x, 0))
+                BYTES_TO_INTEGER_FUNCTION, requestId)
                 .handle((data, ex) -> {
                     if (ex == null) {
                         return data.getObject() + 1;

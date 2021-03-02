@@ -10,13 +10,19 @@
 package io.pravega.controller.store.stream;
 
 import io.pravega.controller.store.Scope;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 
-@AllArgsConstructor
-@Getter
-class RGOperationContext implements OperationContext {
+class StreamOperationContext implements OperationContext {
+    @Getter
     private final Scope scope;
-    private final ReaderGroup readerGroup;
+    @Getter
+    private final Stream stream;
+    @Getter
     private final long requestId;
+
+    StreamOperationContext(Scope scope, Stream stream, long requestId) {
+        this.scope = scope;
+        this.stream = stream;
+        this.requestId = requestId;
+    }
 }
