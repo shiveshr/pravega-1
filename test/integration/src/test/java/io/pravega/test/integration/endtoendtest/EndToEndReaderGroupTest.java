@@ -32,7 +32,6 @@ import io.pravega.client.stream.StreamConfiguration;
 import io.pravega.client.stream.StreamCut;
 import io.pravega.client.stream.impl.ClientFactoryImpl;
 import io.pravega.client.stream.impl.JavaSerializer;
-import io.pravega.client.stream.impl.ReaderGroupImpl;
 import io.pravega.client.stream.impl.StreamCutImpl;
 import io.pravega.common.concurrent.Futures;
 import io.pravega.controller.server.eventProcessor.LocalController;
@@ -71,7 +70,7 @@ public class EndToEndReaderGroupTest extends AbstractEndToEndTest {
     public void testReaderOffline() throws Exception {
         StreamConfiguration config = getStreamConfig();
         LocalController controller = (LocalController) controllerWrapper.getController();
-        controllerWrapper.getControllerService().createScope("test").get();
+        controllerWrapper.getControllerService().createScope("test", 0L).get();
         controller.createStream("test", "test", config).get();
         @Cleanup
         ConnectionFactory connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder()
@@ -117,7 +116,7 @@ public class EndToEndReaderGroupTest extends AbstractEndToEndTest {
     public void testDeleteReaderGroup() throws Exception {
         StreamConfiguration config = getStreamConfig();
         LocalController controller = (LocalController) controllerWrapper.getController();
-        controllerWrapper.getControllerService().createScope("test").get();
+        controllerWrapper.getControllerService().createScope("test", 0L).get();
         controller.createStream("test", "test", config).get();
         @Cleanup
         ConnectionFactory connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder()
@@ -162,7 +161,7 @@ public class EndToEndReaderGroupTest extends AbstractEndToEndTest {
     public void testCreateSubscriberReaderGroup() throws InterruptedException, ExecutionException {
         StreamConfiguration config = getStreamConfig();
         LocalController controller = (LocalController) controllerWrapper.getController();
-        controllerWrapper.getControllerService().createScope("test").get();
+        controllerWrapper.getControllerService().createScope("test", 0L).get();
         controller.createStream("test", "test", config).get();
         @Cleanup
         ConnectionFactory connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder()
@@ -187,7 +186,7 @@ public class EndToEndReaderGroupTest extends AbstractEndToEndTest {
     public void testResetSubscriberToNonSubscriberReaderGroup() throws InterruptedException, ExecutionException {
         StreamConfiguration config = getStreamConfig();
         LocalController controller = (LocalController) controllerWrapper.getController();
-        controllerWrapper.getControllerService().createScope("test").get();
+        controllerWrapper.getControllerService().createScope("test", 0L).get();
         controller.createStream("test", "test", config).get();
         @Cleanup
         ConnectionFactory connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder()
@@ -217,7 +216,7 @@ public class EndToEndReaderGroupTest extends AbstractEndToEndTest {
     public void testResetNonSubscriberToSubscriberReaderGroup() throws InterruptedException, ExecutionException {
         StreamConfiguration config = getStreamConfig();
         LocalController controller = (LocalController) controllerWrapper.getController();
-        controllerWrapper.getControllerService().createScope("test").get();
+        controllerWrapper.getControllerService().createScope("test", 0L).get();
         controller.createStream("test", "test", config).get();
         @Cleanup
         ConnectionFactory connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder()
@@ -232,46 +231,23 @@ public class EndToEndReaderGroupTest extends AbstractEndToEndTest {
         // Create a ReaderGroup
         groupManager.createReaderGroup("group", ReaderGroupConfig.builder().disableAutomaticCheckpoints()
                 .stream("test/test").build());
-        @Cleanup
-        ReaderGroupManager groupManager1 = new ReaderGroupManagerImpl("test", controller, clientFactory);
 
-        // Create a ReaderGroup
-        ReaderGroupConfig build = ReaderGroupConfig.builder().disableAutomaticCheckpoints().readerGroupId(UUID.randomUUID())
-                                                   .generation(0)
-                                                   .stream("test/test").build();
-        groupManager1.createReaderGroup("group", build);
+        List<String> subs = controller.listSubscribers("test", "test").get();
+        assertFalse("Subscriber list contains required reader group", subs.contains("test/group"));
 
-        ReaderGroup rg1 = groupManager.getReaderGroup("group");
-        ReaderGroup rg2 = groupManager1.getReaderGroup("group");
-        build = ReaderGroupConfig.builder().disableAutomaticCheckpoints().readerGroupId(build.getReaderGroupId())
-                                                   .generation(0)
-                                                   .stream("test/test2").build();
+        ReaderGroup subGroup = groupManager.getReaderGroup("group");
+        subGroup.resetReaderGroup(ReaderGroupConfig.builder().disableAutomaticCheckpoints().stream("test/test")
+                .retentionType(ReaderGroupConfig.StreamDataRetention.MANUAL_RELEASE_AT_USER_STREAMCUT).build());
 
-        controller.updateReaderGroup();
-        
-//        CompletableFuture.runAsync(() -> rg1.resetReaderGroup(ReaderGroupConfig.builder().disableAutomaticCheckpoints().stream("test/test").build()), executorService());
-//        ReaderGroupImpl.signal.join();
-        rg2.resetReaderGroup(ReaderGroupConfig.builder().disableAutomaticCheckpoints().stream("test/test").build());
-        
-//        ReaderGroupImpl.wait.complete(null);
-
-        
-//        List<String> subs = controller.listSubscribers("test", "test").get();
-//        assertFalse("Subscriber list contains required reader group", subs.contains("test/group"));
-//
-//        ReaderGroup subGroup = groupManager.getReaderGroup("group");
-//        subGroup.resetReaderGroup(ReaderGroupConfig.builder().disableAutomaticCheckpoints().stream("test/test")
-//                .retentionType(ReaderGroupConfig.StreamDataRetention.MANUAL_RELEASE_AT_USER_STREAMCUT).build());
-//
-//        subs = controller.listSubscribers("test", "test").get();
-//        assertTrue("Subscriber list does not contain required reader group", subs.contains("test/group"));
+        subs = controller.listSubscribers("test", "test").get();
+        assertTrue("Subscriber list does not contain required reader group", subs.contains("test/group"));
     }
 
     @Test
     public void testLaggingResetReaderGroup() throws Exception {
         StreamConfiguration config = getStreamConfig();
         LocalController controller = (LocalController) controllerWrapper.getController();
-        controllerWrapper.getControllerService().createScope("test").get();
+        controllerWrapper.getControllerService().createScope("test", 0L).get();
         controller.createStream("test", "test", config).get();
         controller.createStream("test", "test2", config).get();
         @Cleanup
@@ -314,9 +290,9 @@ public class EndToEndReaderGroupTest extends AbstractEndToEndTest {
         String streamName = "test";
 
         // Create Scopes
-        controllerWrapper.getControllerService().createScope(defaultScope).get();
-        controllerWrapper.getControllerService().createScope(scopeA).get();
-        controllerWrapper.getControllerService().createScope(scopeB).get();
+        controllerWrapper.getControllerService().createScope(defaultScope, 0L).get();
+        controllerWrapper.getControllerService().createScope(scopeA, 0L).get();
+        controllerWrapper.getControllerService().createScope(scopeB, 0L).get();
 
         // Create Streams.
         controller.createStream(scopeA, streamName, getStreamConfig()).get();
