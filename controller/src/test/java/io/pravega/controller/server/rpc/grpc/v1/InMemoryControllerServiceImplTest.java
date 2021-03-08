@@ -89,7 +89,7 @@ public class InMemoryControllerServiceImplTest extends ControllerServiceImplTest
         executorService = ExecutorServiceHelpers.newScheduledThreadPool(20, "testpool");
     
         taskMetadataStore = TaskStoreFactoryForTests.createInMemoryStore(executorService);
-        streamStore = StreamStoreFactory.createInMemoryStore(executorService);
+        streamStore = StreamStoreFactory.createInMemoryStore();
         BucketStore bucketStore = StreamStoreFactory.createInMemoryBucketStore();
         StreamMetrics.initialize();
         TransactionMetrics.initialize();

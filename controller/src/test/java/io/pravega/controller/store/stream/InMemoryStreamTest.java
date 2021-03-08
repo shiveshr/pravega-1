@@ -13,7 +13,7 @@ public class InMemoryStreamTest extends StreamTestBase {
     InMemoryStreamMetadataStore store;
     @Override
     public void setup() throws Exception {
-        store = new InMemoryStreamMetadataStore(executor);
+        store = new InMemoryStreamMetadataStore();
     }
 
     @Override
@@ -23,7 +23,7 @@ public class InMemoryStreamTest extends StreamTestBase {
 
     @Override
     void createScope(String scope) {
-        store.createScope(scope);
+        store.createScope(scope, null, executor);
     }
 
     @Override

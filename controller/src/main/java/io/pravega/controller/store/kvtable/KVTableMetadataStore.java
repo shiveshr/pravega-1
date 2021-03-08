@@ -54,6 +54,7 @@ public interface KVTableMetadataStore extends AutoCloseable {
     CompletableFuture<Void> createEntryForKVTable(final String scopeName,
                                                   final String kvtName,
                                                   final byte[] id,
+                                                  final OperationContext context,
                                                   final Executor executor);
 
     /**

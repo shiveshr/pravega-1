@@ -332,7 +332,7 @@ public class StreamMetadataTasks extends TaskBase {
     OperationContext context = streamMetadataStore.createRGContext(scope, rgName, requestId);
     return RetryHelper.withRetriesAsync(() -> {
       // 1. check if scope with this name exists...
-      return streamMetadataStore.checkScopeExists(scope, context)
+      return streamMetadataStore.checkScopeExists(scope, context, executor)
          .thenCompose(exists -> {
          if (!exists) {
                   return CompletableFuture.completedFuture(Controller.CreateReaderGroupResponse.newBuilder()
@@ -456,7 +456,7 @@ public class StreamMetadataTasks extends TaskBase {
         OperationContext context = streamMetadataStore.createRGContext(scope, rgName, requestId);
         return RetryHelper.withRetriesAsync(() -> {
             // 1. check if scope with this name exists...
-            return streamMetadataStore.checkScopeExists(scope, context)
+            return streamMetadataStore.checkScopeExists(scope, context, executor)
                     .thenCompose(exists -> {
                         if (!exists) {
                             return CompletableFuture.completedFuture(CreateReaderGroupResponse.newBuilder()
@@ -1524,7 +1524,7 @@ public class StreamMetadataTasks extends TaskBase {
                 streamMetadataStore.getState(scope, stream, true, context, executor);
         CompletableFuture<EpochTransitionRecord> etrFuture =
                 streamMetadataStore.getEpochTransition(scope, stream, context, executor).thenApply(VersionedMetadata::getObject);
-        return CompletableFuture.allOf(stateFuture, activeEpochFuture)
+        return CompletableFuture.allOf(stateFuture, activeEpochFuture, etrFuture)
                         .handle((r, ex) -> {
                             ScaleStatusResponse.Builder response = ScaleStatusResponse.newBuilder();
 

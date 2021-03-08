@@ -92,7 +92,7 @@ public abstract class AbstractKVTableMetadataStore implements KVTableMetadataSto
                                                                 final Executor executor) {
         long requestId = context != null ? context.getRequestId() : 0L; // TODO: shivesh
 
-        return Futures.completeOn(checkScopeExists(scope, context)
+        return Futures.completeOn(checkScopeExists(scope, context, executor)
                 .thenCompose(exists -> {
                     if (exists) {
                         // Create kvtable may fail if scope is deleted as we attempt to create the table under scope.
@@ -226,7 +226,7 @@ public abstract class AbstractKVTableMetadataStore implements KVTableMetadataSto
                                                                   final OperationContext context, 
                                                                   final Executor executor);
 
-    public abstract CompletableFuture<Void> deleteFromScope(final String scope,
+    abstract CompletableFuture<Void> deleteFromScope(final String scope,
                                                             final String name,
                                                             final OperationContext context,
                                                             final Executor executor);

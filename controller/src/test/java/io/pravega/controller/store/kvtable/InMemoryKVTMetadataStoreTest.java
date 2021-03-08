@@ -19,7 +19,7 @@ public class InMemoryKVTMetadataStoreTest extends KVTableMetadataStoreTest {
 
     @Override
     public void setupStore() throws Exception {
-        this.streamStore = StreamStoreFactory.createInMemoryStore(executor);
+        this.streamStore = StreamStoreFactory.createInMemoryStore();
         store = KVTableStoreFactory.createInMemoryStore(this.streamStore, executor);
     }
 

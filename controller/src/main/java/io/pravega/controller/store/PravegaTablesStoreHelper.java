@@ -296,7 +296,7 @@ public class PravegaTablesStoreHelper {
      * @param <T> Type of value to be added
      * @return CompletableFuture which when completed will indicate that the value is updated in the table.
      */
-    public <T> CompletableFuture<Version> updateEntry(String tableName, String key, Function<T, byte[]> toBytes, T val, Version ver, long requestId) {
+    public <T> CompletableFuture<Version> updateEntry(String tableName, String key, T val, Function<T, byte[]> toBytes, Version ver, long requestId) {
         long version = ver.asLongVersion().getLongValue();
         log.trace("updateEntry entry called for : {} key : {} version {}", tableName, key, version);
         byte[] value = toBytes.apply(val);

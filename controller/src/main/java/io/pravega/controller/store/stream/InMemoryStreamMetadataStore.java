@@ -72,11 +72,8 @@ public class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
 
     private final AtomicInt96 counter;
 
-    private final Executor executor;
-
-    public InMemoryStreamMetadataStore(Executor executor) {
+    public InMemoryStreamMetadataStore() {
         super(new InMemoryHostIndex(), new InMemoryHostIndex());
-        this.executor = executor;
         this.counter = new AtomicInt96();
     }
 
@@ -283,7 +280,7 @@ public class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
 
     @Override
     @Synchronized
-    public CompletableFuture<DeleteScopeStatus> deleteScope(final String scopeName) {
+    public CompletableFuture<DeleteScopeStatus> deleteScope(final String scopeName, OperationContext context, Executor executor) {
         if (scopes.containsKey(scopeName)) {
             return scopes.get(scopeName).listStreamsInScope().thenApply(streams -> {
                 if (streams.isEmpty()) {
@@ -303,7 +300,7 @@ public class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
 
     @Override
     @Synchronized
-    public CompletableFuture<String> getScopeConfiguration(final String scopeName) {
+    public CompletableFuture<String> getScopeConfiguration(final String scopeName, OperationContext context, Executor executor) {
         if (scopes.containsKey(scopeName)) {
             return CompletableFuture.completedFuture(scopeName);
         } else {
@@ -313,12 +310,13 @@ public class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
 
     @Override
     @Synchronized
-    public CompletableFuture<List<String>> listScopes() {
+    public CompletableFuture<List<String>> listScopes(long requestId) {
         return CompletableFuture.completedFuture(new ArrayList<>(scopes.keySet()));
     }
 
     @Override
-    public CompletableFuture<Pair<List<String>, String>> listScopes(String continuationToken, int limit, Executor executor) {
+    public CompletableFuture<Pair<List<String>, String>> listScopes(String continuationToken, int limit, Executor executor, 
+                                                                    long requestId) {
         List<String> result = new ArrayList<>();
         String nextToken = continuationToken;
         int start = Strings.isNullOrEmpty(continuationToken) ? 0 : Integer.parseInt(continuationToken);
@@ -342,7 +340,8 @@ public class InMemoryStreamMetadataStore extends AbstractStreamMetadataStore {
      */
     @Override
     @Synchronized
-    public CompletableFuture<Map<String, StreamConfiguration>> listStreamsInScope(final String scopeName) {
+    public CompletableFuture<Map<String, StreamConfiguration>> listStreamsInScope(final String scopeName, 
+                                                                                  OperationContext context, Executor executor) {
         InMemoryScope inMemoryScope = scopes.get(scopeName);
         if (inMemoryScope != null) {
             return inMemoryScope.listStreamsInScope()

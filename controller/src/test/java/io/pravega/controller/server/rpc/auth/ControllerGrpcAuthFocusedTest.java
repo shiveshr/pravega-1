@@ -161,7 +161,7 @@ public class ControllerGrpcAuthFocusedTest {
     @Before
     public void setup() throws IOException {
         TaskMetadataStore taskMetadataStore = TaskStoreFactory.createInMemoryStore(EXECUTOR);
-        StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore(EXECUTOR);
+        StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore();
         this.kvtStore = spy(KVTableStoreFactory.createInMemoryStore(streamStore, EXECUTOR));
 
         BucketStore bucketStore = StreamStoreFactory.createInMemoryBucketStore();

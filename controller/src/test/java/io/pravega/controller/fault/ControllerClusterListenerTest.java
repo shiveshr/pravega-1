@@ -127,7 +127,7 @@ public class ControllerClusterListenerTest {
 
         // Create txn sweeper.
         @Cleanup
-        StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore(executor);
+        StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore();
         SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock();
         StreamTransactionMetadataTasks txnTasks = new StreamTransactionMetadataTasks(streamStore, 
                 segmentHelper, executor, host.getHostId(), GrpcAuthHelper.getDisabledAuthHelper(), requestTracker);
@@ -199,7 +199,7 @@ public class ControllerClusterListenerTest {
         }).when(taskSweeper).handleFailedProcess(anyString());
 
         // Create txn sweeper.
-        StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore(executor);
+        StreamMetadataStore streamStore = StreamStoreFactory.createInMemoryStore();
         SegmentHelper segmentHelper = SegmentHelperMock.getSegmentHelperMock();
         // create streamtransactionmetadatatasks but dont initialize it with writers. this will not be
         // ready until writers are supplied.

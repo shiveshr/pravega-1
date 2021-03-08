@@ -311,7 +311,7 @@ public class PravegaTablesStreamMetadataStore extends AbstractStreamMetadataStor
                                        "Old last active segment ({}) for {}/{} is higher than current one {}.",
                                        oldLastActiveSegment, scope, stream, lastActiveSegment);
                                return Futures.toVoid(storeHelper.updateEntry(DELETED_STREAMS_TABLE,
-                                       key, INTEGER_TO_BYTES_FUNCTION, lastActiveSegment, existing.getVersion(), requestId));
+                                       key, lastActiveSegment, INTEGER_TO_BYTES_FUNCTION, existing.getVersion(), requestId));
                            } else {
                                return Futures.toVoid(storeHelper.addNewEntryIfAbsent(DELETED_STREAMS_TABLE,
                                        key, lastActiveSegment, INTEGER_TO_BYTES_FUNCTION, requestId));

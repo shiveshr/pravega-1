@@ -129,7 +129,7 @@ class PravegaTablesKVTable extends AbstractKVTableBase {
     CompletableFuture<Version> setStateData(final VersionedMetadata<KVTStateRecord> state) {
         return getMetadataTable()
                 .thenCompose(metadataTable -> storeHelper.updateEntry(metadataTable, STATE_KEY,
-                        KVTStateRecord::toBytes, state.getObject(), state.getVersion(), requestId));
+                        state.getObject(), KVTStateRecord::toBytes, state.getVersion(), requestId));
     }
 
     @Override

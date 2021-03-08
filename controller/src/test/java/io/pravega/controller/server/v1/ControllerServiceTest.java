@@ -86,7 +86,7 @@ public class ControllerServiceTest {
     private final String stream2 = "stream2";
     private final ScheduledExecutorService executor = ExecutorServiceHelpers.newScheduledThreadPool(10, "test");
 
-    private final StreamMetadataStore streamStore = spy(StreamStoreFactory.createInMemoryStore(executor));
+    private final StreamMetadataStore streamStore = spy(StreamStoreFactory.createInMemoryStore());
     private final KVTableMetadataStore kvtStore = spy(KVTableStoreFactory.createInMemoryStore(streamStore, executor));
 
     private StreamMetadataTasks streamMetadataTasks;
