@@ -20,7 +20,6 @@ import io.pravega.controller.store.stream.StreamMetadataStore;
 import io.pravega.controller.task.Stream.StreamMetadataTasks;
 import io.pravega.shared.NameUtils;
 import io.pravega.shared.controller.event.DeleteReaderGroupEvent;
-import lombok.extern.slf4j.Slf4j;
 import org.slf4j.LoggerFactory;
 
 import java.util.Iterator;
@@ -55,42 +54,36 @@ public class DeleteReaderGroupTask implements ReaderGroupTask<DeleteReaderGroupE
       String readerGroup = request.getRgName();
       long requestId = request.getRequestId();
       UUID readerGroupId = request.getReaderGroupId();
-      long generation = request.getGeneration();
       final OperationContext context = streamMetadataStore.createRGContext(scope, readerGroup, requestId);
       return streamMetadataStore.getReaderGroupId(scope, readerGroup, context, executor)
               .thenCompose(id -> {
                   if (!id.equals(readerGroupId)) {
-                      log.warn("Skipping processing of Reader Group delete request {} as UUIDs did not match.", requestId);
+                      log.warn(requestId, "Skipping processing of Reader Group delete request {} as UUIDs did not match.", requestId);
                       return CompletableFuture.completedFuture(null);
-                  }
-                  return streamMetadataStore.getReaderGroupConfigRecord(scope, readerGroup, context, executor)
-                                            .thenCompose(configRecord -> {
-                                                if (configRecord.getObject().getGeneration() != generation) {
-                                                    log.warn("Skipping processing of Reader Group delete request {} as generation did not match.", requestId);
-                                                    return CompletableFuture.completedFuture(null);
-                                                }
-                                                if (!ReaderGroupConfig.StreamDataRetention.values()[configRecord.getObject().getRetentionTypeOrdinal()]
-                                                        .equals(ReaderGroupConfig.StreamDataRetention.NONE)) {
-                                                    String scopedRGName = NameUtils.getScopedReaderGroupName(scope, readerGroup);
-                                                    // update Stream metadata tables, if RG is a Subscriber
-                                                    Iterator<String> streamIter = configRecord.getObject().getStartingStreamCuts().keySet().iterator();
-                                                    return Futures.loop(streamIter::hasNext, () -> {
-                                                        Stream stream = Stream.of(streamIter.next());
-                                                        OperationContext streamContext = streamMetadataStore.createStreamContext(
-                                                                stream.getScope(), stream.getStreamName(), requestId);
-                                                        return streamMetadataStore.deleteSubscriber(stream.getScope(),
-                                                                stream.getStreamName(), scopedRGName, configRecord.getObject().getGeneration(), 
-                                                                streamContext, executor);
-                                                    }, executor);
-                                                }
-                                                return CompletableFuture.completedFuture(null);
-                                            })
-                                            .thenCompose(v -> {
-                                                String rgStreamContext = NameUtils.getStreamForReaderGroup(readerGroup);
-                                                OperationContext streamContext = streamMetadataStore.createStreamContext(scope, rgStreamContext, requestId);
-                                                return streamMetadataTasks.sealStream(scope, rgStreamContext, streamContext)
-                                                                          .thenCompose(z -> streamMetadataTasks.deleteStream(scope, rgStreamContext, streamContext));
-                                            }).thenCompose(v1 -> streamMetadataStore.deleteReaderGroup(scope, readerGroup, context, executor));
+               }
+               return streamMetadataStore.getReaderGroupConfigRecord(scope, readerGroup, context, executor)
+                     .thenCompose(configRecord -> {
+                         if (!ReaderGroupConfig.StreamDataRetention.values()[configRecord.getObject().getRetentionTypeOrdinal()]
+                                 .equals(ReaderGroupConfig.StreamDataRetention.NONE)) {
+                             String scopedRGName = NameUtils.getScopedReaderGroupName(scope, readerGroup);
+                             // update Stream metadata tables, if RG is a Subscriber
+                             Iterator<String> streamIter = configRecord.getObject().getStartingStreamCuts().keySet().iterator();
+                             return Futures.loop(() -> streamIter.hasNext(), () -> {
+                                 Stream stream = Stream.of(streamIter.next());
+                                 OperationContext streamContext = streamMetadataStore.createStreamContext(
+                                         stream.getScope(), stream.getStreamName(), requestId);
+
+                                 return streamMetadataStore.deleteSubscriber(stream.getScope(),
+                                         stream.getStreamName(), scopedRGName, configRecord.getObject().getGeneration(), streamContext, executor);
+                             }, executor);
+                         }
+                         return CompletableFuture.completedFuture(null);
+                     }).thenCompose(v -> {
+                           String rgStreamContext = NameUtils.getStreamForReaderGroup(readerGroup);
+                           OperationContext streamContext = streamMetadataStore.createStreamContext(scope, rgStreamContext, requestId);
+                           return streamMetadataTasks.sealStream(scope, rgStreamContext, streamContext)
+                                                     .thenCompose(z -> streamMetadataTasks.deleteStream(scope, rgStreamContext, streamContext));
+                     }).thenCompose(v1 -> streamMetadataStore.deleteReaderGroup(scope, readerGroup, context, executor));
               });
 
     }

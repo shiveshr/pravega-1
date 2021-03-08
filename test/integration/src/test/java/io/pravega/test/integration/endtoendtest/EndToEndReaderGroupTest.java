@@ -267,6 +267,42 @@ public class EndToEndReaderGroupTest extends AbstractEndToEndTest {
 //        assertTrue("Subscriber list does not contain required reader group", subs.contains("test/group"));
     }
 
+    @Test
+    public void testLaggingResetReaderGroup() throws Exception {
+        StreamConfiguration config = getStreamConfig();
+        LocalController controller = (LocalController) controllerWrapper.getController();
+        controllerWrapper.getControllerService().createScope("test").get();
+        controller.createStream("test", "test", config).get();
+        controller.createStream("test", "test2", config).get();
+        @Cleanup
+        ConnectionFactory connectionFactory = new SocketConnectionFactoryImpl(ClientConfig.builder()
+                .controllerURI(URI.create("tcp://" + serviceHost))
+                .build());
+        @Cleanup
+        ClientFactoryImpl clientFactory = new ClientFactoryImpl("test", controller, connectionFactory);
+
+        @Cleanup
+        ReaderGroupManager groupManager = new ReaderGroupManagerImpl("test", controller, clientFactory);
+
+        UUID rgId = UUID.randomUUID();
+        ReaderGroupConfig rgConf = ReaderGroupConfig.builder().disableAutomaticCheckpoints()
+                .stream("test/test").retentionType(ReaderGroupConfig.StreamDataRetention.NONE).build();
+        rgConf = ReaderGroupConfig.cloneConfig(rgConf, rgId, 0L);
+
+        // Create a ReaderGroup
+        groupManager.createReaderGroup("group", rgConf);
+
+        ReaderGroupConfig updateConf = ReaderGroupConfig.builder().disableAutomaticCheckpoints()
+                .stream("test/test2").retentionType(ReaderGroupConfig.StreamDataRetention.NONE).build();
+        updateConf = ReaderGroupConfig.cloneConfig(updateConf, rgId, 0L);
+
+        // Update from the controller end
+        controller.updateReaderGroup("test", "group", updateConf).join();
+        ReaderGroup group = groupManager.getReaderGroup("group");
+        // Reset from client end
+        group.resetReaderGroup(ReaderGroupConfig.builder().disableAutomaticCheckpoints().stream("test/test").build());
+    }
+
     @Test(timeout = 30000)
     public void testMultiScopeReaderGroup() throws Exception {
         LocalController controller = (LocalController) controllerWrapper.getController();

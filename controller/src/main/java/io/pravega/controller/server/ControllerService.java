@@ -131,7 +131,7 @@ public class ControllerService {
             return CompletableFuture.completedFuture(
                     CreateKeyValueTableStatus.newBuilder().setStatus(CreateKeyValueTableStatus.Status.INVALID_TABLE_NAME).build());
         }
-        return kvtMetadataTasks.createKeyValueTable(scope, kvtName, kvtConfig, createTimestamp)
+        return kvtMetadataTasks.createKeyValueTable(scope, kvtName, kvtConfig, createTimestamp, requestId)
                 .thenApplyAsync(status -> {
                     reportCreateKVTableMetrics(scope, kvtName, kvtConfig.getPartitionCount(), status, timer.getElapsed());
                     return CreateKeyValueTableStatus.newBuilder().setStatus(status).build();
@@ -159,7 +159,8 @@ public class ControllerService {
     public CompletableFuture<Pair<List<String>, String>> listKeyValueTables(final String scope, final String token, final int limit,
                                                                             final long requestId) {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
-        return kvtMetadataStore.listKeyValueTables(scope, token, limit, executor);
+        OperationContext context = streamStore.createScopeContext(scope, requestId);
+        return kvtMetadataStore.listKeyValueTables(scope, token, limit, context, executor);
     }
 
 
@@ -168,7 +169,7 @@ public class ControllerService {
         Exceptions.checkNotNullOrEmpty(scope, "Scope Name");
         Exceptions.checkNotNullOrEmpty(kvtName, "KeyValueTable Name");
         Timer timer = new Timer();
-        return kvtMetadataTasks.deleteKeyValueTable(scope, kvtName)
+        return kvtMetadataTasks.deleteKeyValueTable(scope, kvtName, requestId)
                 .thenApplyAsync(status -> {
                     reportDeleteKVTableMetrics(scope, kvtName, status, timer.getElapsed());
                     return DeleteKVTableStatus.newBuilder().setStatus(status).build();
@@ -219,14 +220,13 @@ public class ControllerService {
         return streamMetadataTasks.getReaderGroupConfig(scope, rgName, requestId);
     }
 
-    public CompletableFuture<DeleteReaderGroupStatus> deleteReaderGroup(String scope, String rgName, String readerGroupId, final long generation,
-                                                                        final long requestId) {
+    public CompletableFuture<DeleteReaderGroupStatus> deleteReaderGroup(String scope, String rgName, String readerGroupId,
+                                                                        long requestId) {
         Preconditions.checkNotNull(scope, "ReaderGroup scope is null");
         Preconditions.checkNotNull(rgName, "ReaderGroup name is null");
         Preconditions.checkNotNull(readerGroupId, "ReaderGroup Id is null");
-        Preconditions.checkArgument(generation >= 0 );
         Timer timer = new Timer();
-        return streamMetadataTasks.deleteReaderGroup(scope, rgName, readerGroupId, generation, requestId)
+        return streamMetadataTasks.deleteReaderGroup(scope, rgName, readerGroupId, requestId)
                 .thenApplyAsync(status -> {
                     reportDeleteReaderGroupMetrics(scope, rgName, status, timer.getElapsed());
                     return DeleteReaderGroupStatus.newBuilder().setStatus(status).build();
@@ -622,7 +622,7 @@ public class ControllerService {
         }
         OperationContext context = streamStore.createScopeContext(scope, requestId);
 
-        return streamStore.createScope(scope, context).thenApply(r -> reportCreateScopeMetrics(scope, r, timer.getElapsed()));
+        return streamStore.createScope(scope, context, executor).thenApply(r -> reportCreateScopeMetrics(scope, r, timer.getElapsed()));
     }
 
     /**
@@ -636,7 +636,7 @@ public class ControllerService {
         Timer timer = new Timer();
         OperationContext context = streamStore.createScopeContext(scope, requestId);
 
-        return streamStore.deleteScope(scope, context).thenApply(r -> reportDeleteScopeMetrics(scope, r, timer.getElapsed()));
+        return streamStore.deleteScope(scope, context, executor).thenApply(r -> reportDeleteScopeMetrics(scope, r, timer.getElapsed()));
     }
 
     /**
@@ -649,7 +649,7 @@ public class ControllerService {
         Exceptions.checkNotNullOrEmpty(scope, "scope");
         OperationContext context = streamStore.createScopeContext(scope, requestId);
 
-        return streamStore.listStreamsInScope(scope, context);
+        return streamStore.listStreamsInScope(scope, context, executor);
     }
 
     /**
@@ -698,7 +698,7 @@ public class ControllerService {
         Preconditions.checkNotNull(scopeName);
         OperationContext context = streamStore.createScopeContext(scopeName, requestId);
 
-        return streamStore.getScopeConfiguration(scopeName, context);
+        return streamStore.getScopeConfiguration(scopeName, context, executor);
     }
 
     // Metrics reporting region
